@@ -1,5 +1,10 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
+import type { CSSProperties } from "react"
+
+// Prefijo de ruta para GitHub Pages — vacío en local, "/Proyect_Luly" en producción
+const BASE_PATH = process.env.NODE_ENV === "production" ? "/Proyect_Luly" : ""
+const asset = (path: string) => `${BASE_PATH}${path}`
 
 // ══════════════════════════════════════════════════════════════
 //  CONSTANTES
@@ -28,6 +33,10 @@ type WPlat = { x: number; y: number; w: number; h: number; mode: "s" | "t" | "d"
 type Player = {
   x: number; y: number; w: number; h: number; vx: number; vy: number; onGround: boolean; facing: 1 | -1; hp: number; maxHp: number; inv: number; ammo: number; ls: number; as2: number; sh: boolean; jh: boolean; djump: boolean; djumpAvail: boolean; wh: boolean; wcd: number; pf: number; pft: number; pa: string; crouching: boolean; stamina: number; maxStamina: number; staminaCooldown: number; exhausted: boolean; runMode: boolean; tapLeft: number; tapRight: number;
   tapDown: number; dropThruPlatform: boolean
+  // Dash
+  dash: boolean; dashCd: number; dashDir: 1 | -1; dashTimer: number
+  // Wall slide / wall jump
+  wallSliding: boolean; wallDir: 0 | 1 | -1; wallJumpCd: number
 }
 
 type Enemy = {
@@ -36,6 +45,7 @@ type Enemy = {
   hurtTimer: number
   isMoving: boolean
   alertDelay: number
+  phase: number
 }
 type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
@@ -59,6 +69,18 @@ type G = {
   loadedWorlds: Set<number>
   worldSnapshots: Map<number, WorldSnapshot>
   ohko: boolean;
+  // Habilidades desbloqueadas
+  abilities: Set<string>
+  // Combo
+  combo: number; comboTimer: number
+  // Screen shake
+  shakeX: number; shakeY: number; shakeMag: number; shakeTimer: number
+  // Notificación de habilidad
+  abilityNotif: { text: string; timer: number } | null
+  // Sistema de checkpoints con teletransportación
+  discoveredCPs: Set<string>
+  tpMenu: { open: boolean; idx: number } | null
+  tpAnim: { timer: number; phase: 0 | 1; destX: number; destY: number } | null
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -66,10 +88,14 @@ type G = {
 // ══════════════════════════════════════════════════════════════
 type Theme = { bg0: string; bg1: string; wall: string; wallHi: string; platC: string; platHi: string; accent: string; doorC: string; fog: string; rock: string; rockHi: string; rockShadow: string }
 const THEMES: Theme[] = [
-  { bg0: "#0A0D0A", bg1: "#050805", wall: "#2C3A2C", wallHi: "#3D5C3D", platC: "#4A6B3A", platHi: "#5A8040", accent: "#7CFC00", doorC: "#FF4500", fog: "#1A2A1A", rock: "#1E2A1E", rockHi: "#2A3D2A", rockShadow: "#0A100A" },
-  { bg0: "#0F0804", bg1: "#070400", wall: "#4A2810", wallHi: "#6B3B18", platC: "#8B4513", platHi: "#A0522D", accent: "#FF8C00", doorC: "#FF2200", fog: "#2A1A08", rock: "#2A1808", rockHi: "#3D2410", rockShadow: "#100800" },
-  { bg0: "#04080F", bg1: "#020407", wall: "#1A2B3D", wallHi: "#243B55", platC: "#2E5073", platHi: "#3B6B8A", accent: "#00BFFF", doorC: "#FF6347", fog: "#0A1020", rock: "#0E1828", rockHi: "#18263A", rockShadow: "#04080F" },
-  { bg0: "#07000B", bg1: "#030005", wall: "#2A0A3D", wallHi: "#3D1055", platC: "#4B0082", platHi: "#6A0DAD", accent: "#CC00FF", doorC: "#FF0080", fog: "#18002A", rock: "#180824", rockHi: "#280A38", rockShadow: "#070010" },
+  // W0 Las Perreras — hormigón sucio, jaulas, kennel distópico
+  { bg0:"#07090A",bg1:"#030508",wall:"#1B2219",wallHi:"#283524",platC:"#3A5228",platHi:"#4A6A30",accent:"#7CFC00",doorC:"#FF4500",fog:"#0E1A0E",rock:"#182018",rockHi:"#253525",rockShadow:"#090D09" },
+  // W1 Fábrica Canina — acero industrial, paneles metálicos, empresa opresora
+  { bg0:"#0A0B10",bg1:"#060710",wall:"#181C28",wallHi:"#222840",platC:"#2E3450",platHi:"#3A4264",accent:"#FF8C00",doorC:"#FF2200",fog:"#12141E",rock:"#141828",rockHi:"#1E2438",rockShadow:"#08090E" },
+  // W2 Los Tubos — ladrillo húmedo, alcantarilla, musgo
+  { bg0:"#070C0A",bg1:"#040708",wall:"#111917",wallHi:"#182520",platC:"#1E3328",platHi:"#284436",accent:"#00BFFF",doorC:"#FF6347",fog:"#0A1510",rock:"#0E1814",rockHi:"#162420",rockShadow:"#060B08" },
+  // W3 Ctrl. Central — concreto urbano distópico, New York perruno
+  { bg0:"#08060E",bg1:"#040308",wall:"#0D0B18",wallHi:"#181428",platC:"#221E38",platHi:"#2E284A",accent:"#CC00FF",doorC:"#FF0080",fog:"#100C1A",rock:"#0F0D1A",rockHi:"#1A1828",rockShadow:"#06050C" },
 ]
 const WORLD_NAMES = ["LAS PERRERAS", "FÁBRICA CANINA", "LOS TUBOS", "CTRL. CENTRAL"]
 const WORLD_SUBS = ["Libertad o destino", "Engranajes de opresión", "Las venas del sistema", "El corazón del control"]
@@ -175,6 +201,27 @@ const KENNEL_WORLD_POS = KENNEL_ROOMS.map(({ w, c, r }) => {
   const { x: x0, y: y0 } = ro(w, c, r)
   return { x: x0 + WT + 90, y: y0 + RH - WT - PH }
 })
+
+// ── Sistema de Checkpoints (colchoncitos de perro) ────────────────────────────
+// 5 checkpoints por mundo: Oeste, Norte, Este, Sur, Centro
+const CP_LOCS: [number, number][] = [[0, 4], [4, 0], [8, 4], [4, 8], [4, 4]]
+const CP_COMPASS = ["OESTE", "NORTE", "ESTE", "SUR", "CENTRO"]
+const CP_ICON = ["◀", "▲", "▶", "▼", "◆"]
+type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string }
+const ALL_CPS: CPDef[] = (() => {
+  const out: CPDef[] = []
+  for (let w = 0; w < NW; w++)
+    for (let i = 0; i < 5; i++) {
+      const [c, r] = CP_LOCS[i]
+      const { x: x0, y: y0 } = ro(w, c, r)
+      out.push({ id: `${w}_${c}_${r}`, w, c, r,
+        x: x0 + RW / 2 - PW / 2, y: y0 + RH - WT - PH,
+        label: `W${w + 1} ${WORLD_NAMES[w].slice(0, 10)} — ${CP_COMPASS[i]}`,
+        icon: CP_ICON[i] })
+    }
+  return out
+})()
+const CP_RADIUS = 115  // radio de descubrimiento/uso
 
 // ══════════════════════════════════════════════════════════════
 //  TEMPLATE DE SALA
@@ -538,18 +585,6 @@ function makeInternalPlats(w: number, c: number, r: number): WPlat[] {
       addStair(headX, headY, headW)
       addSp(sx, headY, rw, shTop - headY)
     }
-    // Dentro de buildShaft(), al final:
-    // FIX: siempre agregar plataforma de aterrizaje si el shaft no llega al suelo de sala
-    const bottomOfRoom = iT + iH  // = iB
-    const shaftReachesFloor = shBot >= bottomOfRoom - WT - 8
-    if (!shaftReachesFloor) {
-      const footW = Math.max(PW * 2 + 20, Math.floor(rw * 0.6))
-      const footX = sx + Math.floor((rw - footW) / 2)
-      // Plataforma justo debajo del shaft
-      const footY = Math.min(iB - STAIR_H - 4, shBot + 24)
-      addStair(footX, footY, footW)
-      addSp(sx, shBot, rw, footY + STAIR_H - shBot + 4)
-    }
   }
 
   if (d.U && uDoorX !== null) {
@@ -676,7 +711,7 @@ function getWorldCrateDefs(w: number) {
 // ══════════════════════════════════════════════════════════════
 function mkPlayer(): Player {
   const [sw, sc, sr] = PLAYER_START; const { x: x0, y: y0 } = ro(sw, sc, sr)
-  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 3, maxHp: 3, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false }
+  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 3, maxHp: 3, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0 }
 }
 
 // Devuelve los rangos X que corresponden a shafts verticales en una sala
@@ -836,7 +871,7 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         state: "patrol", alert: false, alertT: 0, guardX: -1,
         idleT: Math.floor(rand() * 500), jumpCd: 0,
         dying: false, deathTimer: 0, deathDir: 1,
-        hurtTimer: 0, isMoving: false, alertDelay: 0
+        hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1
       })
     })
   }
@@ -851,10 +886,10 @@ function mkCratesForWorld(w: number, dead: Set<string>): Crate[] {
 
 const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]
 const BG_PATHS = [
-  "/assets/background/world_1.png",
-  "/assets/background/world_2.png",
-  "/assets/background/world_3.png",
-  "/assets/background/world_4.png",
+  asset("/assets/background/world_1.png"),
+  asset("/assets/background/world_2.png"),
+  asset("/assets/background/world_3.png"),
+  asset("/assets/background/world_4.png"),
 ]
 
 function mkG_lazy(): G {
@@ -890,6 +925,15 @@ function mkG_lazy(): G {
     // NUEVO: gestión de mundos lazy
     loadedWorlds,
     worldSnapshots: new Map<number, WorldSnapshot>(),
+
+    // Metroidvania: habilidades, combo, shake, notificaciones
+    abilities: new Set<string>(),
+    combo: 0, comboTimer: 0,
+    shakeX: 0, shakeY: 0, shakeMag: 0, shakeTimer: 0,
+    abilityNotif: null,
+    discoveredCPs: new Set<string>(["0_0_4"]),
+    tpMenu: null,
+    tpAnim: null,
   } as G
 }
 
@@ -949,11 +993,15 @@ function dmgPlayer(g: G, dmg: number) {
   if (g.godMode) { g.pl.hp = g.pl.maxHp; g.pl.inv = 0.5; return }
   if (g.pl.inv > 0) return
   g.pl.hp = Math.max(0, g.pl.hp - dmg); g.pl.inv = 2
+  triggerShake(g, 7, 0.28)
+  g.combo = 0; g.comboTimer = 0
   if (g.pl.hp <= 0) {
+    triggerShake(g, 12, 0.5)
     g.lives--; if (g.lives <= 0) { g.over = true; return }
     g.pl.hp = g.pl.maxHp
     const kp = KENNEL_WORLD_POS[g.checkpoint.w]
     g.pl.x = kp.x; g.pl.y = kp.y; g.pl.vx = 0; g.pl.vy = 0; g.pl.crouching = false; g.pl.h = PH
+    g.pl.dash = false; g.pl.wallSliding = false
   }
 }
 
@@ -990,7 +1038,29 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
 
   const originalWorld = parseInt(e.originalId.split("_")[0]) || e.world
   g.pl.ammo = Math.min(15, g.pl.ammo + 1)
-  g.score += (e.boss ? 2000 : 100) * (originalWorld + 1)
+  // Sistema de combo
+  g.combo = Math.min(g.combo + 1, 20)
+  g.comboTimer = 3.0
+  const mult = Math.min(g.combo, 5)
+  g.score += (e.boss ? 2000 : 100) * (originalWorld + 1) * mult
+  // Shake en muerte de enemigo
+  if (e.boss) triggerShake(g, 14, 0.6)
+  else triggerShake(g, 3, 0.12)
+  // ── Desbloqueo de habilidades al matar boss ─────────────────────────
+  if (e.boss) {
+    if (originalWorld === 0 && !g.abilities.has("dash")) {
+      g.abilities.add("dash")
+      g.abilityNotif = { text: "DASH  [SHIFT / LT]", timer: 4.0 }
+    } else if (originalWorld === 1 && !g.abilities.has("walljump")) {
+      g.abilities.add("walljump")
+      g.abilityNotif = { text: "SALTO EN PARED  [← / → + SALTO]", timer: 4.0 }
+    } else if (originalWorld === 2 && !g.abilities.has("hpup")) {
+      g.abilities.add("hpup")
+      g.pl.maxHp = Math.min(g.pl.maxHp + 1, 6)
+      g.pl.hp = Math.min(g.pl.hp + 1, g.pl.maxHp)
+      g.abilityNotif = { text: "VIDA MÁXIMA +1  ❤", timer: 4.0 }
+    }
+  }
   checkWorldClear(g, originalWorld)
 }
 
@@ -1018,19 +1088,27 @@ function checkWorldClear(g: G, w: number) {
 
 function breakCrate(g: G, c: Crate) {
   c.active = false; g.dead.add(`crate_${c.id}`)
-  const p = g.pl, cx2 = c.x + c.w / 2, cy2 = c.y
-  const scatter = () => {
-    for (let i = 0; i < 8; i++) {
-      const a = (Math.random() - .5) * Math.PI * 1.4, spd = 3 + Math.random() * 2
-      g.bones.push({ x: cx2 + (Math.random() - .5) * 20, y: cy2, w: 11, h: 11, vx: Math.cos(a) * spd, vy: -Math.abs(Math.sin(a) * spd) - 1, active: true, life: 12 })
-    }
+  const cx2 = c.x + c.w / 2, cy2 = c.y
+
+  // Fragmentos: siempre salen
+  for (let i = 0; i < 8; i++) {
+    const a = (Math.random() - .5) * Math.PI * 1.4, spd = 3 + Math.random() * 2
+    g.bones.push({ x: cx2 + (Math.random() - .5) * 20, y: cy2, w: 11, h: 11, vx: Math.cos(a) * spd, vy: -Math.abs(Math.sin(a) * spd) - 1, active: true, life: 12 })
   }
-  const drop = (k: "h" | "a", n = 1) => {
-    for (let i = 0; i < n; i++) g.drops.push({ x: cx2 + (Math.random() - .5) * 24, y: cy2 - 4, vx: (Math.random() - .5) * 2, vy: -3.5 - Math.random() * 1.2, active: true, life: 20, kind: k })
-  }
-  if (p.ammo <= 2) { scatter(); p.ammo = Math.min(15, p.ammo + 10) }
-  else if (p.hp < p.maxHp) { const missing = p.maxHp - p.hp; drop("h", missing >= 2 ? 2 : 1) }
-  else { drop("a", 1) }
+
+  const drop = (k: "h" | "a") =>
+    g.drops.push({ x: cx2 + (Math.random() - .5) * 24, y: cy2 - 4, vx: (Math.random() - .5) * 2, vy: -3.5 - Math.random() * 1.2, active: true, life: 20, kind: k })
+
+  // Drop aleatorio puro:
+  //  0–34 %  → corazón
+  // 35–69 %  → munición
+  // 70–84 %  → corazón + munición
+  // 85–99 %  → caja vacía (solo fragmentos)
+  const roll = Math.random()
+  if      (roll < 0.35) { drop("h") }
+  else if (roll < 0.70) { drop("a") }
+  else if (roll < 0.85) { drop("h"); drop("a") }
+  // else: solo fragmentos
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1038,7 +1116,7 @@ function breakCrate(g: G, c: Crate) {
 // ══════════════════════════════════════════════════════════════
 function tickPlayer(g: G) {
   const k = g.keys, p = g.pl, now = performance.now()
-  const STA_RED = 15, STA_DRAIN = 28, STA_RCH_WALK = 12, STA_RCH_IDLE = 22
+  const STA_RED = 8, STA_DRAIN = 17, STA_RCH_WALK = 12, STA_RCH_IDLE = 22
   const moving = (k["a"] || k["arrowleft"] || k["d"] || k["arrowright"]) && !p.crouching
   const canRun = !p.exhausted && p.stamina > STA_RED
   if (!moving || !canRun) p.runMode = false
@@ -1048,7 +1126,7 @@ function tickPlayer(g: G) {
     if (p.staminaCooldown <= 0) { p.exhausted = false; p.stamina = STA_RED }
   } else if (actuallyRunning) {
     p.stamina = Math.max(0, p.stamina - STA_DRAIN * STEP)
-    if (p.stamina <= STA_RED) { p.stamina = 0; p.exhausted = true; p.staminaCooldown = 5.0 }
+    if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
   } else {
     p.stamina = Math.min(p.maxStamina, p.stamina + (moving ? STA_RCH_WALK : STA_RCH_IDLE) * STEP)
   }
@@ -1066,6 +1144,24 @@ function tickPlayer(g: G) {
   else if (left && !right) { p.vx = -spd; p.facing = -1; p.pa = run ? "run" : "walk" }
   else if (right && !left) { p.vx = spd; p.facing = 1; p.pa = run ? "run" : "walk" }
   else { p.vx = 0; if (p.onGround) p.pa = "idle" }
+
+  // ── DASH ────────────────────────────────────────────────────────────
+  p.dashCd = Math.max(0, p.dashCd - STEP)
+  const shiftKey = k["shift"] || false
+  const canDash = g.abilities.has("dash") && !p.crouching && p.dashCd <= 0 && !p.dash
+  if (shiftKey && canDash) {
+    p.dash = true; p.dashDir = p.facing; p.dashTimer = 0.13
+    p.dashCd = 0.70; p.inv = Math.max(p.inv, 0.14)
+    p.pa = p.dashDir === 1 ? "dash_right" : "dash_left"
+    spawnExplosion(g, p.x + p.w / 2, p.y + p.h / 2, ["#FFFFFF", "#CCCCFF", "#8888FF"], 10, 3.5, false)
+  }
+  if (p.dash) {
+    p.vx = p.dashDir * 16
+    if (p.vy > 0) p.vy *= 0.12
+    p.pa = p.dashDir === 1 ? "dash_right" : "dash_left"
+    if (p.dashTimer > 0) { p.dashTimer -= STEP }
+    else { p.dash = false; p.vx = p.dashDir * RUN }
+  }
 
   if (!jk) p.jh = false
   if (p.onGround) { p.djump = false; p.djumpAvail = true }
@@ -1104,8 +1200,31 @@ function tickPlayer(g: G) {
 
   if (!p.onGround) { p.vy += p.vy < 0 ? GUP : GDN; if (p.vy > GMAX) p.vy = GMAX }
   const hx = p.x + PL_HBX, hy = p.y + PL_HBT, hw = p.w - 2 * PL_HBX, hh = p.h - PL_HBT
+  const preResVx = p.vx, preResVy = p.vy
   const res = resolve(hx, hy, hw, hh, p.vx, p.vy, g)
   p.x = res.x - PL_HBX; p.y = res.y - PL_HBT; p.vx = res.vx; p.vy = res.vy; p.onGround = res.og
+
+  // ── WALL SLIDE / WALL JUMP ───────────────────────────────────────────
+  p.wallJumpCd = Math.max(0, p.wallJumpCd - STEP)
+  const hitWallNow = res.vx === 0 && Math.abs(preResVx) > 0.5 && !p.onGround && !p.crouching && !p.dash
+  if (hitWallNow && preResVy > 0 && p.wallJumpCd <= 0) {
+    p.wallSliding = true
+    p.wallDir = preResVx > 0 ? 1 : -1
+    if (p.vy > 2.2) p.vy = 2.2
+    if (Math.random() < 0.25) spawnExplosion(g, p.wallDir === 1 ? p.x + p.w : p.x, p.y + p.h * 0.5 + Math.random() * 20, ["#DDDDDD", "#AAAAAA"], 2, 1.2, false)
+  } else if (p.onGround || p.dash || (!left && !right)) {
+    p.wallSliding = false; p.wallDir = 0
+  }
+  if (p.wallSliding) p.pa = "jump"
+  // Wall jump
+  if (p.wallSliding && jk && !p.jh && g.abilities.has("walljump")) {
+    p.vy = JV * 0.92; p.vx = -p.wallDir * (RUN + 2)
+    p.facing = (-p.wallDir) as 1 | -1
+    p.jh = true; p.djumpAvail = true
+    p.wallSliding = false; p.wallDir = 0; p.wallJumpCd = 0.22
+    p.pa = "jump"
+    spawnExplosion(g, p.x + p.w / 2, p.y + p.h / 2, ["#FFFFFF", "#88AAFF", "#4466FF"], 8, 3, false)
+  }
 
   if (p.onGround && !standingOnOneWay_plat) p.dropThruPlatform = false
 
@@ -1119,7 +1238,7 @@ function tickPlayer(g: G) {
     const d = getDir(g); const cx = p.x + p.w / 2, cy = p.y + p.h / 2
     g.whip = { x: cx, y: cy, ex: cx + d.x * WLEN, ey: cy + d.y * WLEN, life: 0.2, dealt: false }
     p.stamina = Math.max(0, p.stamina - 18)
-    if (p.stamina < STA_RED) { p.exhausted = true; p.staminaCooldown = 5.0 }
+    if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
     p.wcd = 500; p.wh = true; p.pa = "attack"
   }
   if (!k["m"]) p.wh = false
@@ -1381,7 +1500,17 @@ function tickEnemies(g: G, now: number) {
     if (canSee && !e.alert) {
       e.alert = true; e.alertT = 4000
       e.state = "chase"
-      e.alertDelay = 0.5  // 1 segundo antes de poder atacar
+      e.alertDelay = 0.5
+      // ── Alerta grupal: notifica a enemigos cercanos de la misma sala ──
+      if (!e.boss) {
+        for (const o of g.enemies) {
+          if (o === e || !o.active || o.dying || o.boss || o.alert) continue
+          const ohr = homeRoom(o)
+          if (ohr.w !== hr.w || ohr.c !== hr.c || ohr.r !== hr.r) continue
+          const od = Math.sqrt((o.x - e.x) ** 2 + (o.y - e.y) ** 2)
+          if (od < 400) { o.alert = true; o.alertT = 3500; o.state = "chase"; o.alertDelay = 0.8 + Math.random() * 0.5 }
+        }
+      }
     }
     if (e.alertDelay > 0) e.alertDelay = Math.max(0, e.alertDelay - STEP)
     // Pierde al jugador si sale de la sala o se pierde de vista
@@ -1528,44 +1657,67 @@ function tickEnemies(g: G, now: number) {
       if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
 
     } else if (e.state === "chase" && plSameRoom) {
+      // ── Flanqueo: si hay otro enemigo persiguiendo desde el mismo lado, rodear ──
+      const otherChasers = g.enemies.filter(o =>
+        o !== e && o.active && !o.dying && !o.boss && o.state === "chase" &&
+        homeRoom(o).c === hr.c && homeRoom(o).r === hr.r
+      )
+      let chaseDir = dx > 0 ? 1 : -1
+      if (otherChasers.length > 0) {
+        const avgOtherX = otherChasers.reduce((s, o) => s + o.x, 0) / otherChasers.length
+        const otherSide = avgOtherX < p.x + p.w / 2 ? 1 : -1  // los demás están a la izquierda → este va a la derecha
+        chaseDir = otherSide
+      }
       if (dist > 36) {
-        const rawVx = (dx > 0 ? 1 : -1) * e.spd * 1.4
+        const rawVx = chaseDir * e.spd * 1.4
         const nextX = e.x + rawVx
         if (nextX >= hb.x0 && nextX <= hb.x1) targetVx = rawVx
         else targetVx = 0
       }
-      e.dir = dx > 0 ? 1 : -1
+      e.dir = chaseDir
 
-      // Evasión de obstáculos en chase
+      // Evasión de paredes en chase
       if (eOnGround2 && e.jumpCd <= 0 && Math.abs(targetVx) > 0) {
         const probeX = e.dir > 0 ? (e.x + e.w + 8) : (e.x - 8)
-        const probeYTop = e.y + 4
-        const probeYBot = e.y + e.h - 4
+        const probeYTop = e.y + 4, probeYBot = e.y + e.h - 4
         const wallAhead = activePlats(g).some(pl =>
-          pl.mode === "s" &&
-          probeX > pl.x && probeX < pl.x + pl.w &&
+          pl.mode === "s" && probeX > pl.x && probeX < pl.x + pl.w &&
           probeYBot > pl.y && probeYTop < pl.y + pl.h
         )
         if (wallAhead) {
           const blockPlat = activePlats(g).find(pl =>
-            pl.mode === "s" &&
-            probeX > pl.x && probeX < pl.x + pl.w &&
+            pl.mode === "s" && probeX > pl.x && probeX < pl.x + pl.w &&
             probeYBot > pl.y && probeYTop < pl.y + pl.h
           )
           const platTop = blockPlat ? blockPlat.y : e.y
           const jumpNeeded = e.y + e.h - platTop
-          if (jumpNeeded < JUMP_H * 0.75 && jumpNeeded > 4) {
-            e.vy = JV * 0.88; e.jumpCd = 1000
-          }
+          if (jumpNeeded < JUMP_H * 0.75 && jumpNeeded > 4) { e.vy = JV * 0.92; e.jumpCd = 900 }
         }
       }
 
-      // Salto para alcanzar jugador en plataforma superior
-      if (eOnGround2 && e.jumpCd <= 0 && Math.abs(dy) > 55 && Math.abs(dx) < 180) {
-        const destY = e.y + dy
-        const destInRoom = destY > hr.r * RH + WT && destY < hr.r * RH + RH - WT
-        if (destInRoom && plFloor !== null && plFloor < e.y) {
-          e.vy = JV * 0.88; e.jumpCd = 1200
+      // Salto agresivo para alcanzar al jugador arriba
+      if (eOnGround2 && e.jumpCd <= 0) {
+        if (dy < -55 && Math.abs(dx) < 200) {
+          // Jugador arriba: saltar con fuerza proporcional a la distancia vertical
+          const jPow = Math.min(1, Math.abs(dy) / 200)
+          e.vy = JV * (0.82 + 0.18 * jPow); e.jumpCd = 1100
+        } else if (dy > 60 && Math.abs(dx) < 100 && !e.boss) {
+          // Jugador abajo y cerca: pequeño salto para caer encima (ataque aéreo)
+          e.vy = JV * 0.45; e.jumpCd = 1400
+        }
+      }
+
+      // Esquivar proyectiles del jugador
+      if (eOnGround2 && e.jumpCd <= 0 && !e.boss && Math.random() < 0.25) {
+        for (const pr of g.projs) {
+          if (!pr.active || !pr.pl) continue
+          const toPrX = (pr.x + pr.vx * 25) - (e.x + e.w / 2)
+          const toPrY = (pr.y + pr.vy * 25) - (e.y + e.h / 2)
+          if (Math.abs(toPrX) < 44 && Math.abs(toPrY) < 60) {
+            e.vy = JV * 0.65; e.jumpCd = 700
+            e.vx += (toPrX > 0 ? -1 : 1) * e.spd * 0.8
+            break
+          }
         }
       }
 
@@ -1666,19 +1818,45 @@ function tickEnemies(g: G, now: number) {
       }
     }
 
+    // ── Transición de fase del boss ──────────────────────────────────
+    if (e.boss && e.phase === 1 && e.hp <= Math.ceil(e.mhp * 0.5) && !e.dying) {
+      e.phase = 2
+      e.spd *= 1.5; e.cd = Math.floor(e.cd * 0.55)
+      triggerShake(g, 12, 0.55)
+      spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF0000", "#FF8800", "#FFFF00", "#FFFFFF", "#FF4400"], 24, 6, true)
+    }
+
     // ── Disparo ──────────────────────────────────────────────────────
     const canShoot = e.boss
       ? (dist < sight)
       : (plSameRoom && canSee && e.state === "chase" && e.alertDelay <= 0)
     if (now - e.ls > e.cd && canShoot) {
-      const len = dist || 1, sp = e.boss ? 3.2 : 2.4
+      const sp = e.boss ? (e.phase === 2 ? 4.2 : 3.2) : 2.8
       const ex2 = e.x + e.w / 2, ey2 = e.y + e.h / 2
-      g.projs.push({ x: ex2, y: ey2, vx: (dx / len) * sp, vy: (dy / len) * sp, active: true, pl: false, star: false, rot: Math.atan2(dy, dx) * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
+      // Puntería predictiva: apunta al punto donde estará el jugador ~0.4s después
+      const LEAD = e.boss ? 0.5 : 0.38
+      const pdx = (p.x + p.w / 2 + p.vx * LEAD) - ex2
+      const pdy = (p.y + p.h / 2 + p.vy * LEAD) - ey2
+      const plen = Math.sqrt(pdx * pdx + pdy * pdy) || 1
+      // Proyectil dirigido principal
+      g.projs.push({ x: ex2, y: ey2, vx: (pdx / plen) * sp, vy: (pdy / plen) * sp, active: true, pl: false, star: false, rot: Math.atan2(pdy, pdx) * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
       if (e.boss) {
-        for (let a = 0; a < 8; a++) {
-          const rad = a * Math.PI / 4, bx = e.x + e.w / 2, by = e.y + e.h / 2
-          g.projs.push({ x: bx, y: by, vx: Math.cos(rad) * 2.2, vy: Math.sin(rad) * 2.2, active: true, pl: false, star: true, rot: a * 45, life: 4, dist: 0, ox: bx, oy: by })
+        // Salva radial: 8 en fase 1, 12 en fase 2
+        const numRadial = e.phase === 2 ? 12 : 8
+        for (let a = 0; a < numRadial; a++) {
+          const rad = a * Math.PI * 2 / numRadial, bx = ex2, by = ey2
+          const rsp = e.phase === 2 ? 3.0 : 2.2
+          g.projs.push({ x: bx, y: by, vx: Math.cos(rad) * rsp, vy: Math.sin(rad) * rsp, active: true, pl: false, star: true, rot: a * (360 / numRadial), life: 4, dist: 0, ox: bx, oy: by })
         }
+        // Fase 2: ráfaga triple dirigida al jugador
+        if (e.phase === 2) {
+          const ang = Math.atan2(dy, dx)
+          for (let a = -1; a <= 1; a++) {
+            const aOff = ang + a * 0.32
+            g.projs.push({ x: ex2, y: ey2, vx: Math.cos(aOff) * sp * 1.2, vy: Math.sin(aOff) * sp * 1.2, active: true, pl: false, star: true, rot: aOff * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
+          }
+        }
+        triggerShake(g, e.phase === 2 ? 5 : 3, 0.18)
       }
       e.ls = now; e.sa = 300
     }
@@ -1701,9 +1879,32 @@ function spawnExplosion(g: G, x: number, y: number, cols: string[], count = 8, s
   }
 }
 
+function triggerShake(g: G, mag: number, dur = 0.3) {
+  g.shakeMag = Math.max(g.shakeMag, mag)
+  g.shakeTimer = Math.max(g.shakeTimer, dur)
+}
+
 function tickSparks(g: G) {
   for (const s of g.sparks) { s.x += s.vx; s.y += s.vy; s.vy += 0.18; s.vx *= 0.88; s.life -= STEP }
   g.sparks = g.sparks.filter(s => s.life > 0)
+}
+
+function tickShake(g: G) {
+  if (g.shakeTimer > 0) {
+    g.shakeTimer = Math.max(0, g.shakeTimer - STEP)
+    const t = g.shakeTimer > 0 ? Math.min(1, g.shakeTimer * 4) : 0
+    g.shakeX = (Math.random() - 0.5) * g.shakeMag * t * 2
+    g.shakeY = (Math.random() - 0.5) * g.shakeMag * t * 2
+    if (g.shakeTimer <= 0) { g.shakeMag = 0; g.shakeX = 0; g.shakeY = 0 }
+  }
+  if (g.abilityNotif && g.abilityNotif.timer > 0) {
+    g.abilityNotif.timer -= STEP
+    if (g.abilityNotif.timer <= 0) g.abilityNotif = null
+  }
+  if (g.comboTimer > 0) {
+    g.comboTimer -= STEP
+    if (g.comboTimer <= 0) g.combo = 0
+  }
 }
 
 const PROJ_GRAV = 0.22, PROJ_MAXD = 440
@@ -1919,7 +2120,8 @@ function tickCamera(g: G) {
   if (curW !== g.lastWorld) {
     activateWorld(g, curW)
     g.lastWorld = curW
-    g.checkpoint = { w: curW, x: KENNEL_WORLD_POS[curW].x, y: KENNEL_WORLD_POS[curW].y }
+    const westCP = ALL_CPS.find(cp => cp.w === curW && cp.c === 0 && cp.r === 4)
+    if (westCP) { g.checkpoint = { w: curW, x: westCP.x, y: westCP.y }; g.discoveredCPs.add(westCP.id) }
     g.worldAnim = { name: WORLD_NAMES[curW], sub: WORLD_SUBS[curW], alpha: 0, phase: "in", timer: 0 }
   }
 }
@@ -1933,9 +2135,36 @@ function tickWorldAnim(g: G) {
   else { a.alpha = Math.max(0, 1 - a.timer / 0.65); if (a.timer >= 0.65) g.worldAnim = null }
 }
 
+function tickCheckpoints(g: G) {
+  const p = g.pl
+  // Descubrir checkpoints cercanos automáticamente
+  for (const cp of ALL_CPS) {
+    if (g.discoveredCPs.has(cp.id)) continue
+    const bdx = p.x + p.w / 2 - (cp.x + PW / 2)
+    const bdy = p.y + p.h / 2 - (cp.y + PH)
+    if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) g.discoveredCPs.add(cp.id)
+  }
+  // Animar teletransporte
+  if (g.tpAnim) {
+    g.tpAnim.timer += STEP
+    if (g.tpAnim.phase === 0 && g.tpAnim.timer >= 0.42) {
+      // Mover al jugador
+      g.pl.x = g.tpAnim.destX; g.pl.y = g.tpAnim.destY
+      g.pl.vx = 0; g.pl.vy = 0
+      g.cx = g.pl.x - CW / 2 + PW / 2; g.cy = g.pl.y - CH / 2 + PH / 2
+      g.cx = Math.max(0, Math.min(g.cx, TOT_W - CW)); g.cy = Math.max(0, Math.min(g.cy, TOT_H - CH))
+      spawnExplosion(g, g.tpAnim.destX + PW / 2, g.tpAnim.destY + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88", "#88FFFF"], 16, 4.5)
+      g.tpAnim.phase = 1; g.tpAnim.timer = 0
+    } else if (g.tpAnim.phase === 1 && g.tpAnim.timer >= 0.42) {
+      g.tpAnim = null
+    }
+  }
+}
+
 function tick(g: G) {
+  if (g.tpAnim && g.tpAnim.phase === 0) { tickCheckpoints(g); return }  // congelar juego durante fade-out
   const now = performance.now()
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1964,48 +2193,403 @@ function drawBg(ctx: CanvasRenderingContext2D, g: G) {
     return
   }
 
-  const px = g.cx * 0.12 | 0
-  ctx.save(); ctx.globalAlpha = 0.12
+  const px = g.cx * 0.12 | 0, py = g.cy * 0.08 | 0
 
   if (wi === 0) {
-    ctx.strokeStyle = th.rock; ctx.lineWidth = 2
-    for (let x = ((150 - (px % 150)) % 150); x < CW + 10; x += 150) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 20, CH); ctx.stroke()
+    // ── W0 PERRERAS: silueta de jaulas, rejas y malla de alambre ──
+    ctx.save()
+    // Barras verticales de jaula (capa lejana)
+    ctx.globalAlpha = 0.07; ctx.fillStyle = "#253020"
+    for (let x = ((130 - (px % 130)) % 130); x < CW + 20; x += 130) {
+      ctx.fillRect(x - 5, 0, 10, CH); ctx.fillRect(x - 2, 0, 4, CH)
     }
-    for (let y = 0; y < CH; y += 100) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y + 30); ctx.stroke()
+    // Barras horizontales de kennel
+    ctx.globalAlpha = 0.05; ctx.fillStyle = "#1E2A18"
+    for (let y = ((90 - (py % 90)) % 90); y < CH + 10; y += 90) {
+      ctx.fillRect(0, y - 3, CW, 6)
     }
+    // Malla diagonal (alambre de jaula)
+    ctx.globalAlpha = 0.04; ctx.strokeStyle = "#4AFF00"; ctx.lineWidth = 1
+    for (let x = -CH + ((60 - (px % 60)) % 60); x < CW + CH; x += 60) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + CH, CH); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x - CH, CH); ctx.stroke()
+    }
+    // Luz de emergencia verde pulsante en el suelo
+    ctx.globalAlpha = 0.06; ctx.fillStyle = "#00FF00"
+    ctx.fillRect(0, CH - 6, CW, 3)
+    ctx.restore()
   } else if (wi === 1) {
-    ctx.fillStyle = th.rock
-    for (let y = 60; y < CH; y += 120) ctx.fillRect(0, y - (px % 30), CW, 18)
-    for (let x = ((180 - (px % 180 + 180) % 180)); x < CW + 30; x += 180) {
-      ctx.fillStyle = th.rock; ctx.fillRect(x - 10, 0, 20, CH)
-      ctx.fillStyle = th.rockHi; ctx.fillRect(x - 3, 0, 6, CH)
+    // ── W1 FÁBRICA: tuberías industriales, columnas, engranajes ──
+    ctx.save()
+    // Tuberías horizontales gruesas
+    ctx.globalAlpha = 0.09; ctx.fillStyle = "#1C2030"
+    for (let y = ((160 - (py % 160)) % 160); y < CH; y += 160) {
+      ctx.fillRect(0, y, CW, 16)
+      ctx.fillStyle = "#22283A"; ctx.fillRect(0, y + 4, CW, 5)
+      ctx.fillStyle = "#1C2030"
     }
+    // Columnas de soporte verticales
+    ctx.globalAlpha = 0.07; ctx.fillStyle = "#181C28"
+    for (let x = ((200 - (px % 200)) % 200); x < CW; x += 200) {
+      ctx.fillRect(x - 10, 0, 20, CH)
+      ctx.fillStyle = "#1E2438"; ctx.fillRect(x - 3, 0, 6, CH)
+      ctx.fillStyle = "#181C28"
+    }
+    // Engranajes (círculos) en el fondo
+    ctx.globalAlpha = 0.05; ctx.strokeStyle = "#FF8800"; ctx.lineWidth = 3
+    const gears = [{ x: 160, y: 200, r: 55 }, { x: 820, y: 360, r: 70 }, { x: 460, y: 110, r: 40 }, { x: 970, y: 480, r: 60 }]
+    for (const gp of gears) {
+      const gx = ((gp.x - (px * 0.3 | 0) % (CW + 200) + CW * 3) % (CW + 200)) - 100
+      ctx.beginPath(); ctx.arc(gx, gp.y, gp.r, 0, Math.PI * 2); ctx.stroke()
+      ctx.beginPath(); ctx.arc(gx, gp.y, gp.r * 0.55, 0, Math.PI * 2); ctx.stroke()
+    }
+    // Franjas de advertencia en suelo
+    ctx.globalAlpha = 0.06; ctx.lineWidth = 1
+    for (let x = ((20 - (px % 20)) % 20); x < CW; x += 20) {
+      ctx.fillStyle = x % 40 < 20 ? "#FF880022" : "#00000022"
+      ctx.fillRect(x, CH - 8, 20, 8)
+    }
+    ctx.restore()
   } else if (wi === 2) {
-    ctx.strokeStyle = th.rock; ctx.lineWidth = 10
-    for (let i = 0; i < 4; i++) {
-      const ox = ((i * 280 - ((px * 0.5) | 0) + CW * 5) % CW)
-      ctx.beginPath(); ctx.moveTo(ox, 0); ctx.bezierCurveTo(ox + 60, CH * 0.3, ox - 40, CH * 0.6, ox + 30, CH); ctx.stroke()
+    // ── W2 TUBOS: arcos de alcantarilla, tuberías, goteo ──
+    ctx.save()
+    // Arcos de alcantarilla al fondo
+    ctx.globalAlpha = 0.09; ctx.strokeStyle = "#162820"; ctx.lineWidth = 14
+    for (let x = ((450 - (px % 450)) % 450) - 80; x < CW + 120; x += 450) {
+      ctx.beginPath(); ctx.arc(x, CH + 40, 340, Math.PI, 0); ctx.stroke()
     }
+    // Tuberías verticales
+    ctx.globalAlpha = 0.07; ctx.strokeStyle = "#1A3028"; ctx.lineWidth = 20
+    for (let x = ((270 - (px % 270)) % 270); x < CW + 30; x += 270) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
+      ctx.lineWidth = 6; ctx.strokeStyle = "#0E1C18"
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
+      ctx.lineWidth = 20; ctx.strokeStyle = "#1A3028"
+    }
+    // Goteo animado de agua
+    ctx.globalAlpha = 0.18; ctx.fillStyle = "#004433"
+    const t2 = Date.now() * 0.0015
+    for (let i = 0; i < 7; i++) {
+      const dx = ((i * 151 + (px * 0.5 | 0)) % CW)
+      const dy = ((t2 * 60 + i * 88) % (CH + 40)) - 20
+      ctx.beginPath(); ctx.ellipse(dx, dy, 2, 4, 0, 0, Math.PI * 2); ctx.fill()
+    }
+    // Musgo en las paredes
+    ctx.globalAlpha = 0.08; ctx.fillStyle = "#0A3018"
+    for (let y = 80; y < CH - 80; y += 140) {
+      ctx.fillRect(0, y, 12, 60)
+      ctx.fillRect(CW - 12, y + 20, 12, 60)
+    }
+    ctx.restore()
   } else {
-    ctx.strokeStyle = th.rock; ctx.lineWidth = 1.5
-    for (let i = 0; i < 16; i++) {
-      const ox = ((i * 70 - ((px * 0.7) | 0) + CW * 10) % CW)
-      ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, CH); ctx.stroke()
+    // ── W3 CTRL CENTRAL: rascacielos, ventanas de neón, grid urbano ──
+    ctx.save()
+    // Silueta de edificios nocturnos
+    ctx.globalAlpha = 0.13; ctx.fillStyle = "#0C0A18"
+    const blds = [
+      {x:0,w:75,h:380},{x:85,w:55,h:290},{x:150,w:95,h:440},{x:255,w:45,h:300},
+      {x:310,w:85,h:490},{x:405,w:38,h:270},{x:455,w:105,h:410},{x:570,w:65,h:370},
+      {x:645,w:55,h:330},{x:710,w:115,h:470},{x:835,w:50,h:300},{x:895,w:90,h:430},
+      {x:995,w:60,h:350}
+    ]
+    for (const b of blds) {
+      const bx = ((b.x - (px * 0.35 | 0) % (CW + 250) + CW * 4) % (CW + 250)) - 120
+      ctx.fillRect(bx, CH - b.h, b.w, b.h)
     }
-    for (let y = 0; y < CH; y += 70) {
+    // Ventanas iluminadas (neón)
+    ctx.globalAlpha = 0.09
+    for (let i = 0; i < 36; i++) {
+      const wx = ((i * 97 + (px * 0.35 | 0)) % CW)
+      const wy = ((i * 53 + 60) % (CH - 80)) + 40
+      ctx.fillStyle = i % 4 === 0 ? "#CC00FF" : i % 4 === 1 ? "#6600AA" : "#440088"
+      ctx.fillRect(wx, wy, 4, 3)
+    }
+    // Grid urbano de fondo
+    ctx.globalAlpha = 0.05; ctx.strokeStyle = "#1A0830"; ctx.lineWidth = 1
+    for (let x = ((70 - (px % 70)) % 70); x < CW; x += 70) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
+    }
+    for (let y = ((50 - (py % 50)) % 50); y < CH; y += 50) {
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke()
     }
+    // Neón en el horizonte
+    ctx.globalAlpha = 0.06; ctx.fillStyle = "#CC00FF"
+    ctx.fillRect(0, CH - 2, CW, 2)
+    ctx.restore()
   }
 
-  ctx.restore()
   ctx.fillStyle = th.fog + "88"; ctx.fillRect(0, 0, CW, CH)
 
   if (g.gfx >= 2) {
     ctx.strokeStyle = "rgba(0,0,0,0.05)"; ctx.lineWidth = 1
     for (let y = 0; y < CH; y += 3) {
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke()
+    }
+  }
+}
+
+// ── Tile sólido: textura por mundo ──────────────────────────────────────────
+function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, hash: number, gfx: number, wx: number, wy: number) {
+  ctx.save()
+  ctx.beginPath(); ctx.rect(sx, sy, w, h); ctx.clip()
+
+  if (wi === 0) {
+    // ══ W0 LAS PERRERAS ══ Hormigón sucio, rejas de kennel distópico
+    ctx.fillStyle = "#1A2118"; ctx.fillRect(sx, sy, w, h)
+    if (gfx >= 1) {
+      const BH = 28, BW = 44
+      ctx.strokeStyle = "#0D130C"; ctx.lineWidth = 1.5
+      // Hiladas horizontales (world-aligned)
+      const yOff = ((wy % BH) + BH) % BH
+      for (let ly = BH - yOff; ly < h + BH; ly += BH) {
+        ctx.beginPath(); ctx.moveTo(sx, sy + ly); ctx.lineTo(sx + w, sy + ly); ctx.stroke()
+      }
+      // Juntas verticales con offset alternado (patrón ladrillo, world-aligned)
+      const xOff = ((wx % BW) + BW) % BW
+      for (let ly = -yOff; ly <= h; ly += BH) {
+        const row = Math.floor((wy + ly) / BH)
+        const xShift = (row % 2) ? BW / 2 : 0
+        const firstLx = ((BW - ((xOff + xShift) % BW)) % BW)
+        for (let lx = firstLx - BW; lx < w + BW; lx += BW) {
+          ctx.beginPath()
+          ctx.moveTo(sx + lx, sy + Math.max(-1, ly))
+          ctx.lineTo(sx + lx, sy + Math.min(h + 1, ly + BH))
+          ctx.stroke()
+        }
+      }
+      // Borde: luz arriba-izquierda, sombra abajo-derecha
+      ctx.fillStyle = "#2E3D2A99"; ctx.fillRect(sx, sy, w, 2); ctx.fillRect(sx, sy, 2, h)
+      ctx.fillStyle = "#0A0D0999"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      if (gfx >= 2) {
+        // Manchas de mugre / óxido (hash = var. por plataforma)
+        const rx = sx + (hash * 17 % Math.max(1, w - 20))
+        const ry = sy + (hash * 11 % Math.max(1, h - 14))
+        ctx.fillStyle = hash < 5 ? "#3A280A33" : hash < 9 ? "#1A2A1255" : "#12100622"
+        ctx.fillRect(rx, ry, 16 + (hash % 10), 10 + (hash % 7))
+        // Malla metálica en el borde superior (reja de kennel)
+        if (h > 50) {
+          ctx.strokeStyle = "#3D5030BB"; ctx.lineWidth = 1
+          for (let mx = sx; mx < sx + w; mx += 8) {
+            ctx.beginPath(); ctx.moveTo(mx, sy); ctx.lineTo(mx, sy + 10); ctx.stroke()
+          }
+          ctx.beginPath(); ctx.moveTo(sx, sy + 5); ctx.lineTo(sx + w, sy + 5); ctx.stroke()
+        }
+        // Barra metálica horizontal ocasional
+        if (hash === 3 || hash === 7 || hash === 11) {
+          ctx.fillStyle = "#38482EBB"; ctx.fillRect(sx + w * 0.06, sy + h * 0.47, w * 0.88, 3)
+          ctx.fillStyle = "#2A361E55"; ctx.fillRect(sx + w * 0.06, sy + h * 0.47, w * 0.88, 1)
+        }
+      }
+      // Halo verde distópico (1 px en el tope)
+      ctx.fillStyle = "#4AFF0022"; ctx.fillRect(sx, sy, w, 1)
+    }
+
+  } else if (wi === 1) {
+    // ══ W1 FÁBRICA CANINA ══ Paneles de acero industrial, empresa opresora
+    ctx.fillStyle = "#141828"; ctx.fillRect(sx, sy, w, h)
+    if (gfx >= 1) {
+      const PH = 36, PW = 52
+      ctx.strokeStyle = "#0A0C14"; ctx.lineWidth = 1
+      const yOff = ((wy % PH) + PH) % PH
+      // Divisiones horizontales de panel
+      for (let ly = PH - yOff; ly < h + PH; ly += PH) {
+        ctx.beginPath(); ctx.moveTo(sx, sy + ly); ctx.lineTo(sx + w, sy + ly); ctx.stroke()
+        // Reflejo metálico en la parte superior de cada panel
+        ctx.fillStyle = "#1E2840"; ctx.fillRect(sx, sy + ly - PH + 1, w, 3)
+        ctx.fillStyle = "#1A2238"; ctx.fillRect(sx, sy + ly - PH + 4, w, 2)
+      }
+      // Divisiones verticales de panel
+      const xOff = ((wx % PW) + PW) % PW
+      for (let lx = PW - xOff; lx < w + PW; lx += PW) {
+        ctx.beginPath(); ctx.moveTo(sx + lx, sy); ctx.lineTo(sx + lx, sy + h); ctx.stroke()
+      }
+      // Bordes biselados metálicos
+      ctx.fillStyle = "#2A324899"; ctx.fillRect(sx, sy, w, 3); ctx.fillRect(sx, sy, 3, h)
+      ctx.fillStyle = "#06070C99"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      if (gfx >= 2) {
+        // Remaches en intersecciones de paneles
+        ctx.fillStyle = "#323C55"
+        for (let ly = PH - yOff; ly < h + PH; ly += PH) {
+          for (let lx = PW - xOff; lx < w + PW; lx += PW) {
+            ctx.beginPath(); ctx.arc(sx + lx - 5, sy + ly - 5, 2.5, 0, Math.PI * 2); ctx.fill()
+            ctx.beginPath(); ctx.arc(sx + lx + 5, sy + ly - 5, 2.5, 0, Math.PI * 2); ctx.fill()
+          }
+        }
+        // Franjas de advertencia en borde inferior
+        const strW = 8
+        const xOff2 = ((wx % (strW * 2)) + strW * 2) % (strW * 2)
+        for (let lx = -xOff2; lx < w; lx += strW * 2) {
+          ctx.fillStyle = "#FF880028"; ctx.fillRect(sx + lx, sy + h - 5, strW, 5)
+        }
+        // Etiqueta de panel (ocasional)
+        if (hash < 3 && w > 50) {
+          ctx.strokeStyle = "#FF880033"; ctx.lineWidth = 1
+          ctx.strokeRect(sx + 6, sy + 8, 22, 10)
+          ctx.fillStyle = "#FF880022"; ctx.fillRect(sx + 7, sy + 9, 20, 8)
+        }
+      }
+      // Borde naranja industrial en el tope
+      ctx.fillStyle = "#FF880028"; ctx.fillRect(sx, sy, w, 1)
+    }
+
+  } else if (wi === 2) {
+    // ══ W2 LOS TUBOS ══ Ladrillo húmedo de alcantarilla, musgo, filtraciones
+    ctx.fillStyle = "#101814"; ctx.fillRect(sx, sy, w, h)
+    if (gfx >= 1) {
+      const BH = 20, BW = 34
+      ctx.strokeStyle = "#08100C"; ctx.lineWidth = 1
+      // Hiladas de ladrillo (world-aligned)
+      const yOff = ((wy % BH) + BH) % BH
+      for (let ly = BH - yOff; ly < h + BH; ly += BH) {
+        ctx.beginPath(); ctx.moveTo(sx, sy + ly); ctx.lineTo(sx + w, sy + ly); ctx.stroke()
+      }
+      // Verticales con offset alternado
+      const xOff = ((wx % BW) + BW) % BW
+      for (let ly = -yOff; ly <= h; ly += BH) {
+        const row = Math.floor((wy + ly) / BH)
+        const xShift = (row % 2) ? BW / 2 : 0
+        const firstLx = ((BW - ((xOff + xShift) % BW)) % BW)
+        for (let lx = firstLx - BW; lx < w + BW; lx += BW) {
+          ctx.beginPath()
+          ctx.moveTo(sx + lx, sy + Math.max(-1, ly))
+          ctx.lineTo(sx + lx, sy + Math.min(h + 1, ly + BH))
+          ctx.stroke()
+        }
+      }
+      // Bordes: tonos húmedos
+      ctx.fillStyle = "#1C2E2499"; ctx.fillRect(sx, sy, w, 2); ctx.fillRect(sx, sy, 2, h)
+      ctx.fillStyle = "#06090799"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      if (gfx >= 2) {
+        // Manchas de humedad / eflorescencia
+        const rx = sx + (hash * 13 % Math.max(1, w - 16))
+        const ry = sy + (hash * 9 % Math.max(1, h - 10))
+        ctx.fillStyle = "#0A2A1833"; ctx.fillRect(rx, ry, 14 + (hash % 12), 9 + (hash % 6))
+        // Musgo en el borde inferior
+        if (h > 30) {
+          const nMoss = Math.floor(w / 14)
+          for (let i = 0; i < nMoss; i++) {
+            const mh = 3 + ((hash + i * 3) % 5)
+            ctx.fillStyle = `rgba(0,${44 + (hash + i) % 36},${16 + i % 14},0.3)`
+            ctx.fillRect(sx + i * 14 + ((hash * 3) % 7), sy + h - mh, 8, mh)
+          }
+        }
+        // Filtración de agua (línea fina vertical)
+        if (hash % 4 === 0) {
+          ctx.strokeStyle = "#00441822"; ctx.lineWidth = 1
+          const dripX = sx + (hash * 11 % Math.max(1, w - 4))
+          ctx.beginPath()
+          ctx.moveTo(dripX, sy)
+          ctx.lineTo(dripX, sy + Math.min(h, 18 + hash % 14))
+          ctx.stroke()
+        }
+        // Conector de tubería en extremo (hash par)
+        if (hash % 5 === 0 && w > 60) {
+          ctx.fillStyle = "#1C2C22"; ctx.fillRect(sx + w - 10, sy + h * 0.25, 10, h * 0.5)
+          ctx.strokeStyle = "#0A1810"; ctx.lineWidth = 1
+          ctx.strokeRect(sx + w - 10, sy + h * 0.25, 10, h * 0.5)
+        }
+      }
+      // Borde teal húmedo en el tope
+      ctx.fillStyle = "#00CCAA18"; ctx.fillRect(sx, sy, w, 1)
+    }
+
+  } else {
+    // ══ W3 CTRL. CENTRAL ══ Fachada de concreto urbano distópico, New York
+    ctx.fillStyle = "#0C0A17"; ctx.fillRect(sx, sy, w, h)
+    if (gfx >= 1) {
+      const PH = 32, PW = 60
+      ctx.strokeStyle = "#07060E"; ctx.lineWidth = 1
+      const yOff = ((wy % PH) + PH) % PH
+      // Bloques de hormigón urbano (pisos de fachada)
+      for (let ly = PH - yOff; ly < h + PH; ly += PH) {
+        ctx.beginPath(); ctx.moveTo(sx, sy + ly); ctx.lineTo(sx + w, sy + ly); ctx.stroke()
+        ctx.fillStyle = "#100E1C22"; ctx.fillRect(sx, sy + ly - 2, w, 2)
+      }
+      // Divisiones verticales
+      const xOff = ((wx % PW) + PW) % PW
+      for (let lx = PW - xOff; lx < w + PW; lx += PW) {
+        ctx.beginPath(); ctx.moveTo(sx + lx, sy); ctx.lineTo(sx + lx, sy + h); ctx.stroke()
+      }
+      // Bordes: luz arriba, sombra abajo
+      ctx.fillStyle = "#1E1A3099"; ctx.fillRect(sx, sy, w, 3); ctx.fillRect(sx, sy, 2, h)
+      ctx.fillStyle = "#04030899"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      if (gfx >= 2) {
+        // Ventanas oscuras en bloques grandes (fachada de edificio)
+        if (h > 58 && w > 70) {
+          const numW = Math.floor((w - 16) / 28)
+          for (let i = 0; i < numW; i++) {
+            const winX = sx + 8 + i * 28, winY = sy + 10
+            const lit = ((hash + i * 5) % 7) === 0
+            ctx.fillStyle = lit ? "#AA00EE14" : "#050409"
+            ctx.fillRect(winX, winY, 18, 13)
+            if (lit) {
+              ctx.strokeStyle = "#CC00FF33"; ctx.lineWidth = 0.5
+              ctx.strokeRect(winX, winY, 18, 13)
+            }
+          }
+        }
+        // Grafiti (marcas de spray diagonales)
+        if (hash < 4 && w > 40 && h > 20) {
+          ctx.strokeStyle = `rgba(${155 + hash * 15},0,${195 + hash * 10},0.2)`
+          ctx.lineWidth = 1
+          const gx0 = sx + 10 + (hash * 7 % Math.max(1, w - 40))
+          const gy0 = sy + h * 0.42
+          ctx.beginPath(); ctx.moveTo(gx0, gy0); ctx.lineTo(gx0 + 22 + hash * 3, gy0 + 8); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(gx0 + 4, gy0 - 4); ctx.lineTo(gx0 + 18, gy0 + 12); ctx.stroke()
+        }
+        // Marco de neón en algunos bloques
+        if (hash % 5 === 1 && w > 60 && h > 40) {
+          ctx.strokeStyle = "#9900CC22"; ctx.lineWidth = 1
+          ctx.strokeRect(sx + 3, sy + 3, w - 6, h - 6)
+        }
+      }
+      // Brillo de neón morado en el tope (2 px degradado)
+      ctx.fillStyle = "#CC00FF2A"; ctx.fillRect(sx, sy, w, 1)
+      ctx.fillStyle = "#CC00FF14"; ctx.fillRect(sx, sy + 1, w, 1)
+    }
+  }
+  ctx.restore()
+}
+
+// ── Plataforma atravesable: estilo por mundo ─────────────────────────────────
+function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, gfx: number) {
+  if (wi === 0) {
+    // Perrera: barra de reja metálica oxidada
+    ctx.fillStyle = "#253020BB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#2E4026"; ctx.fillRect(sx, sy, w, 2)
+    if (gfx >= 1) {
+      ctx.fillStyle = "#4AFF001A"; ctx.fillRect(sx, sy, w, h)
+      for (let bx = sx; bx < sx + w; bx += 7) {
+        ctx.fillStyle = "#354A2855"; ctx.fillRect(bx, sy, 2, 5)
+      }
+    }
+  } else if (wi === 1) {
+    // Fábrica: pasarela metálica con rejilla antideslizante
+    ctx.fillStyle = "#1E2438BB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#2A3050"; ctx.fillRect(sx, sy, w, 2)
+    if (gfx >= 1) {
+      ctx.fillStyle = "#FF88001A"; ctx.fillRect(sx, sy, w, h)
+      for (let bx = sx; bx < sx + w; bx += 10) {
+        ctx.fillStyle = "#30386044"; ctx.fillRect(bx, sy, 1, 5)
+      }
+      ctx.fillStyle = "#FF880055"; ctx.fillRect(sx, sy, 5, 2)
+      ctx.fillStyle = "#FF880055"; ctx.fillRect(sx + w - 5, sy, 5, 2)
+    }
+  } else if (wi === 2) {
+    // Tubos: tubería horizontal de alcantarilla
+    ctx.fillStyle = "#182822BB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#243830"; ctx.fillRect(sx, sy, w, 2)
+    if (gfx >= 1) {
+      ctx.fillStyle = "#00CCAA18"; ctx.fillRect(sx, sy, w, h)
+      ctx.fillStyle = "#00CCAA44"; ctx.fillRect(sx, sy, w, 1)
+    }
+  } else {
+    // Ctrl Central: repisa de fachada urbana con neón
+    ctx.fillStyle = "#14122ABB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#1E1A34"; ctx.fillRect(sx, sy, w, 2)
+    if (gfx >= 1) {
+      ctx.fillStyle = "#CC00FF18"; ctx.fillRect(sx, sy, w, h)
+      ctx.fillStyle = "#CC00FF44"; ctx.fillRect(sx, sy, w, 1)
     }
   }
 }
@@ -2020,6 +2604,7 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
     const sx = p.x - cx, sy = p.y - cy
     if (sx + p.w < -4 || sx > CW + 4 || sy + p.h < -4 || sy > CH + 4) continue
 
+    // Puerta sellada
     if (p.mode === "d") {
       const t = now * 0.003
       ctx.fillStyle = th.doorC + "BB"; ctx.fillRect(sx, sy, p.w, p.h)
@@ -2030,87 +2615,163 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
       continue
     }
 
+    const pWi = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
+
+    // Plataforma atravesable
     if (p.mode === "t") {
-      const pWi = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
-      const pTh = THEMES[pWi]
-      ctx.fillStyle = pTh.rockHi + "88"
-      ctx.fillRect(sx, sy, p.w, 5)
-      if (g.gfx >= 1) {
-        ctx.fillStyle = pTh.accent + "14"
-        ctx.fillRect(sx, sy, p.w, p.h)
-      }
+      drawTraversableTile(ctx, sx, sy, p.w, p.h, pWi, g.gfx)
       continue
     }
 
-    const pWi = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
-    const pTh = THEMES[pWi]
+    // Tile sólido con textura por mundo
+    const hash = ((p.x * 7 + p.y * 13) >>> 0) % 16
+    drawSolidTile(ctx, sx, sy, p.w, p.h, pWi, hash, g.gfx, p.x, p.y)
+  }
+}
 
-    ctx.fillStyle = pTh.rock
-    ctx.fillRect(sx, sy, p.w, p.h)
+function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
+  const p = g.pl, t = Date.now() * 0.001
+  for (const cp of ALL_CPS) {
+    const bedCX = cp.x + PW / 2, bedCY = cp.y + PH
+    const sx = bedCX - g.cx, sy = bedCY - g.cy
+    if (sx + 90 < 0 || sx - 90 > CW || sy + 10 < 0 || sy - 80 > CH) continue
 
-    if (g.gfx >= 1) {
-      ctx.fillStyle = pTh.rockHi + "88"
-      ctx.fillRect(sx, sy, p.w, 3)
-      ctx.fillRect(sx, sy, 3, p.h)
+    const th = THEMES[cp.w]
+    const discovered = g.discoveredCPs.has(cp.id)
+    const isSpawn = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
+    const isKennel = KENNEL_ROOMS[cp.w].c === cp.c && KENNEL_ROOMS[cp.w].r === cp.r
+    const dx = p.x + p.w / 2 - bedCX, dy = p.y + p.h / 2 - (bedCY - PH / 2)
+    const near = Math.sqrt(dx * dx + dy * dy) < CP_RADIUS
+    const pulse = 0.65 + 0.35 * Math.sin(t * 2.8)
 
-      ctx.fillStyle = pTh.rockShadow + "CC"
-      ctx.fillRect(sx + p.w - 3, sy, 3, p.h)
-      ctx.fillRect(sx, sy + p.h - 3, p.w, 3)
+    // ── Halo de radio cuando el jugador está cerca ──
+    if (near) {
+      ctx.save(); ctx.strokeStyle = th.accent + "33"; ctx.lineWidth = 1; ctx.setLineDash([4, 6])
+      ctx.beginPath(); ctx.arc(sx, sy - 18, CP_RADIUS, 0, Math.PI * 2); ctx.stroke()
+      ctx.setLineDash([]); ctx.restore()
+    }
 
-      if (g.gfx >= 2 && p.w > 40 && p.h > 40) {
-        const hash = ((p.x * 7 + p.y * 13) >>> 0) % 7
-        ctx.strokeStyle = pTh.rockShadow + "33"
-        ctx.lineWidth = 1
-        if (hash === 0) { ctx.beginPath(); ctx.moveTo(sx + p.w * 0.2, sy + p.h * 0.3); ctx.lineTo(sx + p.w * 0.45, sy + p.h * 0.7); ctx.stroke() }
-        if (hash === 1) { ctx.beginPath(); ctx.moveTo(sx + p.w * 0.6, sy + p.h * 0.1); ctx.lineTo(sx + p.w * 0.8, sy + p.h * 0.5); ctx.stroke() }
-        if (hash === 2) { ctx.beginPath(); ctx.moveTo(sx + p.w * 0.1, sy + p.h * 0.6); ctx.lineTo(sx + p.w * 0.4, sy + p.h * 0.9); ctx.stroke() }
-        if (hash === 3) {
-          ctx.strokeStyle = pTh.accent + "20"
-          ctx.lineWidth = 1.5
-          ctx.beginPath(); ctx.moveTo(sx + p.w * 0.3, sy + p.h * 0.4); ctx.lineTo(sx + p.w * 0.7, sy + p.h * 0.6); ctx.stroke()
-        }
+    // ── Resplandor de punto activo ──
+    if (isSpawn) {
+      const grad = ctx.createRadialGradient(sx, sy - 20, 6, sx, sy - 20, 55)
+      grad.addColorStop(0, th.accent + "40"); grad.addColorStop(1, th.accent + "00")
+      ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(sx, sy - 20, 55, 0, Math.PI * 2); ctx.fill()
+    }
+
+    if (isKennel) {
+      // ── Casa/kennel original para los puntos Oeste (home base) ──────
+      const kw = 78, kh = 58
+      ctx.fillStyle = isSpawn ? th.wall + "EE" : discovered ? "#1E2420" : "#181818"
+      ctx.fillRect(sx - kw / 2, sy - kh, kw, kh)
+      ctx.fillStyle = isSpawn ? th.accent : discovered ? th.rockHi : "#2A2A2A"
+      ctx.beginPath(); ctx.moveTo(sx - kw / 2 - 8, sy - kh); ctx.lineTo(sx, sy - kh - 30)
+      ctx.lineTo(sx + kw / 2 + 8, sy - kh); ctx.closePath(); ctx.fill()
+      if (isSpawn) {
+        ctx.strokeStyle = th.accent + "AA"; ctx.lineWidth = 1.5
+        ctx.beginPath(); ctx.moveTo(sx - kw / 2 - 8, sy - kh); ctx.lineTo(sx, sy - kh - 30)
+        ctx.lineTo(sx + kw / 2 + 8, sy - kh); ctx.closePath(); ctx.stroke()
       }
+      // Entrada
+      ctx.fillStyle = "#0A0A0A"
+      ctx.beginPath(); ctx.arc(sx, sy - 16, 16, Math.PI, 0); ctx.rect(sx - 16, sy - 16, 32, 16); ctx.fill()
+      ctx.strokeStyle = isSpawn ? th.accent + "CC" : discovered ? "#3A3A3A" : "#222"
+      ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(sx, sy - 16, 16, Math.PI, 0); ctx.stroke()
+    } else {
+      // ── Colchoncito de perro (nuevos checkpoints) ──────────────────
+      const bw = 56, bh = 22
+      // Sombra del colchón
+      ctx.fillStyle = "rgba(0,0,0,0.45)"
+      ctx.beginPath(); ctx.ellipse(sx, sy - 4, bw / 2 + 4, 7, 0, 0, Math.PI * 2); ctx.fill()
+      // Base del colchón (oval)
+      ctx.fillStyle = discovered ? (isSpawn ? th.wall : th.rock) : "#1A1A1A"
+      ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2, bh / 2, 0, 0, Math.PI * 2); ctx.fill()
+      // Borde del colchón
+      ctx.strokeStyle = discovered ? (isSpawn ? th.accent + "CC" : th.rockHi) : "#2A2A2A"
+      ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2, bh / 2, 0, 0, Math.PI * 2); ctx.stroke()
+      // Relleno interno (cojín)
+      ctx.fillStyle = discovered ? (isSpawn ? th.wallHi : th.wall) : "#141414"
+      ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2 - 5, bh / 2 - 4, 0, 0, Math.PI * 2); ctx.fill()
+      // Costuras decorativas del colchón
+      if (discovered) {
+        ctx.strokeStyle = th.rock + "AA"; ctx.lineWidth = 0.8
+        ctx.beginPath(); ctx.ellipse(sx - 8, sy - 10, 6, bh / 2 - 6, 0, 0, Math.PI * 2); ctx.stroke()
+        ctx.beginPath(); ctx.ellipse(sx + 8, sy - 10, 6, bh / 2 - 6, 0, 0, Math.PI * 2); ctx.stroke()
+      }
+      // Hueso decorativo encima (si descubierto y no activo)
+      if (discovered && !isSpawn) {
+        ctx.fillStyle = th.rockHi + "99"; ctx.font = "10px monospace"; ctx.textAlign = "center"
+        ctx.fillText("🦴", sx, sy - 7); ctx.textAlign = "left"
+      }
+    }
+
+    // ── Estrella flotante + nombre cuando es spawn activo ──
+    if (isSpawn) {
+      const bounce = Math.sin(t * 2) * 3
+      ctx.fillStyle = th.accent; ctx.font = "bold 15px monospace"; ctx.textAlign = "center"
+      ctx.fillText("★", sx, sy - (isKennel ? 68 : 38) + bounce)
+      ctx.font = "7px monospace"; ctx.fillStyle = th.accent + "BB"
+      ctx.fillText(cp.icon + " RESPAWN", sx, sy - (isKennel ? 78 : 48) + bounce)
+      ctx.textAlign = "left"
+    }
+
+    // ── Indicador de descubrimiento (primera vez) ──
+    if (!discovered && near) {
+      ctx.globalAlpha = pulse; ctx.fillStyle = "rgba(0,0,0,0.85)"
+      ctx.beginPath(); ctx.roundRect(sx - 60, sy - 56, 120, 22, 4); ctx.fill()
+      ctx.fillStyle = "#FFDD88"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+      ctx.fillText("¡ NUEVO CHECKPOINT !", sx, sy - 40)
+      ctx.textAlign = "left"; ctx.globalAlpha = 1
+    }
+
+    // ── Prompt de interacción ──
+    if (near && discovered) {
+      const canTP = g.discoveredCPs.size >= 2
+      ctx.globalAlpha = pulse
+      ctx.fillStyle = "rgba(0,0,0,0.82)"; ctx.beginPath()
+      ctx.roundRect(sx - 76, sy - 68, 152, canTP ? 42 : 26, 5); ctx.fill()
+      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 10px monospace"; ctx.textAlign = "center"
+      ctx.fillText(!isSpawn ? "[E]  GUARDAR AQUÍ" : "★  PUNTO ACTIVO", sx, sy - 50)
+      if (canTP) {
+        ctx.fillStyle = th.accent; ctx.font = "9px monospace"
+        ctx.fillText("[T]  TELETRANSPORTAR", sx, sy - 36)
+      }
+      ctx.textAlign = "left"; ctx.globalAlpha = 1
     }
   }
 }
 
-function drawKennels(ctx: CanvasRenderingContext2D, g: G) {
-  const p = g.pl, t = Date.now() * 0.003
-  for (let w = 0; w < NW; w++) {
-    const kp = KENNEL_WORLD_POS[w], floorY = kp.y + PH, centerX = kp.x + PW / 2 + 16
-    const sx = centerX - g.cx, sy = floorY - g.cy
-    if (sx + 110 < 0 || sx - 110 > CW || sy - 120 < 0 || sy > CH + 10) continue
-    const th = THEMES[w], isActive = g.checkpoint.w === w
-    const dx = p.x + p.w / 2 - centerX, dy = p.y + p.h / 2 - (floorY - PH / 2)
-    const near = Math.sqrt(dx * dx + dy * dy) < KENNEL_R
-    const kw = 82, kh = 62
-    if (isActive) {
-      const grad = ctx.createRadialGradient(sx, sy - kh / 2, 10, sx, sy - kh / 2, KENNEL_R * 0.9)
-      grad.addColorStop(0, th.accent + "2A"); grad.addColorStop(1, th.accent + "00")
-      ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(sx, sy - kh / 2, KENNEL_R * 0.9, 0, Math.PI * 2); ctx.fill()
+// ── Menú de teletransportación ───────────────────────────────────────────────
+function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
+  if (!g.tpMenu || !g.tpMenu.open) return
+  const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
+  const mW = 320, mH = Math.min(discovered.length * 28 + 64, CH - 80)
+  const mX = (CW - mW) / 2, mY = (CH - mH) / 2
+
+  // Fondo del menú
+  ctx.fillStyle = "rgba(0,0,0,0.92)"; ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 10); ctx.fill()
+  ctx.strokeStyle = "#7CFC00AA"; ctx.lineWidth = 1.5; ctx.strokeRect(mX, mY, mW, mH)
+  // Título
+  ctx.fillStyle = "#7CFC00"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"
+  ctx.fillText("⚡  TELETRANSPORTACIÓN", mX + mW / 2, mY + 20)
+  ctx.fillStyle = "#3A5A3A"; ctx.font = "8px monospace"
+  ctx.fillText("↑↓ navegar  ·  ENTER confirmar  ·  ESC cerrar", mX + mW / 2, mY + 34)
+  ctx.textAlign = "left"
+
+  const listY = mY + 50, itemH = 28
+  const maxVisible = Math.floor((mH - 60) / itemH)
+  const startIdx = Math.max(0, Math.min(g.tpMenu.idx - Math.floor(maxVisible / 2), discovered.length - maxVisible))
+  for (let i = 0; i < Math.min(maxVisible, discovered.length); i++) {
+    const cp = discovered[startIdx + i]
+    if (!cp) continue
+    const th = THEMES[cp.w]
+    const iy = listY + i * itemH
+    const isSelected = startIdx + i === g.tpMenu.idx
+    if (isSelected) {
+      ctx.fillStyle = th.accent + "22"; ctx.beginPath(); ctx.roundRect(mX + 6, iy, mW - 12, itemH - 2, 4); ctx.fill()
+      ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1; ctx.strokeRect(mX + 6, iy, mW - 12, itemH - 2)
     }
-    ctx.fillStyle = isActive ? th.wall + "EE" : "#252525"; ctx.fillRect(sx - kw / 2, sy - kh, kw, kh)
-    ctx.fillStyle = isActive ? th.accent : "#3A3A3A"
-    ctx.beginPath(); ctx.moveTo(sx - kw / 2 - 10, sy - kh); ctx.lineTo(sx, sy - kh - 34); ctx.lineTo(sx + kw / 2 + 10, sy - kh); ctx.closePath(); ctx.fill()
-    if (isActive) { ctx.strokeStyle = th.accent + "AA"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(sx - kw / 2 - 10, sy - kh); ctx.lineTo(sx, sy - kh - 34); ctx.lineTo(sx + kw / 2 + 10, sy - kh); ctx.closePath(); ctx.stroke() }
-    ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(sx, sy - 18, 18, Math.PI, 0); ctx.rect(sx - 18, sy - 18, 36, 18); ctx.fill()
-    ctx.strokeStyle = isActive ? th.accent + "CC" : "#444"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, sy - 18, 18, Math.PI, 0); ctx.stroke()
-    if (isActive) {
-      const bounce = Math.sin(t * 2) * 3
-      ctx.fillStyle = th.accent; ctx.font = "bold 16px monospace"; ctx.textAlign = "center"
-      ctx.fillText("★", sx, sy - kh - 38 + bounce); ctx.font = "bold 8px monospace"
-      ctx.fillStyle = th.accent + "BB"; ctx.fillText("CHECKPOINT", sx, sy - kh - 45 + bounce); ctx.textAlign = "left"
-    }
-    if (near && !isActive) {
-      const pulse = 0.7 + 0.3 * Math.sin(t * 4); ctx.globalAlpha = pulse
-      ctx.fillStyle = "rgba(0,0,0,0.78)"; ctx.beginPath(); ctx.roundRect(sx - 78, sy - kh - 54, 156, 28, 5); ctx.fill()
-      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 11px monospace"; ctx.textAlign = "center"
-      ctx.fillText("[E]  GUARDAR PUNTO", sx, sy - kh - 36); ctx.textAlign = "left"; ctx.globalAlpha = 1
-    }
-    if (near) {
-      ctx.save(); ctx.strokeStyle = th.accent + "44"; ctx.lineWidth = 1; ctx.setLineDash([5, 5])
-      ctx.beginPath(); ctx.arc(sx, sy - kh / 2, KENNEL_R, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.restore()
-    }
+    ctx.fillStyle = isSelected ? th.accent : "#666666"; ctx.font = "bold 9px monospace"
+    ctx.fillText(`${cp.icon}  ${cp.label}`, mX + 16, iy + 17)
   }
 }
 
@@ -2574,9 +3235,23 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.clearRect(0, 0, CW, CH)
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
   if (g.showMap) { drawFullMap(ctx, g); return }
-  drawBg(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawKennels(ctx, g)
+  // ── Screen shake: solo afecta al mundo, no al HUD ──────────────────
+  const hasShake = g.shakeX !== 0 || g.shakeY !== 0
+  if (hasShake) { ctx.save(); ctx.translate(g.shakeX, g.shakeY) }
+  drawBg(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
   drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawWhip(ctx, g)
-  drawSparks(ctx, g); drawMinimap(ctx, g); drawHUD(ctx, g); drawWorldTransition(ctx, g)
+  drawSparks(ctx, g)
+  if (hasShake) ctx.restore()
+  // ── Efecto de teletransportación ──
+  if (g.tpAnim) {
+    const prog = g.tpAnim.timer / 0.42
+    const alpha = g.tpAnim.phase === 0 ? Math.min(1, prog * 1.2) : Math.max(0, 1 - prog)
+    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.92})`; ctx.fillRect(0, 0, CW, CH)
+    if (g.tpAnim.phase === 0 && alpha > 0.3) {
+      ctx.fillStyle = `rgba(150,255,150,${(alpha - 0.3) * 0.5})`; ctx.fillRect(0, 0, CW, CH)
+    }
+  }
+  drawMinimap(ctx, g); drawHUD(ctx, g); drawTPMenu(ctx, g); drawWorldTransition(ctx, g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2683,6 +3358,89 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     const lines = [`FPS: ${g.lfps.toFixed(0)}`, `GFX: ${["BAJA", "MEDIA", "ALTA"][g.gfx]} [Q ciclar]`, `POS: ${Math.floor(p.x)},${Math.floor(p.y)}`, `SAL: W${curW}.${curC}.${curR}`, `ENEMIGOS: ${g.enemies.length}`, `MUERTOS: ${g.dead.size}`, `CP: W${g.checkpoint.w}`]
     lines.forEach((l, i) => ctx.fillText(l, panX + 8, 226 + i * 18))
   }
+
+  // ── Barra de boss ────────────────────────────────────────────────────
+  const boss = g.enemies.find(e => e.active && !e.dying && e.boss && e.world === curW)
+  if (boss) {
+    const barW = 420, barH = 14, barX = (CW - barW) / 2, barY = CH - 34
+    ctx.fillStyle = "rgba(0,0,0,0.85)"
+    ctx.beginPath(); ctx.roundRect(barX - 8, barY - 22, barW + 16, barH + 30, 7); ctx.fill()
+    ctx.strokeStyle = th.doorC + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(barX - 8, barY - 22, barW + 16, barH + 30)
+    // Nombre del boss y fase
+    ctx.fillStyle = th.doorC; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+    ctx.fillText(`⚠ JEFE — ${WORLD_NAMES[boss.world]}`, CW / 2 - 50, barY - 8)
+    if ((boss as any).phase === 2) {
+      const pulse = 0.7 + 0.3 * Math.sin(Date.now() * 0.008)
+      ctx.fillStyle = `rgba(255,80,0,${pulse})`; ctx.font = "bold 9px monospace"
+      ctx.fillText("◈ FASE CRÍTICA ◈", CW / 2 + 80, barY - 8)
+    }
+    // Fondo de barra
+    ctx.fillStyle = "#2A0000"; ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, 4); ctx.fill()
+    // Barra de HP con color dinámico
+    const hpR = Math.max(0, boss.hp) / boss.mhp
+    const bossCol = (boss as any).phase === 2 ? "#FF6600" : "#DD2222"
+    ctx.shadowColor = bossCol; ctx.shadowBlur = 10
+    ctx.fillStyle = bossCol; ctx.beginPath(); ctx.roundRect(barX, barY, Math.max(0, barW * hpR), barH, 4); ctx.fill()
+    ctx.shadowBlur = 0
+    // Marca de fase al 50%
+    ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.moveTo(barX + barW * 0.5, barY - 1); ctx.lineTo(barX + barW * 0.5, barY + barH + 1); ctx.stroke()
+    // Brillo superior
+    ctx.fillStyle = "rgba(255,255,255,0.15)"
+    ctx.beginPath(); ctx.roundRect(barX, barY, Math.max(0, barW * hpR), Math.floor(barH / 2), 4); ctx.fill()
+    ctx.textAlign = "left"
+  }
+
+  // ── Indicadores de habilidades desbloqueadas ─────────────────────────
+  {
+    const aY = 206, aX = panX + 8, aGap = 36
+    ctx.fillStyle = th.accent + "55"; ctx.font = "6px monospace"; ctx.fillText("HABILIDADES", aX, aY)
+    const icons: [string, string, boolean][] = [
+      ["DASH", "⚡", g.abilities.has("dash")],
+      ["W.JUMP", "↑↑", g.abilities.has("walljump")],
+      ["HP+1", "❤+", g.abilities.has("hpup")],
+    ]
+    icons.forEach(([label, icon, unlocked], i) => {
+      const ix = aX + i * aGap
+      ctx.fillStyle = unlocked ? "rgba(0,0,0,0.7)" : "rgba(0,0,0,0.4)"
+      ctx.beginPath(); ctx.roundRect(ix, aY + 4, 30, 22, 3); ctx.fill()
+      ctx.strokeStyle = unlocked ? th.accent : "#333"; ctx.lineWidth = 1; ctx.strokeRect(ix, aY + 4, 30, 22)
+      ctx.fillStyle = unlocked ? th.accent : "#444"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+      ctx.fillText(icon, ix + 15, aY + 14)
+      ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = "5px monospace"
+      ctx.fillText(label, ix + 15, aY + 23); ctx.textAlign = "left"
+    })
+  }
+
+  // ── Contador de combo ─────────────────────────────────────────────────
+  if (g.combo >= 2 && g.comboTimer > 0) {
+    const alpha = Math.min(1, g.comboTimer * 1.5) * Math.min(1, (3.0 - g.comboTimer) * 3 + 0.2)
+    ctx.save(); ctx.globalAlpha = Math.max(0, alpha)
+    const cx2 = CW / 2, cy2 = 56
+    ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.beginPath(); ctx.roundRect(cx2 - 90, cy2 - 18, 180, 32, 6); ctx.fill()
+    const hue = Math.max(0, 55 - g.combo * 4)
+    ctx.fillStyle = `hsl(${hue}, 100%, 65%)`
+    ctx.font = `bold ${11 + Math.min(g.combo, 8)}px monospace`; ctx.textAlign = "center"
+    ctx.fillText(`× ${g.combo}  COMBO`, cx2, cy2)
+    ctx.restore()
+  }
+
+  // ── Notificación de habilidad desbloqueada ────────────────────────────
+  if (g.abilityNotif && g.abilityNotif.timer > 0) {
+    const t = g.abilityNotif.timer
+    const alpha = Math.min(1, t * 2) * Math.min(1, (4.0 - t) * 1.5)
+    ctx.save(); ctx.globalAlpha = Math.max(0, alpha)
+    ctx.fillStyle = "rgba(0,0,0,0.92)"
+    ctx.beginPath(); ctx.roundRect(CW / 2 - 175, CH / 2 - 48, 350, 88, 12); ctx.fill()
+    ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(CW / 2 - 175, CH / 2 - 48, 350, 88)
+    ctx.fillStyle = th.accent; ctx.font = "bold 10px monospace"; ctx.textAlign = "center"
+    ctx.fillText("✦  NUEVA HABILIDAD DESBLOQUEADA  ✦", CW / 2, CH / 2 - 24)
+    ctx.fillStyle = "#FFFFFF"; ctx.font = `bold 16px monospace`
+    ctx.fillText(g.abilityNotif.text, CW / 2, CH / 2 + 12)
+    ctx.fillStyle = th.accent + "99"; ctx.font = "9px monospace"
+    ctx.fillText("Elimina al siguiente jefe para la próxima habilidad", CW / 2, CH / 2 + 32)
+    ctx.textAlign = "left"; ctx.restore()
+  }
 }
 
 function drawWorldTransition(ctx: CanvasRenderingContext2D, g: G) {
@@ -2781,6 +3539,7 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   g.keys["a"] = dLeft; g.keys["d"] = dRight; g.keys["w"] = dUp; g.keys["s"] = dDown
   g.keys["arrowleft"] = false; g.keys["arrowright"] = false; g.keys["arrowup"] = false; g.keys["arrowdown"] = false
   g.keys[" "] = btn(GP.A); g.keys["n"] = btn(GP.X) || btn(GP.RB); g.keys["m"] = btn(GP.Y) || btn(GP.LB)
+  g.keys["shift"] = btn(GP.LT) || ax(2) > 0.4 || ax(4) > 0.4
   if (btn(GP.RT) || ax(5) > GP_DEAD) g.pl.runMode = true
   const gNow2 = performance.now(), TAP_W = 280
   const stL = ax(0) < -0.70, stR = ax(0) > 0.70
@@ -2806,9 +3565,12 @@ export default function ProyectoLuly() {
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
   const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false })
+  // "start" = menú inicio  |  "playing" = partida activa
+  const [screen, setScreen] = useState<"start" | "playing">("start")
+  const gameActiveRef = useRef(false)
 
   useEffect(() => {
-    const L = (k: string, s: string) => { const img = new Image(); img.src = s; img.onload = () => { sprs.current[k] = img }; img.onerror = () => { sprs.current[k] = null } }
+    const L = (k: string, s: string) => { const img = new Image(); img.src = asset(s); img.onload = () => { sprs.current[k] = img }; img.onerror = () => { sprs.current[k] = null } }
     L("player_idle", "/assets/player/player_idle.png")
     L("player_walk", "/assets/player/player_walk.png")
     L("player_run", "/assets/player/player_run.png")
@@ -2853,11 +3615,15 @@ export default function ProyectoLuly() {
     const canvas = canvasRef.current!, ctx = canvas.getContext("2d")!
     let raf: number, accum = 0, last = performance.now(), ut = 0
     const gpCheckpoint = () => {
-      const g = G.current, kps = KENNEL_WORLD_POS, p = g.pl
-      for (let w = 0; w < NW; w++) {
-        const kp = kps[w], cx2 = kp.x + PW / 2 + 16, cy2 = kp.y + PH / 2
-        const dx = p.x + p.w / 2 - cx2, dy = p.y + p.h / 2 - cy2
-        if (Math.sqrt(dx * dx + dy * dy) < KENNEL_R && g.checkpoint.w !== w) { g.checkpoint = { w, x: kp.x, y: kp.y }; g.kennelMsg = 3; break }
+      const g = G.current, p = g.pl
+      for (const cp of ALL_CPS) {
+        const bdx = p.x + p.w / 2 - (cp.x + PW / 2), bdy = p.y + p.h / 2 - (cp.y + PH)
+        if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
+          g.discoveredCPs.add(cp.id)
+          const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
+          if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3 }
+          break
+        }
       }
     }
     const gpFullscreen = () => { const el = document.fullscreenElement; if (!el) (containerRef.current || document.documentElement).requestFullscreen().catch(() => { }); else document.exitFullscreen().catch(() => { }) }
@@ -2866,12 +3632,12 @@ export default function ProyectoLuly() {
       g.fps.push(1 / Math.max(dt, .001)); if (g.fps.length > 60) g.fps.shift()
       g.lfps = g.fps.reduce((a, b) => a + b, 0) / g.fps.length
       pollGamepad(g, () => { }, () => G.current = mkG_lazy(), gpCheckpoint, gpFullscreen)
-      if (!g.paused && !g.over && !g.won) {
+      if (gameActiveRef.current && !g.paused && !g.over && !g.won) {
         accum += dt; let st = 0
         while (accum >= STEP && st < 4) { tick(g); accum -= STEP; st++ }
         if (accum > STEP * 2) accum = 0
       } else accum = 0
-      draw(g, ctx, sprs.current, devHoverRef.current)
+      if (gameActiveRef.current) draw(g, ctx, sprs.current, devHoverRef.current)
       ut += dt; if (ut > .25) {
         ut = 0
         // if (g.autoGfx) {
@@ -2889,7 +3655,7 @@ export default function ProyectoLuly() {
   }, [])
 
   useEffect(() => {
-    const pv = ["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "w", "a", "s", "d", "tab", "z", "f", "enter"]
+    const pv = ["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "w", "a", "s", "d", "t", "tab", "z", "f", "enter", "shift"]
     const dn = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase(); if (pv.includes(k)) e.preventDefault()
       const g = G.current
@@ -2937,16 +3703,40 @@ export default function ProyectoLuly() {
       if (k === "tab") { g.showMap = !g.showMap; g.paused = g.showMap }
       if (k === "f") { const el = document.fullscreenElement; if (!el) (containerRef.current || document.documentElement).requestFullscreen().catch(() => { }); else document.exitFullscreen().catch(() => { }) }
       if (k === "escape") {
+        if (g.tpMenu?.open) { g.tpMenu = null; return }
         if (g.showMap) { g.showMap = false; g.paused = false }
         if (g.showDevMap) { g.showDevMap = false; g.paused = false }
       }
-      if (k === "e") {
+      if (k === "e" && !g.tpAnim) {
         ; (g as any)._gfxMsg = false
-        const kps = KENNEL_WORLD_POS, p = g.pl
-        for (let w = 0; w < NW; w++) {
-          const kp = kps[w], centerX = kp.x + PW / 2 + 16, centerY = kp.y + PH / 2
-          const dx = p.x + p.w / 2 - centerX, dy = p.y + p.h / 2 - centerY
-          if (Math.sqrt(dx * dx + dy * dy) < KENNEL_R && g.checkpoint.w !== w) { g.checkpoint = { w, x: kp.x, y: kp.y }; g.kennelMsg = 3; break }
+        const p = g.pl
+        for (const cp of ALL_CPS) {
+          const bdx = p.x + p.w / 2 - (cp.x + PW / 2), bdy = p.y + p.h / 2 - (cp.y + PH)
+          if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
+            g.discoveredCPs.add(cp.id)
+            const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
+            if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3 }
+            break
+          }
+        }
+      }
+      if (k === "t" && !g.tpAnim) {
+        if (g.tpMenu?.open) { g.tpMenu = null; return }
+        if (g.discoveredCPs.size >= 2) { g.tpMenu = { open: true, idx: 0 } }
+      }
+      // Navegación menú de teleporte
+      if (g.tpMenu?.open) {
+        const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
+        if (k === "arrowup" || k === "w") { g.tpMenu.idx = (g.tpMenu.idx - 1 + discovered.length) % discovered.length; return }
+        if (k === "arrowdown" || k === "s") { g.tpMenu.idx = (g.tpMenu.idx + 1) % discovered.length; return }
+        if (k === "enter" || k === " ") {
+          const dest = discovered[g.tpMenu.idx]
+          if (dest) {
+            g.tpMenu = null
+            g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
+            spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
+          }
+          return
         }
       }
     }
@@ -3007,62 +3797,187 @@ export default function ProyectoLuly() {
 
   const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false }) }
 
+  const handlePlay = () => {
+    gameActiveRef.current = true
+    setScreen("playing")
+  }
+  const handleExit = () => { try { window.close() } catch (_e) { } }
+  const handleRestart = () => { reset(); setScreen("start"); gameActiveRef.current = false }
+  const handlePlayAgain = () => { reset(); handlePlay() }
+
   const canvasStyle = isFullscreen
     ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%", objectFit: "contain" as const, border: "none", borderRadius: 0 }
     : { display: "block", imageRendering: "pixelated" as const, border: "2px solid #1A1A1A", borderRadius: 4 }
 
+  // Estilo común de botón para la pantalla de inicio
+  const menuBtn = (accent: string): CSSProperties => ({
+    fontFamily: "monospace", fontWeight: "bold", fontSize: 15,
+    padding: "12px 48px", border: `2px solid ${accent}`,
+    color: accent, background: "rgba(0,0,0,0.55)",
+    cursor: "pointer", letterSpacing: "0.12em",
+    transition: "background 0.2s, box-shadow 0.2s",
+    borderRadius: 3, outline: "none",
+  })
+
   return (
     <div className="w-full h-screen bg-black flex flex-col items-center justify-center overflow-hidden select-none">
       <div ref={containerRef} className="relative" style={isFullscreen ? { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999 } : { boxShadow: "0 0 60px rgba(0,0,0,.95)" }}>
-        <canvas ref={canvasRef} width={CW} height={CH} style={canvasStyle} />
-        <div className="absolute top-1 left-2 text-xs font-mono opacity-40 flex items-center gap-2" style={{ color: "#888" }}>
-          <span>{ui.fps}fps</span>
-          {gpadConnected && <span style={{ color: "#7CFC00", opacity: 0.9 }} title="Control Xbox detectado">🎮</span>}
-        </div>
-        {/* FIX: el overlay de pausa NO se muestra cuando showDevMap está activo */}
-        {ui.paused && !ui.over && !ui.won && !ui.showDevMap && (
+
+        {/* ── Canvas del juego ── */}
+        <canvas ref={canvasRef} width={CW} height={CH} style={{ ...canvasStyle, display: screen === "playing" ? "block" : "none" }} />
+
+        {/* ══════════════════════════════════════════════════
+            PANTALLA DE INICIO
+        ══════════════════════════════════════════════════ */}
+        {screen === "start" && (
+          <div style={{
+            width: CW, height: CH,
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            position: "relative", overflow: "hidden",
+            // Fondo: imagen configurable + gradiente de respaldo
+            backgroundImage: `url(${asset("/assets/menu_bg.png")}), linear-gradient(180deg,#040804 0%,#091409 55%,#020502 100%)`,
+            backgroundSize: "cover", backgroundPosition: "center",
+            border: "2px solid #1A1A1A", borderRadius: 4,
+            fontFamily: "monospace",
+          }}>
+            {/* Capa oscura sobre el fondo */}
+            <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.58)", zIndex: 0 }} />
+
+            {/* Línea decorativa superior */}
+            <div style={{ position: "absolute", top: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#7CFC0055,#7CFC00AA,#7CFC0055,transparent)", zIndex: 1 }} />
+            <div style={{ position: "absolute", bottom: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#7CFC0055,#7CFC00AA,#7CFC0055,transparent)", zIndex: 1 }} />
+
+            {/* Contenido centrado */}
+            <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
+
+              {/* Etiqueta superior */}
+              <p style={{ color: "#3A5A3A", fontSize: 11, letterSpacing: "0.35em", marginBottom: 12 }}>
+                // COMPLEJO CANINO — SECTOR 0 //
+              </p>
+
+              {/* Título principal */}
+              <h1 style={{
+                fontSize: 58, fontWeight: "900", letterSpacing: "0.08em", margin: 0,
+                color: "#EEFFEE",
+                textShadow: "0 0 28px #7CFC00CC, 0 0 60px #3A8A0066, 0 2px 0 #000",
+                lineHeight: 1.05,
+              }}>
+                PROYECTO LULY
+              </h1>
+
+              {/* Subtítulo */}
+              <p style={{ color: "#4A7A4A", fontSize: 13, letterSpacing: "0.22em", margin: "10px 0 44px", fontStyle: "italic" }}>
+                liberación canina — metroidvania
+              </p>
+
+              {/* Botones */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, width: 260, alignItems: "stretch" }}>
+                <button
+                  style={menuBtn("#7CFC00")}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(124,252,0,0.15)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #7CFC0066" }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.boxShadow = "none" }}
+                  onClick={handlePlay}
+                >
+                  ▶  JUGAR
+                </button>
+                <button
+                  style={menuBtn("#556655")}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(85,102,85,0.18)"; (e.target as HTMLElement).style.color = "#88AA88" }}
+                  onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.color = "#556655" }}
+                  onClick={handleExit}
+                >
+                  ✕  SALIR
+                </button>
+              </div>
+
+              {/* Controles resumidos */}
+              <div style={{ marginTop: 38, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 28px", fontSize: 10, color: "#3A5A3A", textAlign: "center" }}>
+                <span><span style={{ color: "#7CFC0088" }}>WASD</span> mover</span>
+                <span><span style={{ color: "#7CFC0088" }}>ESPACIO</span> saltar</span>
+                <span><span style={{ color: "#7CFC0088" }}>N</span> disparar</span>
+                <span><span style={{ color: "#7CFC0088" }}>M</span> látigo</span>
+                <span><span style={{ color: "#7CFC0088" }}>SHIFT</span> dash*</span>
+                <span><span style={{ color: "#7CFC0088" }}>TAB</span> mapa</span>
+              </div>
+              <p style={{ marginTop: 8, fontSize: 9, color: "#2A3A2A" }}>* se desbloquea derrotando al primer jefe</p>
+            </div>
+
+            {/* Versión */}
+            <p style={{ position: "absolute", bottom: 14, right: 18, fontSize: 9, color: "#1E2E1E", zIndex: 2, fontFamily: "monospace" }}>
+              v2.0 — 4 mundos × 9×9 salas
+            </p>
+          </div>
+        )}
+
+        {/* ── FPS y gamepad (solo en juego) ── */}
+        {screen === "playing" && (
+          <div className="absolute top-1 left-2 text-xs font-mono opacity-40 flex items-center gap-2" style={{ color: "#888" }}>
+            <span>{ui.fps}fps</span>
+            {gpadConnected && <span style={{ color: "#7CFC00", opacity: 0.9 }} title="Control Xbox detectado">🎮</span>}
+          </div>
+        )}
+
+        {/* ── Pausa ── */}
+        {screen === "playing" && ui.paused && !ui.over && !ui.won && !ui.showDevMap && (
           <div className="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center">
             <div className="text-center p-8 border border-gray-700 rounded-xl" style={{ background: "#0D0D0D" }}>
               <div className="text-3xl mb-2">⏸</div>
               <h2 className="text-xl font-bold text-gray-200 mb-2" style={{ fontFamily: "monospace" }}>// PAUSADO</h2>
-              <p className="text-gray-500 text-sm font-mono">P → continuar</p>
+              <p className="text-gray-500 text-sm font-mono mb-4">P → continuar</p>
+              <button
+                onClick={handleRestart}
+                className="px-4 py-1 border border-gray-600 text-gray-400 font-mono text-sm hover:bg-gray-800 transition-colors"
+              >[ MENÚ PRINCIPAL ]</button>
             </div>
           </div>
         )}
-        {ui.over && (
+
+        {/* ── Game Over ── */}
+        {screen === "playing" && ui.over && (
           <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
             <div className="text-center p-8 border border-red-900 rounded-xl" style={{ background: "#0D0000" }}>
               <div className="text-4xl mb-3">☠</div>
               <h2 className="text-2xl font-bold text-red-500 mb-2" style={{ fontFamily: "monospace" }}>GAME_OVER</h2>
-              <p className="text-yellow-600 font-mono mb-4">score: {ui.score}</p>
-              <button onClick={reset} className="px-6 py-2 border border-red-700 text-red-400 font-mono hover:bg-red-900 transition-colors">[ REINICIAR ]</button>
+              <p className="text-yellow-600 font-mono mb-5">score: {ui.score}</p>
+              <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                <button onClick={handlePlayAgain} className="px-5 py-2 border border-red-700 text-red-400 font-mono hover:bg-red-900 transition-colors">[ REINTENTAR ]</button>
+                <button onClick={handleRestart} className="px-5 py-2 border border-gray-700 text-gray-400 font-mono hover:bg-gray-800 transition-colors">[ MENÚ ]</button>
+              </div>
             </div>
           </div>
         )}
-        {ui.won && (
+
+        {/* ── Victoria ── */}
+        {screen === "playing" && ui.won && (
           <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
             <div className="text-center p-8 border border-yellow-700 rounded-xl" style={{ background: "#0D0A00" }}>
               <div className="text-4xl mb-3">⭐</div>
               <h2 className="text-2xl font-bold text-yellow-400 mb-1" style={{ fontFamily: "monospace" }}>LIBERTAD_CANINA</h2>
               <p className="text-gray-400 font-mono text-sm mb-3">La resistencia perrina ha triunfado.</p>
-              <p className="text-yellow-500 font-mono font-bold mb-4">score_final: {ui.score}</p>
-              <button onClick={reset} className="px-6 py-2 border border-yellow-700 text-yellow-400 font-mono hover:bg-yellow-900 transition-colors">[ JUGAR_DE_NUEVO ]</button>
+              <p className="text-yellow-500 font-mono font-bold mb-5">score_final: {ui.score}</p>
+              <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+                <button onClick={handlePlayAgain} className="px-5 py-2 border border-yellow-700 text-yellow-400 font-mono hover:bg-yellow-900 transition-colors">[ JUGAR DE NUEVO ]</button>
+                <button onClick={handleRestart} className="px-5 py-2 border border-gray-700 text-gray-400 font-mono hover:bg-gray-800 transition-colors">[ MENÚ ]</button>
+              </div>
             </div>
           </div>
         )}
       </div>
-      {!isFullscreen && <>
-        <div className="mt-3 grid grid-cols-5 gap-4 text-xs font-mono max-w-3xl w-full px-4" style={{ color: "#666" }}>
-          <div><span className="text-gray-300 block mb-1">// mover</span>WASD | Flechas<br /><span style={{ color: "#7CFC00" }}>2×</span> izq/der: correr</div>
-          <div><span className="text-gray-300 block mb-1">// combate</span>Espacio: saltar<br /><span style={{ color: "#7CFC00" }}>2×Espacio</span>: doble salto<br />N: disparar | M: látigo</div>
-          <div><span className="text-gray-300 block mb-1">// checkpoint</span><span style={{ color: "#7CFC00" }}>E</span>: guardar perrera<br />★ reapareces ahí</div>
-          <div><span className="text-gray-300 block mb-1">// sistema</span>P: pausa | R: reset<br />J: debug | Tab: mapa | <span style={{ color: "#7CFC00" }}>Z</span>: zoom | <span style={{ color: "#7CFC00" }}>F</span>: fullscreen<br /><span style={{ color: "#FF8C00" }}>`</span>: dev | <span style={{ color: "#FF8C00" }}>H</span>: teleport | <span style={{ color: "#FF8C00" }}>I</span>: god | <span style={{ color: "#FF8C00" }}>O</span>: ∞ammo | <span style={{ color: "#FF8C00" }}>K</span>: sin enemigos</div>
-          <div><span className="text-gray-300 block mb-1">// plataformas</span><span style={{ color: "#7CFC00" }}>S+S</span> ó agachado+S:<br />bajar de plataforma<br />Espacio+S: caer</div>
-        </div>
-        <div className="mt-1 text-xs font-mono" style={{ color: "#2A2A2A" }}>
-          4 mundos × 9×9 salas | túneles procedurales estilo hollow knight | ~600 enemigos
-        </div>
-      </>}
+
+      {/* ── Controles detallados (solo fuera de fullscreen y en juego) ── */}
+      {!isFullscreen && screen === "playing" && (
+        <>
+          <div className="mt-3 grid grid-cols-5 gap-4 text-xs font-mono max-w-3xl w-full px-4" style={{ color: "#666" }}>
+            <div><span className="text-gray-300 block mb-1">// mover</span>WASD | Flechas<br /><span style={{ color: "#7CFC00" }}>2×</span> izq/der: correr</div>
+            <div><span className="text-gray-300 block mb-1">// combate</span>Espacio: saltar | N: disparar<br />M: látigo | <span style={{ color: "#7CFC00" }}>SHIFT</span>: dash*</div>
+            <div><span className="text-gray-300 block mb-1">// checkpoint</span><span style={{ color: "#7CFC00" }}>E</span>: guardar perrera<br />★ reapareces ahí</div>
+            <div><span className="text-gray-300 block mb-1">// sistema</span>P: pausa | Tab: mapa<br /><span style={{ color: "#7CFC00" }}>Z</span>: zoom | <span style={{ color: "#7CFC00" }}>F</span>: fullscreen</div>
+            <div><span className="text-gray-300 block mb-1">// plataformas</span><span style={{ color: "#7CFC00" }}>S</span> agachado+S: bajar<br />Espacio+S: caer</div>
+          </div>
+          <div className="mt-1 text-xs font-mono" style={{ color: "#2A2A2A" }}>
+            * dash se desbloquea al matar el primer jefe
+          </div>
+      </>)}
     </div>
   )
 }
