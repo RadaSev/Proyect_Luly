@@ -16,17 +16,46 @@
 // }
 
 
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 
 export const metadata: Metadata = {
   title: "Proyecto Luly — Metroidvania",
   description: "Un metroidvania protagonizado por una perrita llamada Luly",
+  other: {
+    // iOS Safari: permite modo standalone al añadir al inicio
+    "apple-mobile-web-app-capable": "yes",
+    // Barra de estado transparente en modo standalone
+    "apple-mobile-web-app-status-bar-style": "black-translucent",
+    "apple-mobile-web-app-title": "Proyecto Luly",
+    // Chrome en Android
+    "mobile-web-app-capable": "yes",
+  },
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",   // extiende a la pantalla completa (muescas/notch)
+  interactiveWidget: "resizes-content",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body style={{ margin: 0, padding: 0, background: "#000", overflow: "hidden" }}>
+      <head>
+        {/* Precarga de fuentes para mejor rendimiento */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+      </head>
+      <body style={{
+        margin: 0, padding: 0, background: "#000",
+        overflow: "hidden",
+        // iOS Safari: usa la altura disponible real (sin barra de navegación)
+        height: "100dvh",
+        WebkitOverflowScrolling: "touch" as const,
+      }}>
         {children}
       </body>
     </html>

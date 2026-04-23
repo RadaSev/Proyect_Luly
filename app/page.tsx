@@ -88,14 +88,14 @@ type G = {
 // ══════════════════════════════════════════════════════════════
 type Theme = { bg0: string; bg1: string; wall: string; wallHi: string; platC: string; platHi: string; accent: string; doorC: string; fog: string; rock: string; rockHi: string; rockShadow: string }
 const THEMES: Theme[] = [
-  // W0 Las Perreras — hormigón sucio, jaulas, kennel distópico
-  { bg0:"#07090A",bg1:"#030508",wall:"#1B2219",wallHi:"#283524",platC:"#3A5228",platHi:"#4A6A30",accent:"#7CFC00",doorC:"#FF4500",fog:"#0E1A0E",rock:"#182018",rockHi:"#253525",rockShadow:"#090D09" },
-  // W1 Fábrica Canina — acero industrial, paneles metálicos, empresa opresora
-  { bg0:"#0A0B10",bg1:"#060710",wall:"#181C28",wallHi:"#222840",platC:"#2E3450",platHi:"#3A4264",accent:"#FF8C00",doorC:"#FF2200",fog:"#12141E",rock:"#141828",rockHi:"#1E2438",rockShadow:"#08090E" },
-  // W2 Los Tubos — ladrillo húmedo, alcantarilla, musgo
-  { bg0:"#070C0A",bg1:"#040708",wall:"#111917",wallHi:"#182520",platC:"#1E3328",platHi:"#284436",accent:"#00BFFF",doorC:"#FF6347",fog:"#0A1510",rock:"#0E1814",rockHi:"#162420",rockShadow:"#060B08" },
-  // W3 Ctrl. Central — concreto urbano distópico, New York perruno
-  { bg0:"#08060E",bg1:"#040308",wall:"#0D0B18",wallHi:"#181428",platC:"#221E38",platHi:"#2E284A",accent:"#CC00FF",doorC:"#FF0080",fog:"#100C1A",rock:"#0F0D1A",rockHi:"#1A1828",rockShadow:"#06050C" },
+  // ── W0 LAS PERRERAS ── regla de 3: 60% hormigón/suciedad | 30% hierro oxidado | 10% luz kennel amarilla
+  { bg0:"#0E0C09",bg1:"#080604",wall:"#2A2218",wallHi:"#3C3025",platC:"#3E3220",platHi:"#524030",accent:"#D4C400",doorC:"#FF5500",fog:"#150E08",rock:"#1E1610",rockHi:"#2C2018",rockShadow:"#0A0806" },
+  // ── W1 FÁBRICA CANINA ── regla de 3: 60% acero azul-gris | 30% metal oscuro | 10% naranja industrial/horno
+  { bg0:"#060810",bg1:"#030408",wall:"#101A2E",wallHi:"#182440",platC:"#1E2C44",platHi:"#283C5C",accent:"#FF5500",doorC:"#FF1500",fog:"#0C1020",rock:"#0E1828",rockHi:"#162240",rockShadow:"#04060C" },
+  // ── W2 LOS TUBOS ── regla de 3: 60% pantano oscuro | 30% ladrillo húmedo/musgo | 10% cian tóxico
+  { bg0:"#050908",bg1:"#030604",wall:"#0E1C12",wallHi:"#162A1A",platC:"#1A2C18",platHi:"#223C22",accent:"#00DD88",doorC:"#FF4400",fog:"#080E08",rock:"#0A1810",rockHi:"#122418",rockShadow:"#030604" },
+  // ── W3 CTRL. CENTRAL ── regla de 3: 60% vacío digital negro | 30% concreto urbano morado | 10% magenta eléctrico
+  { bg0:"#06040E",bg1:"#030208",wall:"#12102A",wallHi:"#1A1840",platC:"#1E1A38",platHi:"#28224C",accent:"#CC00FF",doorC:"#FF0088",fog:"#0C0A1C",rock:"#10102A",rockHi:"#1A1A3C",rockShadow:"#050310" },
 ]
 const WORLD_NAMES = ["LAS PERRERAS", "FÁBRICA CANINA", "LOS TUBOS", "CTRL. CENTRAL"]
 const WORLD_SUBS = ["Libertad o destino", "Engranajes de opresión", "Las venas del sistema", "El corazón del control"]
@@ -208,19 +208,7 @@ const CP_LOCS: [number, number][] = [[0, 4], [4, 0], [8, 4], [4, 8], [4, 4]]
 const CP_COMPASS = ["OESTE", "NORTE", "ESTE", "SUR", "CENTRO"]
 const CP_ICON = ["◀", "▲", "▶", "▼", "◆"]
 type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string }
-const ALL_CPS: CPDef[] = (() => {
-  const out: CPDef[] = []
-  for (let w = 0; w < NW; w++)
-    for (let i = 0; i < 5; i++) {
-      const [c, r] = CP_LOCS[i]
-      const { x: x0, y: y0 } = ro(w, c, r)
-      out.push({ id: `${w}_${c}_${r}`, w, c, r,
-        x: x0 + RW / 2 - PW / 2, y: y0 + RH - WT - PH,
-        label: `W${w + 1} ${WORLD_NAMES[w].slice(0, 10)} — ${CP_COMPASS[i]}`,
-        icon: CP_ICON[i] })
-    }
-  return out
-})()
+// ALL_CPS se define más abajo, después de getWorldPlats, para poder validar contra plataformas
 const CP_RADIUS = 115  // radio de descubrimiento/uso
 
 // ══════════════════════════════════════════════════════════════
@@ -386,6 +374,11 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     const gx = x0 + udDoorX_rel(w, c, r - 1)
     if (gx - x0 > 0) result.push(solid(x0, y0, gx - x0, WT))
     if (x0 + RW - (gx + DW) > 0) result.push(solid(gx + DW, y0, x0 + RW - (gx + DW), WT))
+    // Bloquear puerta superior del boss room
+    const exU = WORLD_EXITS[w]
+    if (exU[0] === c && exU[1] === r) {
+      result.push({ x: gx, y: y0, w: DW, h: WT, mode: "d", sw: -(w + 1) })
+    }
   }
   const floorY = y0 + RH - WT
   if (!d.D) {
@@ -394,6 +387,11 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     const gx = x0 + udDoorX_rel(w, c, r)
     if (gx - x0 > 0) result.push(solid(x0, floorY, gx - x0, WT))
     if (x0 + RW - (gx + DW) > 0) result.push(solid(gx + DW, floorY, x0 + RW - (gx + DW), WT))
+    // Bloquear puerta inferior del boss room
+    const exD = WORLD_EXITS[w]
+    if (exD[0] === c && exD[1] === r) {
+      result.push({ x: gx, y: floorY, w: DW, h: WT, mode: "d", sw: -(w + 1) })
+    }
   }
   if (!d.L) {
     result.push(solid(x0, y0 + WT, WT, RH - 2 * WT))
@@ -403,6 +401,11 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     const botH = RH - WT - dy - DH
     if (topH > 0) result.push(solid(x0, y0 + WT, WT, topH))
     if (botH > 0) result.push(solid(x0, y0 + dy + DH, WT, botH))
+    // Puerta de entrada al boss room — bloqueada hasta matar todos los enemigos normales
+    const ex = WORLD_EXITS[w]
+    if (ex[0] === c && ex[1] === r) {
+      result.push({ x: x0, y: y0 + dy, w: WT, h: DH, mode: "d", sw: -(w + 1) })
+    }
   }
   if (!d.R) {
     result.push(solid(x0 + RW - WT, y0 + WT, WT, RH - 2 * WT))
@@ -657,6 +660,36 @@ function getWorldPlats(w: number): WPlat[] {
   return plats
 }
 
+// ALL_CPS — validados para que no queden dentro de plataformas sólidas
+const ALL_CPS: CPDef[] = (() => {
+  const out: CPDef[] = []
+  for (let w = 0; w < NW; w++)
+    for (let i = 0; i < 5; i++) {
+      const [c, r] = CP_LOCS[i]
+      const { x: x0, y: y0 } = ro(w, c, r)
+      const cpX = x0 + RW / 2 - PW / 2
+      let cpY = y0 + RH - WT - PH  // posición base: suelo de la sala
+      // Validar contra todas las plataformas sólidas de la sala
+      const roomPlats = [...makeRoomWalls(w, c, r), ...makeInternalPlats(w, c, r)]
+        .filter(p => p.mode === "s")
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const hit = roomPlats.find(p =>
+          cpX < p.x + p.w && cpX + PW > p.x &&
+          cpY < p.y + p.h && cpY + PH > p.y
+        )
+        if (!hit) break
+        cpY = hit.y - PH - 1  // subir por encima de la plataforma
+      }
+      // Nunca salirse del interior de la sala
+      cpY = Math.max(y0 + WT + 4, Math.min(cpY, y0 + RH - WT - PH))
+      out.push({ id: `${w}_${c}_${r}`, w, c, r,
+        x: cpX, y: cpY,
+        label: `W${w + 1} ${WORLD_NAMES[w].slice(0, 10)} — ${CP_COMPASS[i]}`,
+        icon: CP_ICON[i] })
+    }
+  return out
+})()
+
 // Función que reemplaza a BASE_PLATS en todas sus referencias.
 // Devuelve únicamente los mundos que están activos/cargados.
 function getActivePlatsForWorlds(loadedWorlds: Set<number>): WPlat[] {
@@ -671,10 +704,31 @@ function getActivePlatsForWorlds(loadedWorlds: Set<number>): WPlat[] {
 const _WORLD_CRATE_DEFS: (Array<{ id: number; x: number; y: number; w: number; h: number }> | null)[] = [null, null, null, null]
 let _crateIdCounter = 0  // ID global, persistente entre mundos
 
+// Encuentra todas las posiciones Y donde una caja puede reposar sobre una superficie sólida
+function getCrateValidSurfaces(roomPlats: WPlat[], cx: number, cW: number, cH: number, roomTop: number, roomBot: number): number[] {
+  // Plataformas sólidas que se solapan horizontalmente con la caja
+  const hOv = roomPlats.filter(p =>
+    p.mode === "s" && cx < p.x + p.w && cx + cW > p.x
+  ).sort((a, b) => a.y - b.y)
+
+  const surfaces: number[] = []
+  for (const plat of hOv) {
+    const cy = plat.y - cH  // la caja reposa sobre el tope de esta plataforma
+    if (cy < roomTop || cy + cH > roomBot + 2) continue
+    // Verificar que la caja en esa Y no colisione con otra plataforma
+    const blocked = hOv.some(other =>
+      other !== plat && cy < other.y + other.h && cy + cH > other.y
+    )
+    if (!blocked) surfaces.push(cy)
+  }
+  return surfaces
+}
+
 function getWorldCrateDefs(w: number) {
   if (_WORLD_CRATE_DEFS[w]) return _WORLD_CRATE_DEFS[w]!
-  const xSlots = [0.12, 0.28, 0.50, 0.68, 0.84]
+  const xSlots = [0.12, 0.28, 0.44, 0.62, 0.80]
   const cr: Array<{ id: number; x: number; y: number; w: number; h: number }> = []
+  const worldPlats = getWorldPlats(w)
 
   for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
     const isKennel = KENNEL_ROOMS.some(k => k.w === w && k.c === c && k.r === r)
@@ -683,18 +737,31 @@ function getWorldCrateDefs(w: number) {
     const hash = (w * 37 + c * 13 + r * 7) % 10
     if (hash < 2 && !isBoss) continue
     const count = isBoss ? 2 : (hash >= 7 ? 2 : 1)
+    const { x: x0, y: y0 } = ro(w, c, r)
+    const roomPlats = worldPlats.filter(p =>
+      p.mode === "s" && p.x < x0 + RW && p.x + p.w > x0 && p.y < y0 + RH && p.y + p.h > y0
+    )
+    const roomTop = y0 + WT + 4, roomBot = y0 + RH - WT
+
     for (let i = 0; i < count; i++) {
       const slotIdx = (hash + i * 3) % xSlots.length
       const rx = xSlots[slotIdx]
-      const { x: x0, y: y0 } = ro(w, c, r)
-      const floorY = y0 + RH - WT
-      const platOffs = [0, 110, 240, 370]
-      const rYf = platOffs[(hash + i * 2) % platOffs.length]
-      const crateY = floorY - rYf - 44
-      cr.push({ id: _crateIdCounter++, x: x0 + WT + Math.round((RW - 2 * WT - 44) * rx), y: crateY, w: 44, h: 44 })
+      const crateX = x0 + WT + Math.round((RW - 2 * WT - 44) * rx)
+
+      // Encontrar todas las superficies válidas para esta X
+      const surfaces = getCrateValidSurfaces(roomPlats, crateX, 44, 44, roomTop, roomBot)
+      if (surfaces.length === 0) continue  // sin superficie válida → no colocar caja
+
+      // Elegir surface de forma determinista usando el hash
+      // Preferir alturas medias (no siempre el suelo)
+      const sorted = [...surfaces].sort((a, b) => a - b)  // más alto (menor Y) primero
+      const pickIdx = (hash + i * 5) % sorted.length
+      const crateY = sorted[pickIdx]
+
+      cr.push({ id: _crateIdCounter++, x: crateX, y: crateY, w: 44, h: 44 })
     }
   }
-  // Kennels del mundo
+  // Kennels del mundo — cajas en el suelo
   const kr = KENNEL_ROOMS[w]
   const { x: kx0, y: ky0 } = ro(kr.w, kr.c, kr.r)
   const kfly = ky0 + RH - WT
@@ -944,13 +1011,20 @@ let _apCache2: WPlat[] | null = null
 let _apLoadedKey = ""  // string de mundos cargados para invalidar cache
 
 function activePlats(g: G): WPlat[] {
-  const key = [...g.loadedWorlds].sort().join(",") + "|" + g.cw.size
+  const key = [...g.loadedWorlds].sort().join(",") + "|" + g.cw.size + "|" + g.dead.size
   if (_apCache2 && _apLoadedKey === key) return _apCache2
 
   const allPlats: WPlat[] = []
   for (const w of g.loadedWorlds) allPlats.push(...getWorldPlats(w))
 
-  _apCache2 = allPlats.filter(p => p.mode !== "d" || (p.sw !== undefined && !g.cw.has(p.sw)))
+  _apCache2 = allPlats.filter(p => {
+    if (p.mode !== "d") return true
+    if (p.sw === undefined) return true
+    if (p.sw >= 0) return !g.cw.has(p.sw)  // puerta salida: sólida hasta mundo completado
+    // puerta entrada boss (sw = -(w+1)): sólida hasta matar todos los enemigos normales
+    const bossW = -(p.sw + 1)
+    return !areRegularEnemiesDead(g, bossW)
+  })
   _apLoadedKey = key
   return _apCache2
 }
@@ -1086,6 +1160,19 @@ function checkWorldClear(g: G, w: number) {
   if (allDead) { g.cw.add(w); if (g.cw.size >= NW) setTimeout(() => { g.won = true }, 1200) }
 }
 
+// Helper: todos los enemigos normales (no boss) del mundo w están muertos
+function areRegularEnemiesDead(g: G, w: number): boolean {
+  const [bc, br] = WORLD_EXITS[w]
+  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+    if (c === bc && r === br) continue  // ignorar sala del boss
+    const sp = getEnemySpawns(w, c, r)
+    for (let i = 0; i < sp.length; i++) {
+      if (!isSpawnDead(g.dead, w, c, r, i)) return false
+    }
+  }
+  return true
+}
+
 function breakCrate(g: G, c: Crate) {
   c.active = false; g.dead.add(`crate_${c.id}`)
   const cx2 = c.x + c.w / 2, cy2 = c.y
@@ -1118,7 +1205,7 @@ function tickPlayer(g: G) {
   const k = g.keys, p = g.pl, now = performance.now()
   const STA_RED = 8, STA_DRAIN = 17, STA_RCH_WALK = 12, STA_RCH_IDLE = 22
   const moving = (k["a"] || k["arrowleft"] || k["d"] || k["arrowright"]) && !p.crouching
-  const canRun = !p.exhausted && p.stamina > STA_RED
+  const canRun = !p.exhausted  // drena hasta 0; STA_RED solo se usa para reinicio tras agotamiento
   if (!moving || !canRun) p.runMode = false
   const wantsRun = p.runMode, actuallyRunning = wantsRun && canRun && moving
   if (p.exhausted) {
@@ -2196,96 +2283,96 @@ function drawBg(ctx: CanvasRenderingContext2D, g: G) {
   const px = g.cx * 0.12 | 0, py = g.cy * 0.08 | 0
 
   if (wi === 0) {
-    // ── W0 PERRERAS: silueta de jaulas, rejas y malla de alambre ──
+    // ── W0 PERRERAS: jaulas de alambre, rejas, luz de kennel amarilla ──
     ctx.save()
-    // Barras verticales de jaula (capa lejana)
-    ctx.globalAlpha = 0.07; ctx.fillStyle = "#253020"
+    // Barras verticales de jaula (hierro oxidado)
+    ctx.globalAlpha = 0.08; ctx.fillStyle = "#2A1E0E"
     for (let x = ((130 - (px % 130)) % 130); x < CW + 20; x += 130) {
       ctx.fillRect(x - 5, 0, 10, CH); ctx.fillRect(x - 2, 0, 4, CH)
     }
-    // Barras horizontales de kennel
-    ctx.globalAlpha = 0.05; ctx.fillStyle = "#1E2A18"
+    // Barras horizontales de kennel (hormigón)
+    ctx.globalAlpha = 0.06; ctx.fillStyle = "#221808"
     for (let y = ((90 - (py % 90)) % 90); y < CH + 10; y += 90) {
       ctx.fillRect(0, y - 3, CW, 6)
     }
-    // Malla diagonal (alambre de jaula)
-    ctx.globalAlpha = 0.04; ctx.strokeStyle = "#4AFF00"; ctx.lineWidth = 1
+    // Malla diagonal (alambre oxidado, tonos cálidos)
+    ctx.globalAlpha = 0.04; ctx.strokeStyle = "#C8A000"; ctx.lineWidth = 1
     for (let x = -CH + ((60 - (px % 60)) % 60); x < CW + CH; x += 60) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + CH, CH); ctx.stroke()
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x - CH, CH); ctx.stroke()
     }
-    // Luz de emergencia verde pulsante en el suelo
-    ctx.globalAlpha = 0.06; ctx.fillStyle = "#00FF00"
+    // Luz de kennel amarilla en el suelo (fluorescente sucio)
+    ctx.globalAlpha = 0.07; ctx.fillStyle = "#D4C400"
     ctx.fillRect(0, CH - 6, CW, 3)
     ctx.restore()
   } else if (wi === 1) {
-    // ── W1 FÁBRICA: tuberías industriales, columnas, engranajes ──
+    // ── W1 FÁBRICA: tuberías industriales, columnas, engranajes candentes ──
     ctx.save()
-    // Tuberías horizontales gruesas
-    ctx.globalAlpha = 0.09; ctx.fillStyle = "#1C2030"
+    // Tuberías horizontales gruesas (acero azul-gris)
+    ctx.globalAlpha = 0.09; ctx.fillStyle = "#141C30"
     for (let y = ((160 - (py % 160)) % 160); y < CH; y += 160) {
       ctx.fillRect(0, y, CW, 16)
-      ctx.fillStyle = "#22283A"; ctx.fillRect(0, y + 4, CW, 5)
-      ctx.fillStyle = "#1C2030"
+      ctx.fillStyle = "#1C2440"; ctx.fillRect(0, y + 4, CW, 5)
+      ctx.fillStyle = "#141C30"
     }
-    // Columnas de soporte verticales
-    ctx.globalAlpha = 0.07; ctx.fillStyle = "#181C28"
+    // Columnas de soporte verticales (metal oscuro)
+    ctx.globalAlpha = 0.07; ctx.fillStyle = "#10182C"
     for (let x = ((200 - (px % 200)) % 200); x < CW; x += 200) {
       ctx.fillRect(x - 10, 0, 20, CH)
-      ctx.fillStyle = "#1E2438"; ctx.fillRect(x - 3, 0, 6, CH)
-      ctx.fillStyle = "#181C28"
+      ctx.fillStyle = "#18243E"; ctx.fillRect(x - 3, 0, 6, CH)
+      ctx.fillStyle = "#10182C"
     }
-    // Engranajes (círculos) en el fondo
-    ctx.globalAlpha = 0.05; ctx.strokeStyle = "#FF8800"; ctx.lineWidth = 3
+    // Engranajes (círculos) — naranja horno fundido
+    ctx.globalAlpha = 0.06; ctx.strokeStyle = "#FF5500"; ctx.lineWidth = 3
     const gears = [{ x: 160, y: 200, r: 55 }, { x: 820, y: 360, r: 70 }, { x: 460, y: 110, r: 40 }, { x: 970, y: 480, r: 60 }]
     for (const gp of gears) {
       const gx = ((gp.x - (px * 0.3 | 0) % (CW + 200) + CW * 3) % (CW + 200)) - 100
       ctx.beginPath(); ctx.arc(gx, gp.y, gp.r, 0, Math.PI * 2); ctx.stroke()
       ctx.beginPath(); ctx.arc(gx, gp.y, gp.r * 0.55, 0, Math.PI * 2); ctx.stroke()
     }
-    // Franjas de advertencia en suelo
+    // Franjas de advertencia naranja en suelo
     ctx.globalAlpha = 0.06; ctx.lineWidth = 1
     for (let x = ((20 - (px % 20)) % 20); x < CW; x += 20) {
-      ctx.fillStyle = x % 40 < 20 ? "#FF880022" : "#00000022"
+      ctx.fillStyle = x % 40 < 20 ? "#FF550022" : "#00000022"
       ctx.fillRect(x, CH - 8, 20, 8)
     }
     ctx.restore()
   } else if (wi === 2) {
-    // ── W2 TUBOS: arcos de alcantarilla, tuberías, goteo ──
+    // ── W2 TUBOS: arcos de alcantarilla, tuberías verdes, goteo tóxico ──
     ctx.save()
-    // Arcos de alcantarilla al fondo
-    ctx.globalAlpha = 0.09; ctx.strokeStyle = "#162820"; ctx.lineWidth = 14
+    // Arcos de alcantarilla al fondo (cemento húmedo)
+    ctx.globalAlpha = 0.10; ctx.strokeStyle = "#0C1E10"; ctx.lineWidth = 14
     for (let x = ((450 - (px % 450)) % 450) - 80; x < CW + 120; x += 450) {
       ctx.beginPath(); ctx.arc(x, CH + 40, 340, Math.PI, 0); ctx.stroke()
     }
-    // Tuberías verticales
-    ctx.globalAlpha = 0.07; ctx.strokeStyle = "#1A3028"; ctx.lineWidth = 20
+    // Tuberías verticales (metal verde-musgo)
+    ctx.globalAlpha = 0.08; ctx.strokeStyle = "#142818"; ctx.lineWidth = 20
     for (let x = ((270 - (px % 270)) % 270); x < CW + 30; x += 270) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
-      ctx.lineWidth = 6; ctx.strokeStyle = "#0E1C18"
+      ctx.lineWidth = 6; ctx.strokeStyle = "#0A1C10"
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
-      ctx.lineWidth = 20; ctx.strokeStyle = "#1A3028"
+      ctx.lineWidth = 20; ctx.strokeStyle = "#142818"
     }
-    // Goteo animado de agua
-    ctx.globalAlpha = 0.18; ctx.fillStyle = "#004433"
+    // Goteo animado de líquido tóxico cian
+    ctx.globalAlpha = 0.20; ctx.fillStyle = "#00AA55"
     const t2 = Date.now() * 0.0015
     for (let i = 0; i < 7; i++) {
       const dx = ((i * 151 + (px * 0.5 | 0)) % CW)
       const dy = ((t2 * 60 + i * 88) % (CH + 40)) - 20
       ctx.beginPath(); ctx.ellipse(dx, dy, 2, 4, 0, 0, Math.PI * 2); ctx.fill()
     }
-    // Musgo en las paredes
-    ctx.globalAlpha = 0.08; ctx.fillStyle = "#0A3018"
+    // Musgo en las paredes (verde oscuro)
+    ctx.globalAlpha = 0.09; ctx.fillStyle = "#082A10"
     for (let y = 80; y < CH - 80; y += 140) {
       ctx.fillRect(0, y, 12, 60)
       ctx.fillRect(CW - 12, y + 20, 12, 60)
     }
     ctx.restore()
   } else {
-    // ── W3 CTRL CENTRAL: rascacielos, ventanas de neón, grid urbano ──
+    // ── W3 CTRL CENTRAL: rascacielos de neón magenta, grid digital ──
     ctx.save()
-    // Silueta de edificios nocturnos
-    ctx.globalAlpha = 0.13; ctx.fillStyle = "#0C0A18"
+    // Silueta de edificios distópicos (concreto negro-violeta)
+    ctx.globalAlpha = 0.14; ctx.fillStyle = "#0E0C22"
     const blds = [
       {x:0,w:75,h:380},{x:85,w:55,h:290},{x:150,w:95,h:440},{x:255,w:45,h:300},
       {x:310,w:85,h:490},{x:405,w:38,h:270},{x:455,w:105,h:410},{x:570,w:65,h:370},
@@ -2296,24 +2383,24 @@ function drawBg(ctx: CanvasRenderingContext2D, g: G) {
       const bx = ((b.x - (px * 0.35 | 0) % (CW + 250) + CW * 4) % (CW + 250)) - 120
       ctx.fillRect(bx, CH - b.h, b.w, b.h)
     }
-    // Ventanas iluminadas (neón)
-    ctx.globalAlpha = 0.09
+    // Ventanas iluminadas (neón magenta)
+    ctx.globalAlpha = 0.10
     for (let i = 0; i < 36; i++) {
       const wx = ((i * 97 + (px * 0.35 | 0)) % CW)
       const wy = ((i * 53 + 60) % (CH - 80)) + 40
-      ctx.fillStyle = i % 4 === 0 ? "#CC00FF" : i % 4 === 1 ? "#6600AA" : "#440088"
+      ctx.fillStyle = i % 4 === 0 ? "#CC00FF" : i % 4 === 1 ? "#880099" : "#550066"
       ctx.fillRect(wx, wy, 4, 3)
     }
-    // Grid urbano de fondo
-    ctx.globalAlpha = 0.05; ctx.strokeStyle = "#1A0830"; ctx.lineWidth = 1
+    // Grid digital de fondo (violeta oscuro)
+    ctx.globalAlpha = 0.05; ctx.strokeStyle = "#200A3C"; ctx.lineWidth = 1
     for (let x = ((70 - (px % 70)) % 70); x < CW; x += 70) {
       ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
     }
     for (let y = ((50 - (py % 50)) % 50); y < CH; y += 50) {
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke()
     }
-    // Neón en el horizonte
-    ctx.globalAlpha = 0.06; ctx.fillStyle = "#CC00FF"
+    // Línea de neón en el horizonte (magenta eléctrico)
+    ctx.globalAlpha = 0.07; ctx.fillStyle = "#CC00FF"
     ctx.fillRect(0, CH - 2, CW, 2)
     ctx.restore()
   }
@@ -2334,11 +2421,11 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
   ctx.beginPath(); ctx.rect(sx, sy, w, h); ctx.clip()
 
   if (wi === 0) {
-    // ══ W0 LAS PERRERAS ══ Hormigón sucio, rejas de kennel distópico
-    ctx.fillStyle = "#1A2118"; ctx.fillRect(sx, sy, w, h)
+    // ══ W0 LAS PERRERAS ══ Hormigón sucio y cálido, hierro oxidado
+    ctx.fillStyle = "#221C14"; ctx.fillRect(sx, sy, w, h)
     if (gfx >= 1) {
       const BH = 28, BW = 44
-      ctx.strokeStyle = "#0D130C"; ctx.lineWidth = 1.5
+      ctx.strokeStyle = "#140E08"; ctx.lineWidth = 1.5
       // Hiladas horizontales (world-aligned)
       const yOff = ((wy % BH) + BH) % BH
       for (let ly = BH - yOff; ly < h + BH; ly += BH) {
@@ -2357,87 +2444,87 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
           ctx.stroke()
         }
       }
-      // Borde: luz arriba-izquierda, sombra abajo-derecha
-      ctx.fillStyle = "#2E3D2A99"; ctx.fillRect(sx, sy, w, 2); ctx.fillRect(sx, sy, 2, h)
-      ctx.fillStyle = "#0A0D0999"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      // Borde: luz arriba-izquierda, sombra abajo-derecha (cálido)
+      ctx.fillStyle = "#3C2E2099"; ctx.fillRect(sx, sy, w, 2); ctx.fillRect(sx, sy, 2, h)
+      ctx.fillStyle = "#0A080699"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
       if (gfx >= 2) {
-        // Manchas de mugre / óxido (hash = var. por plataforma)
+        // Manchas de mugre / óxido cálido
         const rx = sx + (hash * 17 % Math.max(1, w - 20))
         const ry = sy + (hash * 11 % Math.max(1, h - 14))
-        ctx.fillStyle = hash < 5 ? "#3A280A33" : hash < 9 ? "#1A2A1255" : "#12100622"
+        ctx.fillStyle = hash < 5 ? "#3A280A33" : hash < 9 ? "#2A1E0833" : "#1A120433"
         ctx.fillRect(rx, ry, 16 + (hash % 10), 10 + (hash % 7))
-        // Malla metálica en el borde superior (reja de kennel)
+        // Malla metálica en el borde superior (reja de kennel oxidada)
         if (h > 50) {
-          ctx.strokeStyle = "#3D5030BB"; ctx.lineWidth = 1
+          ctx.strokeStyle = "#503C20BB"; ctx.lineWidth = 1
           for (let mx = sx; mx < sx + w; mx += 8) {
             ctx.beginPath(); ctx.moveTo(mx, sy); ctx.lineTo(mx, sy + 10); ctx.stroke()
           }
           ctx.beginPath(); ctx.moveTo(sx, sy + 5); ctx.lineTo(sx + w, sy + 5); ctx.stroke()
         }
-        // Barra metálica horizontal ocasional
+        // Barra de hierro horizontal ocasional
         if (hash === 3 || hash === 7 || hash === 11) {
-          ctx.fillStyle = "#38482EBB"; ctx.fillRect(sx + w * 0.06, sy + h * 0.47, w * 0.88, 3)
-          ctx.fillStyle = "#2A361E55"; ctx.fillRect(sx + w * 0.06, sy + h * 0.47, w * 0.88, 1)
+          ctx.fillStyle = "#503C20BB"; ctx.fillRect(sx + w * 0.06, sy + h * 0.47, w * 0.88, 3)
+          ctx.fillStyle = "#3A2A1055"; ctx.fillRect(sx + w * 0.06, sy + h * 0.47, w * 0.88, 1)
         }
       }
-      // Halo verde distópico (1 px en el tope)
-      ctx.fillStyle = "#4AFF0022"; ctx.fillRect(sx, sy, w, 1)
+      // Halo luz kennel amarilla (1 px en el tope)
+      ctx.fillStyle = "#D4C40022"; ctx.fillRect(sx, sy, w, 1)
     }
 
   } else if (wi === 1) {
-    // ══ W1 FÁBRICA CANINA ══ Paneles de acero industrial, empresa opresora
-    ctx.fillStyle = "#141828"; ctx.fillRect(sx, sy, w, h)
+    // ══ W1 FÁBRICA CANINA ══ Paneles de acero frío, metal industrial
+    ctx.fillStyle = "#0E1626"; ctx.fillRect(sx, sy, w, h)
     if (gfx >= 1) {
       const PH = 36, PW = 52
-      ctx.strokeStyle = "#0A0C14"; ctx.lineWidth = 1
+      ctx.strokeStyle = "#080C14"; ctx.lineWidth = 1
       const yOff = ((wy % PH) + PH) % PH
       // Divisiones horizontales de panel
       for (let ly = PH - yOff; ly < h + PH; ly += PH) {
         ctx.beginPath(); ctx.moveTo(sx, sy + ly); ctx.lineTo(sx + w, sy + ly); ctx.stroke()
         // Reflejo metálico en la parte superior de cada panel
-        ctx.fillStyle = "#1E2840"; ctx.fillRect(sx, sy + ly - PH + 1, w, 3)
-        ctx.fillStyle = "#1A2238"; ctx.fillRect(sx, sy + ly - PH + 4, w, 2)
+        ctx.fillStyle = "#182236"; ctx.fillRect(sx, sy + ly - PH + 1, w, 3)
+        ctx.fillStyle = "#142034"; ctx.fillRect(sx, sy + ly - PH + 4, w, 2)
       }
       // Divisiones verticales de panel
       const xOff = ((wx % PW) + PW) % PW
       for (let lx = PW - xOff; lx < w + PW; lx += PW) {
         ctx.beginPath(); ctx.moveTo(sx + lx, sy); ctx.lineTo(sx + lx, sy + h); ctx.stroke()
       }
-      // Bordes biselados metálicos
-      ctx.fillStyle = "#2A324899"; ctx.fillRect(sx, sy, w, 3); ctx.fillRect(sx, sy, 3, h)
-      ctx.fillStyle = "#06070C99"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      // Bordes biselados metálicos (azul-gris frío)
+      ctx.fillStyle = "#263A5499"; ctx.fillRect(sx, sy, w, 3); ctx.fillRect(sx, sy, 3, h)
+      ctx.fillStyle = "#04060A99"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
       if (gfx >= 2) {
-        // Remaches en intersecciones de paneles
-        ctx.fillStyle = "#323C55"
+        // Remaches en intersecciones de paneles (metal oscuro)
+        ctx.fillStyle = "#2A3650"
         for (let ly = PH - yOff; ly < h + PH; ly += PH) {
           for (let lx = PW - xOff; lx < w + PW; lx += PW) {
             ctx.beginPath(); ctx.arc(sx + lx - 5, sy + ly - 5, 2.5, 0, Math.PI * 2); ctx.fill()
             ctx.beginPath(); ctx.arc(sx + lx + 5, sy + ly - 5, 2.5, 0, Math.PI * 2); ctx.fill()
           }
         }
-        // Franjas de advertencia en borde inferior
+        // Franjas de advertencia naranja en borde inferior
         const strW = 8
         const xOff2 = ((wx % (strW * 2)) + strW * 2) % (strW * 2)
         for (let lx = -xOff2; lx < w; lx += strW * 2) {
-          ctx.fillStyle = "#FF880028"; ctx.fillRect(sx + lx, sy + h - 5, strW, 5)
+          ctx.fillStyle = "#FF550028"; ctx.fillRect(sx + lx, sy + h - 5, strW, 5)
         }
         // Etiqueta de panel (ocasional)
         if (hash < 3 && w > 50) {
-          ctx.strokeStyle = "#FF880033"; ctx.lineWidth = 1
+          ctx.strokeStyle = "#FF550033"; ctx.lineWidth = 1
           ctx.strokeRect(sx + 6, sy + 8, 22, 10)
-          ctx.fillStyle = "#FF880022"; ctx.fillRect(sx + 7, sy + 9, 20, 8)
+          ctx.fillStyle = "#FF550022"; ctx.fillRect(sx + 7, sy + 9, 20, 8)
         }
       }
       // Borde naranja industrial en el tope
-      ctx.fillStyle = "#FF880028"; ctx.fillRect(sx, sy, w, 1)
+      ctx.fillStyle = "#FF550028"; ctx.fillRect(sx, sy, w, 1)
     }
 
   } else if (wi === 2) {
-    // ══ W2 LOS TUBOS ══ Ladrillo húmedo de alcantarilla, musgo, filtraciones
-    ctx.fillStyle = "#101814"; ctx.fillRect(sx, sy, w, h)
+    // ══ W2 LOS TUBOS ══ Ladrillo húmedo de alcantarilla, musgo, filtraciones tóxicas
+    ctx.fillStyle = "#0C1610"; ctx.fillRect(sx, sy, w, h)
     if (gfx >= 1) {
       const BH = 20, BW = 34
-      ctx.strokeStyle = "#08100C"; ctx.lineWidth = 1
+      ctx.strokeStyle = "#080E08"; ctx.lineWidth = 1
       // Hiladas de ladrillo (world-aligned)
       const yOff = ((wy % BH) + BH) % BH
       for (let ly = BH - yOff; ly < h + BH; ly += BH) {
@@ -2456,14 +2543,14 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
           ctx.stroke()
         }
       }
-      // Bordes: tonos húmedos
-      ctx.fillStyle = "#1C2E2499"; ctx.fillRect(sx, sy, w, 2); ctx.fillRect(sx, sy, 2, h)
-      ctx.fillStyle = "#06090799"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      // Bordes: tonos húmedos pantanosos
+      ctx.fillStyle = "#182A1C99"; ctx.fillRect(sx, sy, w, 2); ctx.fillRect(sx, sy, 2, h)
+      ctx.fillStyle = "#06080699"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
       if (gfx >= 2) {
-        // Manchas de humedad / eflorescencia
+        // Manchas de humedad / eflorescencia (verde musgo)
         const rx = sx + (hash * 13 % Math.max(1, w - 16))
         const ry = sy + (hash * 9 % Math.max(1, h - 10))
-        ctx.fillStyle = "#0A2A1833"; ctx.fillRect(rx, ry, 14 + (hash % 12), 9 + (hash % 6))
+        ctx.fillStyle = "#082A1433"; ctx.fillRect(rx, ry, 14 + (hash % 12), 9 + (hash % 6))
         // Musgo en el borde inferior
         if (h > 30) {
           const nMoss = Math.floor(w / 14)
@@ -2484,35 +2571,35 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
         }
         // Conector de tubería en extremo (hash par)
         if (hash % 5 === 0 && w > 60) {
-          ctx.fillStyle = "#1C2C22"; ctx.fillRect(sx + w - 10, sy + h * 0.25, 10, h * 0.5)
-          ctx.strokeStyle = "#0A1810"; ctx.lineWidth = 1
+          ctx.fillStyle = "#183020"; ctx.fillRect(sx + w - 10, sy + h * 0.25, 10, h * 0.5)
+          ctx.strokeStyle = "#081A0C"; ctx.lineWidth = 1
           ctx.strokeRect(sx + w - 10, sy + h * 0.25, 10, h * 0.5)
         }
       }
-      // Borde teal húmedo en el tope
-      ctx.fillStyle = "#00CCAA18"; ctx.fillRect(sx, sy, w, 1)
+      // Borde cian tóxico en el tope (filtración química)
+      ctx.fillStyle = "#00DD8820"; ctx.fillRect(sx, sy, w, 1)
     }
 
   } else {
-    // ══ W3 CTRL. CENTRAL ══ Fachada de concreto urbano distópico, New York
-    ctx.fillStyle = "#0C0A17"; ctx.fillRect(sx, sy, w, h)
+    // ══ W3 CTRL. CENTRAL ══ Concreto digital distópico, neón magenta
+    ctx.fillStyle = "#100E28"; ctx.fillRect(sx, sy, w, h)
     if (gfx >= 1) {
       const PH = 32, PW = 60
-      ctx.strokeStyle = "#07060E"; ctx.lineWidth = 1
+      ctx.strokeStyle = "#090810"; ctx.lineWidth = 1
       const yOff = ((wy % PH) + PH) % PH
       // Bloques de hormigón urbano (pisos de fachada)
       for (let ly = PH - yOff; ly < h + PH; ly += PH) {
         ctx.beginPath(); ctx.moveTo(sx, sy + ly); ctx.lineTo(sx + w, sy + ly); ctx.stroke()
-        ctx.fillStyle = "#100E1C22"; ctx.fillRect(sx, sy + ly - 2, w, 2)
+        ctx.fillStyle = "#1A183A22"; ctx.fillRect(sx, sy + ly - 2, w, 2)
       }
       // Divisiones verticales
       const xOff = ((wx % PW) + PW) % PW
       for (let lx = PW - xOff; lx < w + PW; lx += PW) {
         ctx.beginPath(); ctx.moveTo(sx + lx, sy); ctx.lineTo(sx + lx, sy + h); ctx.stroke()
       }
-      // Bordes: luz arriba, sombra abajo
-      ctx.fillStyle = "#1E1A3099"; ctx.fillRect(sx, sy, w, 3); ctx.fillRect(sx, sy, 2, h)
-      ctx.fillStyle = "#04030899"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
+      // Bordes: luz arriba (violeta), sombra abajo
+      ctx.fillStyle = "#28224499"; ctx.fillRect(sx, sy, w, 3); ctx.fillRect(sx, sy, 2, h)
+      ctx.fillStyle = "#05030A99"; ctx.fillRect(sx + w - 2, sy, 2, h); ctx.fillRect(sx, sy + h - 2, w, 2)
       if (gfx >= 2) {
         // Ventanas oscuras en bloques grandes (fachada de edificio)
         if (h > 58 && w > 70) {
@@ -2520,10 +2607,10 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
           for (let i = 0; i < numW; i++) {
             const winX = sx + 8 + i * 28, winY = sy + 10
             const lit = ((hash + i * 5) % 7) === 0
-            ctx.fillStyle = lit ? "#AA00EE14" : "#050409"
+            ctx.fillStyle = lit ? "#BB00EE20" : "#07050E"
             ctx.fillRect(winX, winY, 18, 13)
             if (lit) {
-              ctx.strokeStyle = "#CC00FF33"; ctx.lineWidth = 0.5
+              ctx.strokeStyle = "#CC00FF44"; ctx.lineWidth = 0.5
               ctx.strokeRect(winX, winY, 18, 13)
             }
           }
@@ -2543,9 +2630,9 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
           ctx.strokeRect(sx + 3, sy + 3, w - 6, h - 6)
         }
       }
-      // Brillo de neón morado en el tope (2 px degradado)
-      ctx.fillStyle = "#CC00FF2A"; ctx.fillRect(sx, sy, w, 1)
-      ctx.fillStyle = "#CC00FF14"; ctx.fillRect(sx, sy + 1, w, 1)
+      // Brillo de neón magenta en el tope (2 px)
+      ctx.fillStyle = "#CC00FF30"; ctx.fillRect(sx, sy, w, 1)
+      ctx.fillStyle = "#CC00FF18"; ctx.fillRect(sx, sy + 1, w, 1)
     }
   }
   ctx.restore()
@@ -2554,39 +2641,39 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
 // ── Plataforma atravesable: estilo por mundo ─────────────────────────────────
 function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, gfx: number) {
   if (wi === 0) {
-    // Perrera: barra de reja metálica oxidada
-    ctx.fillStyle = "#253020BB"; ctx.fillRect(sx, sy, w, 5)
-    ctx.fillStyle = "#2E4026"; ctx.fillRect(sx, sy, w, 2)
+    // Perrera: barra de reja herrumbrada, tono óxido cálido
+    ctx.fillStyle = "#3A2C18BB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#4A3820"; ctx.fillRect(sx, sy, w, 2)
     if (gfx >= 1) {
-      ctx.fillStyle = "#4AFF001A"; ctx.fillRect(sx, sy, w, h)
+      ctx.fillStyle = "#D4C4001A"; ctx.fillRect(sx, sy, w, h)
       for (let bx = sx; bx < sx + w; bx += 7) {
-        ctx.fillStyle = "#354A2855"; ctx.fillRect(bx, sy, 2, 5)
+        ctx.fillStyle = "#60501855"; ctx.fillRect(bx, sy, 2, 5)
       }
     }
   } else if (wi === 1) {
-    // Fábrica: pasarela metálica con rejilla antideslizante
-    ctx.fillStyle = "#1E2438BB"; ctx.fillRect(sx, sy, w, 5)
-    ctx.fillStyle = "#2A3050"; ctx.fillRect(sx, sy, w, 2)
+    // Fábrica: pasarela metálica azul-gris, bordes naranja advertencia
+    ctx.fillStyle = "#1A2A40BB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#263A58"; ctx.fillRect(sx, sy, w, 2)
     if (gfx >= 1) {
-      ctx.fillStyle = "#FF88001A"; ctx.fillRect(sx, sy, w, h)
+      ctx.fillStyle = "#FF55001A"; ctx.fillRect(sx, sy, w, h)
       for (let bx = sx; bx < sx + w; bx += 10) {
-        ctx.fillStyle = "#30386044"; ctx.fillRect(bx, sy, 1, 5)
+        ctx.fillStyle = "#2A3C5C44"; ctx.fillRect(bx, sy, 1, 5)
       }
-      ctx.fillStyle = "#FF880055"; ctx.fillRect(sx, sy, 5, 2)
-      ctx.fillStyle = "#FF880055"; ctx.fillRect(sx + w - 5, sy, 5, 2)
+      ctx.fillStyle = "#FF550055"; ctx.fillRect(sx, sy, 5, 2)
+      ctx.fillStyle = "#FF550055"; ctx.fillRect(sx + w - 5, sy, 5, 2)
     }
   } else if (wi === 2) {
-    // Tubos: tubería horizontal de alcantarilla
-    ctx.fillStyle = "#182822BB"; ctx.fillRect(sx, sy, w, 5)
-    ctx.fillStyle = "#243830"; ctx.fillRect(sx, sy, w, 2)
+    // Tubos: tubería horizontal oxidada con borde cian tóxico
+    ctx.fillStyle = "#142818BB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#1E3820"; ctx.fillRect(sx, sy, w, 2)
     if (gfx >= 1) {
-      ctx.fillStyle = "#00CCAA18"; ctx.fillRect(sx, sy, w, h)
-      ctx.fillStyle = "#00CCAA44"; ctx.fillRect(sx, sy, w, 1)
+      ctx.fillStyle = "#00DD8818"; ctx.fillRect(sx, sy, w, h)
+      ctx.fillStyle = "#00DD8840"; ctx.fillRect(sx, sy, w, 1)
     }
   } else {
-    // Ctrl Central: repisa de fachada urbana con neón
-    ctx.fillStyle = "#14122ABB"; ctx.fillRect(sx, sy, w, 5)
-    ctx.fillStyle = "#1E1A34"; ctx.fillRect(sx, sy, w, 2)
+    // Ctrl Central: repisa de concreto digital, brillo magenta
+    ctx.fillStyle = "#18163ABB"; ctx.fillRect(sx, sy, w, 5)
+    ctx.fillStyle = "#201E48"; ctx.fillRect(sx, sy, w, 2)
     if (gfx >= 1) {
       ctx.fillStyle = "#CC00FF18"; ctx.fillRect(sx, sy, w, h)
       ctx.fillStyle = "#CC00FF44"; ctx.fillRect(sx, sy, w, 1)
@@ -2607,11 +2694,21 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
     // Puerta sellada
     if (p.mode === "d") {
       const t = now * 0.003
-      ctx.fillStyle = th.doorC + "BB"; ctx.fillRect(sx, sy, p.w, p.h)
-      ctx.fillStyle = `rgba(255,80,0,${0.3 + 0.3 * Math.sin(t)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-      ctx.strokeStyle = th.doorC; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
-      ctx.fillStyle = "#FFF"; ctx.font = "bold 10px monospace"; ctx.textAlign = "center"
-      ctx.fillText("██SELLADO██", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
+      const isBossEntrance = p.sw !== undefined && p.sw < 0
+      if (isBossEntrance) {
+        // Puerta roja intensa — bloqueada hasta matar enemigos normales
+        ctx.fillStyle = "#3A0000BB"; ctx.fillRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(200,0,0,${0.5 + 0.4 * Math.sin(t * 1.8)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
+        ctx.strokeStyle = "#FF2200"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = "#FF4400"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚠BOSS⚠", sx + p.w / 2, sy + p.h / 2 + 3); ctx.textAlign = "left"
+      } else {
+        ctx.fillStyle = th.doorC + "BB"; ctx.fillRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(255,80,0,${0.3 + 0.3 * Math.sin(t)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
+        ctx.strokeStyle = th.doorC; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = "#FFF"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("██SELLADO██", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
+      }
       continue
     }
 
@@ -2699,7 +2796,7 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
       }
       // Hueso decorativo encima (si descubierto y no activo)
       if (discovered && !isSpawn) {
-        ctx.fillStyle = th.rockHi + "99"; ctx.font = "10px monospace"; ctx.textAlign = "center"
+        ctx.fillStyle = th.rockHi + "99"; ctx.font = "10px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("🦴", sx, sy - 7); ctx.textAlign = "left"
       }
     }
@@ -2707,9 +2804,9 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
     // ── Estrella flotante + nombre cuando es spawn activo ──
     if (isSpawn) {
       const bounce = Math.sin(t * 2) * 3
-      ctx.fillStyle = th.accent; ctx.font = "bold 15px monospace"; ctx.textAlign = "center"
+      ctx.fillStyle = th.accent; ctx.font = "bold 16px 'Courier New',monospace"; ctx.textAlign = "center"
       ctx.fillText("★", sx, sy - (isKennel ? 68 : 38) + bounce)
-      ctx.font = "7px monospace"; ctx.fillStyle = th.accent + "BB"
+      ctx.font = "9px 'Courier New',monospace"; ctx.fillStyle = th.accent + "BB"
       ctx.fillText(cp.icon + " RESPAWN", sx, sy - (isKennel ? 78 : 48) + bounce)
       ctx.textAlign = "left"
     }
@@ -2718,7 +2815,7 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
     if (!discovered && near) {
       ctx.globalAlpha = pulse; ctx.fillStyle = "rgba(0,0,0,0.85)"
       ctx.beginPath(); ctx.roundRect(sx - 60, sy - 56, 120, 22, 4); ctx.fill()
-      ctx.fillStyle = "#FFDD88"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+      ctx.fillStyle = "#FFDD88"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
       ctx.fillText("¡ NUEVO CHECKPOINT !", sx, sy - 40)
       ctx.textAlign = "left"; ctx.globalAlpha = 1
     }
@@ -2729,10 +2826,10 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
       ctx.globalAlpha = pulse
       ctx.fillStyle = "rgba(0,0,0,0.82)"; ctx.beginPath()
       ctx.roundRect(sx - 76, sy - 68, 152, canTP ? 42 : 26, 5); ctx.fill()
-      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 10px monospace"; ctx.textAlign = "center"
+      ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
       ctx.fillText(!isSpawn ? "[E]  GUARDAR AQUÍ" : "★  PUNTO ACTIVO", sx, sy - 50)
       if (canTP) {
-        ctx.fillStyle = th.accent; ctx.font = "9px monospace"
+        ctx.fillStyle = th.accent; ctx.font = "9px 'Courier New',monospace"
         ctx.fillText("[T]  TELETRANSPORTAR", sx, sy - 36)
       }
       ctx.textAlign = "left"; ctx.globalAlpha = 1
@@ -2743,17 +2840,18 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
 // ── Menú de teletransportación ───────────────────────────────────────────────
 function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
   if (!g.tpMenu || !g.tpMenu.open) return
+  const th = THEMES[getWorldAtX(g.cx)]
   const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
   const mW = 320, mH = Math.min(discovered.length * 28 + 64, CH - 80)
   const mX = (CW - mW) / 2, mY = (CH - mH) / 2
 
   // Fondo del menú
   ctx.fillStyle = "rgba(0,0,0,0.92)"; ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 10); ctx.fill()
-  ctx.strokeStyle = "#7CFC00AA"; ctx.lineWidth = 1.5; ctx.strokeRect(mX, mY, mW, mH)
+  ctx.strokeStyle = th.accent + "AA"; ctx.lineWidth = 1.5; ctx.strokeRect(mX, mY, mW, mH)
   // Título
-  ctx.fillStyle = "#7CFC00"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"
+  ctx.fillStyle = th.accent; ctx.font = "bold 12px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("⚡  TELETRANSPORTACIÓN", mX + mW / 2, mY + 20)
-  ctx.fillStyle = "#3A5A3A"; ctx.font = "8px monospace"
+  ctx.fillStyle = "#3A5A3A"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText("↑↓ navegar  ·  ENTER confirmar  ·  ESC cerrar", mX + mW / 2, mY + 34)
   ctx.textAlign = "left"
 
@@ -2770,7 +2868,7 @@ function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
       ctx.fillStyle = th.accent + "22"; ctx.beginPath(); ctx.roundRect(mX + 6, iy, mW - 12, itemH - 2, 4); ctx.fill()
       ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1; ctx.strokeRect(mX + 6, iy, mW - 12, itemH - 2)
     }
-    ctx.fillStyle = isSelected ? th.accent : "#666666"; ctx.font = "bold 9px monospace"
+    ctx.fillStyle = isSelected ? th.accent : "#666666"; ctx.font = "bold 9px 'Courier New',monospace"
     ctx.fillText(`${cp.icon}  ${cp.label}`, mX + 16, iy + 17)
   }
 }
@@ -2851,15 +2949,15 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       }
     }
     ctx.globalAlpha = 1
-    if (!e.dying) {
+    // Barra de HP sobre la cabeza — solo enemigos normales (el boss usa la barra del HUD)
+    if (!e.dying && !e.boss) {
       const hpR = Math.max(0, e.hp) / e.mhp
       ctx.fillStyle = "rgba(0,0,0,.65)"; ctx.fillRect(sx, sy - 11, e.w, 8)
       ctx.fillStyle = hpR > 0.5 ? "#00CC44" : hpR > 0.25 ? "#FFAA00" : "#FF2222"
       ctx.fillRect(sx + 1, sy - 10, Math.max(0, (e.w - 2) * hpR), 6)
-      if (e.boss) { ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1; ctx.strokeRect(sx, sy - 11, e.w, 8) }
     }
     if (e.alert && e.state === "chase" && !e.dying) {
-      ctx.fillStyle = "#FFD700"; ctx.font = `bold ${e.boss ? 20 : 15}px monospace`; ctx.textAlign = "center"
+      ctx.fillStyle = "#FFD700"; ctx.font = `bold ${e.boss ? 20 : 15}px 'Courier New',monospace`; ctx.textAlign = "center"
       ctx.fillText("!", sx + e.w / 2, sy - (e.boss ? 18 : 13)); ctx.textAlign = "left"
     }
   }
@@ -2924,7 +3022,7 @@ function drawDrops(ctx: CanvasRenderingContext2D, g: G) {
     } else {
       const t = Date.now() * .003; ctx.save(); ctx.translate(sx + 10, sy + 10); ctx.rotate(t)
       ctx.fillStyle = "#F5DEB3"; ctx.fillRect(-10, -2, 20, 4); ctx.fillRect(-2, -10, 4, 20); ctx.restore()
-      ctx.fillStyle = "#FFF"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.fillText("+10", sx + 10, sy - 2); ctx.textAlign = "left"
+      ctx.fillStyle = "#FFF"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText("+10", sx + 10, sy - 2); ctx.textAlign = "left"
     }
   }
 }
@@ -2978,7 +3076,7 @@ function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
     if (kr.c === c && kr.r === r) { ctx.fillStyle = g.checkpoint.w === curW ? "#FFD700" : "#AAAAAA"; ctx.fillRect(rx + rw / 2 - 1, ry + 1, 2, rh - 2) }
     if (large) {
       const nCr = getCratesInRoom(curW, c, r, g)
-      if (nCr > 0) { ctx.fillStyle = "#FFEE55CC"; ctx.font = "bold 7px monospace"; ctx.textAlign = "right"; ctx.fillText(`■${nCr}`, rx + rw - 1, ry + rh - 1); ctx.textAlign = "left" }
+      if (nCr > 0) { ctx.fillStyle = "#FFEE55CC"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`■${nCr}`, rx + rw - 1, ry + rh - 1); ctx.textAlign = "left" }
     }
     const dSz = Math.max(2, Math.round(Math.min(rw, rh) * 0.55))
     if (doors.R && c < NC - 1) { ctx.fillStyle = g.explored.has(`${curW}_${c + 1}_${r}`) ? doorCol : "rgba(255,255,255,0.9)"; ctx.fillRect(rx + rw - 2, ry + Math.round((rh - dSz) / 2), 2, dSz) }
@@ -2986,12 +3084,27 @@ function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
     if (doors.L && c > 0) { ctx.fillStyle = g.explored.has(`${curW}_${c - 1}_${r}`) ? doorCol : "rgba(255,255,255,0.9)"; ctx.fillRect(rx, ry + Math.round((rh - dSz) / 2), 2, dSz) }
     if (doors.U && r > 0) { ctx.fillStyle = g.explored.has(`${curW}_${c}_${r - 1}`) ? doorCol : "rgba(255,255,255,0.9)"; ctx.fillRect(rx + Math.round((rw - dSz) / 2), ry, dSz, 2) }
   }
+  // ── Iconos de checkpoints descubiertos en el minimap ──────────────────
+  for (const cp of ALL_CPS) {
+    if (cp.w !== curW) continue
+    if (!g.discoveredCPs.has(cp.id)) continue
+    const cpRx = gx + cp.c * (rw + gap) + Math.round(rw / 2)
+    const cpRy = gy + cp.r * (rh + gap) + Math.round(rh / 2)
+    const isActive = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
+    // Fondo del icono
+    ctx.fillStyle = isActive ? th.accent : (large ? "#FFD700AA" : "#FFD70088")
+    ctx.beginPath(); ctx.arc(cpRx, cpRy, large ? 3.5 : 2.2, 0, Math.PI * 2); ctx.fill()
+    if (isActive) {
+      ctx.strokeStyle = "#FFF"; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.arc(cpRx, cpRy, large ? 5 : 3.5, 0, Math.PI * 2); ctx.stroke()
+    }
+  }
   const plRx = gx + curC * (rw + gap) + Math.round(rw / 2), plRy = gy + curR * (rh + gap) + Math.round(rh / 2)
   ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(plRx, plRy, large ? 3.5 : 2.5, 0, Math.PI * 2); ctx.fill()
   ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.stroke()
-  ctx.fillStyle = th.accent + "DD"; ctx.font = `bold ${large ? 8 : 7}px monospace`; ctx.textAlign = "center"
+  ctx.fillStyle = th.accent + "DD"; ctx.font = `bold ${large ? 8 : 7}px 'Courier New',monospace`; ctx.textAlign = "center"
   ctx.fillText(WORLD_NAMES[curW].slice(0, 16), mx + mw / 2, my + mh - 3)
-  if (!large) { ctx.fillStyle = "#444"; ctx.font = "6px monospace"; ctx.fillText("[Z] zoom", mx + mw / 2, my + mh + 7) }
+  if (!large) { ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("[Z] zoom", mx + mw / 2, my + mh + 7) }
   ctx.textAlign = "left"
 }
 
@@ -3005,9 +3118,9 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
   const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
   ctx.fillStyle = "rgba(0,0,0,0.95)"; ctx.fillRect(0, 0, CW, CH)
   ctx.strokeStyle = "#2A2A2A"; ctx.lineWidth = 2; ctx.strokeRect(2, 2, CW - 4, CH - 4)
-  ctx.fillStyle = "#CCC"; ctx.font = "bold 13px monospace"; ctx.textAlign = "center"
+  ctx.fillStyle = "#CCC"; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("// MAPA DEL COMPLEJO CANINO //", CW / 2, 22)
-  ctx.fillStyle = "#444"; ctx.font = "9px monospace"
+  ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText("[TAB] cerrar   ★ = perrera/checkpoint   negro = sin explorar", CW / 2, 36)
   ctx.textAlign = "left"
   const rW = 34, rH = 22, gap = 2
@@ -3028,7 +3141,7 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
     ctx.strokeStyle = wCleared ? th.accent : w === curW ? th.wallHi : "#2A2A2A"
     ctx.lineWidth = wCleared ? 2 : 1; ctx.strokeRect(bx, by, panW, panH)
     ctx.fillStyle = w === curW ? th.accent : wCleared ? "#888" : "#444"
-    ctx.font = "bold 9px monospace"; ctx.textAlign = "left"
+    ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "left"
     ctx.fillText(`W${w + 1}  ${WORLD_NAMES[w]}`, bx + 5, by + 14)
     const gx = bx + wPadX, gy = by + wPadY + 14, kr = KENNEL_ROOMS[w]
     for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
@@ -3048,9 +3161,9 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
         ctx.fillRect(rx, ry, rW, rH)
         const ex2 = WORLD_EXITS[w]
         if (ex2[0] === c && ex2[1] === r) { ctx.fillStyle = wCleared ? "rgba(0,200,80,0.3)" : "rgba(255,60,0,0.3)"; ctx.fillRect(rx, ry, rW, rH) }
-        if (kr.c === c && kr.r === r) { ctx.fillStyle = g.checkpoint.w === w ? "#FFD700" : "#555"; ctx.font = "10px monospace"; ctx.textAlign = "center"; ctx.fillText("★", rx + rW / 2, ry + rH / 2 + 4); ctx.textAlign = "left" }
+        if (kr.c === c && kr.r === r) { ctx.fillStyle = g.checkpoint.w === w ? "#FFD700" : "#555"; ctx.font = "10px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText("★", rx + rW / 2, ry + rH / 2 + 4); ctx.textAlign = "left" }
         const nCr = getCratesInRoom(w, c, r, g)
-        if (nCr > 0) { ctx.fillStyle = "#FFEE44EE"; ctx.font = "bold 8px monospace"; ctx.textAlign = "right"; ctx.fillText(`■${nCr}`, rx + rW - 2, ry + rH - 2); ctx.textAlign = "left" }
+        if (nCr > 0) { ctx.fillStyle = "#FFEE44EE"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`■${nCr}`, rx + rW - 2, ry + rH - 2); ctx.textAlign = "left" }
         if (isCur) { ctx.strokeStyle = th.accent + "CC"; ctx.lineWidth = 1.5; ctx.strokeRect(rx, ry, rW, rH) }
         else { ctx.strokeStyle = wCleared ? th.accent + "55" : "rgba(255,255,255,0.08)"; ctx.lineWidth = 0.5; ctx.strokeRect(rx, ry, rW, rH) }
       }
@@ -3065,14 +3178,40 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
         if (doors.U && r > 0) { ctx.fillStyle = g.explored.has(nbU2) ? knownCol : unknownCol; ctx.fillRect(rx + Math.round((rW - dw2) / 2), ry, dw2, doorW) }
       }
     }
-    ctx.font = "7px monospace"; ctx.textAlign = "center"
+    // ── Iconos de checkpoints en este panel de mundo ───────────────────
+    for (const cp of ALL_CPS) {
+      if (cp.w !== w) continue
+      if (!g.discoveredCPs.has(cp.id)) continue
+      const cpRx = gx + cp.c * (rW + gap) + Math.round(rW / 2)
+      const cpRy = gy + cp.r * (rH + gap) + Math.round(rH / 2)
+      const isActive = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
+      ctx.fillStyle = isActive ? THEMES[w].accent : "#FFD700"
+      ctx.beginPath(); ctx.arc(cpRx, cpRy, isActive ? 5 : 3.5, 0, Math.PI * 2); ctx.fill()
+      if (isActive) {
+        ctx.strokeStyle = "#FFF"; ctx.lineWidth = 1.5
+        ctx.beginPath(); ctx.arc(cpRx, cpRy, 7, 0, Math.PI * 2); ctx.stroke()
+      }
+      if (rW >= 26) {
+        ctx.fillStyle = isActive ? "#FFF" : "#AA8800"
+        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText(cp.icon, cpRx + 7, cpRy + 3); ctx.textAlign = "left"
+      }
+    }
+    ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillStyle = wCleared ? "#00FF88" : w === curW ? "#AAAAFF" : w < curW ? "#666" : "#333"
     ctx.fillText(wCleared ? "✓ LIBERADO" : w === curW ? "⟶ ACTIVO" : w < curW ? "⚔ VISITADO" : "[ BLOQUEADO ]", bx + panW / 2, by + panH - 4)
     ctx.textAlign = "left"
   }
-  const ly = CH - 14, items: [string, string][] = [["#050505", "sin explorar"], ["#b22", "enemigos"], ["#aa8800", "a medias"], ["#0a5", "limpia"], ["rgba(255,60,0,0.8)", "boss"], ["#FFD700", "perrera"]]
-  let lx = mLeft; ctx.font = "8px monospace"
-  for (const [col, lbl] of items) { ctx.fillStyle = col; ctx.fillRect(lx, ly, 9, 9); ctx.fillStyle = "#555"; ctx.fillText(" " + lbl, lx + 11, ly + 8); lx += lbl.length * 5 + 26 }
+  const ly = CH - 14, items: [string, string][] = [["#050505", "sin explorar"], ["#b22", "enemigos"], ["#aa8800", "a medias"], ["#0a5", "limpia"], ["rgba(255,60,0,0.8)", "boss"], ["#FFD700", "perrera"], ["#FFD700", "checkpoint"]]
+  let lx = mLeft; ctx.font = "9px 'Courier New',monospace"
+  for (const [col, lbl] of items) {
+    if (lbl === "checkpoint") {
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx + 4, ly + 4, 4, 0, Math.PI * 2); ctx.fill()
+    } else {
+      ctx.fillStyle = col; ctx.fillRect(lx, ly, 9, 9)
+    }
+    ctx.fillStyle = "#555"; ctx.fillText(" " + lbl, lx + 11, ly + 8); lx += lbl.length * 5 + 26
+  }
 }
 
 
@@ -3100,9 +3239,9 @@ function devTeleport(g: G, targetWorld: number, targetC: number, targetR: number
 function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: number; r: number } | null) {
   ctx.fillStyle = "#000D00"; ctx.fillRect(0, 0, CW, CH)
   ctx.strokeStyle = "#00FF44"; ctx.lineWidth = 2; ctx.strokeRect(2, 2, CW - 4, CH - 4)
-  ctx.fillStyle = "#00FF44"; ctx.font = "bold 13px monospace"; ctx.textAlign = "center"
+  ctx.fillStyle = "#00FF44"; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("// MODO DESARROLLADOR — MAPA TELEPORT //", CW / 2, 20)
-  ctx.fillStyle = "#1A6622"; ctx.font = "9px monospace"
+  ctx.fillStyle = "#1A6622"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText(
     `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
     CW / 2, 36
@@ -3117,7 +3256,7 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     const active = g.devMapWorld === w, th = THEMES[w]
     ctx.fillStyle = active ? th.accent + "33" : "#111"; ctx.fillRect(tx, tabY, tabW - 2, tabH)
     ctx.strokeStyle = active ? th.accent : "#333"; ctx.lineWidth = active ? 2 : 1; ctx.strokeRect(tx, tabY, tabW - 2, tabH)
-    ctx.fillStyle = active ? th.accent : "#555"; ctx.font = "bold 8px monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = active ? th.accent : "#555"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(`W${w + 1} ${WORLD_NAMES[w].slice(0, 12)}`, tx + tabW / 2 - 1, tabY + 14); ctx.textAlign = "left"
   }
 
@@ -3150,10 +3289,10 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     if (isHov) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(rx, ry, rW, rH); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rW, rH) }
     else if (isCur) { ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rW, rH) }
     else { ctx.strokeStyle = th.accent + "44"; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, rW, rH) }
-    ctx.fillStyle = isHov ? "#FFF" : isCur ? th.accent : "#AAFFAA"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = isHov ? "#FFF" : isCur ? th.accent : "#AAFFAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(`[${c},${r}]`, rx + rW / 2, ry + 13)
     const stateLbl = state === "clear" ? "✓ LIMPIA" : state === "half" ? "◑ MEDIA" : "⚠ ACTIVA"
-    ctx.fillStyle = state === "clear" ? "#00FF88" : state === "half" ? "#FFCC00" : "#FF4444"; ctx.font = "7px monospace"
+    ctx.fillStyle = state === "clear" ? "#00FF88" : state === "half" ? "#FFCC00" : "#FF4444"; ctx.font = "9px 'Courier New',monospace"
     ctx.fillText(stateLbl, rx + rW / 2, ry + 25)
     const sp = getEnemySpawns(w, c, r)
     const alive = sp.filter((_, i) => !isSpawnDead(g.dead, w, c, r, i)).length
@@ -3181,19 +3320,19 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     ctx.strokeRect(crx - 1, cry - 1, rW + 2, rH + 2)
     // Mini label "SELEC" sobre el cursor
     ctx.fillStyle = `rgba(0,255,255,${alpha * 0.8})`
-    ctx.font = "bold 7px monospace"; ctx.textAlign = "center"
+    ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText("► SELEC", crx + rW / 2, cry - 3)
     ctx.textAlign = "left"
   }
 
   const ly = CH - 16
-  ctx.font = "9px monospace"
+  ctx.font = "9px 'Courier New',monospace"
   const leg: [string, string][] = [["rgba(0,120,40,0.8)", "limpia"], ["rgba(120,90,0,0.8)", "media"], ["rgba(0,80,0,0.5)", "activa"], ["rgba(180,0,0,0.8)", "boss"], ["rgba(60,50,0,0.9)", "perrera"]]
   let lx = 24
   for (const [col, lbl] of leg) { ctx.fillStyle = col; ctx.fillRect(lx, ly, 10, 10); ctx.fillStyle = "#888"; ctx.fillText(" " + lbl, lx + 12, ly + 9); lx += lbl.length * 6 + 28 }
 
   // Hint de controles gamepad
-  ctx.fillStyle = "rgba(0,255,68,0.35)"; ctx.font = "8px monospace"; ctx.textAlign = "right"
+  ctx.fillStyle = "rgba(0,255,68,0.35)"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "right"
   ctx.fillText("🎮 stick/↑↓←→=cursor  LB/RB=mundo  A/Enter=teleport  B/ESC=cerrar", CW - 10, CH - 4)
   ctx.textAlign = "left"
 }
@@ -3231,6 +3370,39 @@ function drawSparks(ctx: CanvasRenderingContext2D, g: G) {
   ctx.globalAlpha = 1
 }
 
+// Niebla oscura sobre la sala del boss cuando está bloqueada y visible en pantalla
+function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
+  const p = g.pl
+  const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
+  if (!areRegularEnemiesDead(g, curW)) {
+    const [bc, br] = WORLD_EXITS[curW]
+    const { x: brX, y: brY } = ro(curW, bc, br)
+    const sx = brX - g.cx, sy = brY - g.cy
+    // Solo dibujar si el boss room es visible en pantalla
+    if (sx < CW && sx + RW > 0 && sy < CH && sy + RH > 0) {
+      // Overlay muy oscuro sobre la sala completa
+      ctx.save()
+      ctx.fillStyle = "rgba(0,0,0,0.91)"
+      ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      // Neblina roja tenue en los bordes de la puerta bloqueada
+      const t = Date.now() * 0.002
+      ctx.fillStyle = `rgba(120,0,0,${0.15 + 0.08 * Math.sin(t)})`
+      ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      // Texto ominoso si la sala está centrada en pantalla
+      const roomCenterX = sx + RW / 2, roomCenterY = sy + RH / 2
+      if (roomCenterX > 100 && roomCenterX < CW - 100) {
+        ctx.fillStyle = `rgba(180,0,0,${0.5 + 0.3 * Math.sin(t * 1.4)})`
+        ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚠  SALA DEL JEFE  ⚠", roomCenterX, roomCenterY)
+        ctx.fillStyle = "rgba(120,0,0,0.7)"; ctx.font = "9px 'Courier New',monospace"
+        ctx.fillText("Derrota a todos los enemigos primero", roomCenterX, roomCenterY + 18)
+        ctx.textAlign = "left"
+      }
+      ctx.restore()
+    }
+  }
+}
+
 function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w: number; c: number; r: number } | null = null) {
   ctx.clearRect(0, 0, CW, CH)
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
@@ -3242,6 +3414,8 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g)
   if (hasShake) ctx.restore()
+  // ── Niebla sala del boss ──
+  drawBossRoomFog(ctx, g)
   // ── Efecto de teletransportación ──
   if (g.tpAnim) {
     const prog = g.tpAnim.timer / 0.42
@@ -3270,7 +3444,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     const hx = panX + 10 + i * hsp; ctx.fillStyle = i < p.hp ? "#FF1744" : "#333"
     ctx.beginPath(); ctx.moveTo(hx + hs / 2, hy + hs * .8); ctx.bezierCurveTo(hx + hs / 2, hy + hs * .6, hx, hy + hs * .3, hx, hy + hs * .5); ctx.bezierCurveTo(hx, hy + hs * .2, hx + hs * .3, hy, hx + hs / 2, hy + hs * .3); ctx.bezierCurveTo(hx + hs * .7, hy, hx + hs, hy + hs * .2, hx + hs, hy + hs * .5); ctx.bezierCurveTo(hx + hs, hy + hs * .3, hx + hs / 2, hy + hs * .6, hx + hs / 2, hy + hs * .8); ctx.fill()
   }
-  ctx.fillStyle = th.accent + "99"; ctx.font = "9px monospace"; ctx.fillText("ENEMIGOS SALA", panX + 10, hy + hs + 16)
+  ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("ENEMIGOS SALA", panX + 10, hy + hs + 16)
   const roomSpawns = getEnemySpawns(curW, curC, curR)
   const eCy = hy + hs + 26, eR = 6, eSp = 16
   for (let i = 0; i < Math.min(roomSpawns.length, 7); i++) {
@@ -3278,10 +3452,10 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.fillStyle = dead2 ? "#1A1A1A" : "#CC2222"; ctx.beginPath(); ctx.arc(ex, eCy, eR, 0, Math.PI * 2); ctx.fill()
     if (dead2) { ctx.strokeStyle = "#FF4444"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(ex - 3, eCy - 3); ctx.lineTo(ex + 3, eCy + 3); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex + 3, eCy - 3); ctx.lineTo(ex - 3, eCy + 3); ctx.stroke() }
   }
-  if (roomSpawns.length > 7) { ctx.fillStyle = "#888"; ctx.font = "8px monospace"; ctx.fillText(`+${roomSpawns.length - 7}`, panX + 10 + 7 * eSp + eR + 2, eCy + 4) }
-  if (roomSpawns.length === 0) { ctx.fillStyle = "#00FF88"; ctx.font = "bold 9px monospace"; ctx.fillText("✓ LIMPIA", panX + 10, eCy + 4) }
+  if (roomSpawns.length > 7) { ctx.fillStyle = "#888"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText(`+${roomSpawns.length - 7}`, panX + 10 + 7 * eSp + eR + 2, eCy + 4) }
+  if (roomSpawns.length === 0) { ctx.fillStyle = "#00FF88"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.fillText("✓ LIMPIA", panX + 10, eCy + 4) }
   const ammoY = eCy + eR + 14
-  ctx.fillStyle = th.accent + "99"; ctx.font = "9px monospace"; ctx.fillText("MUNICIÓN", panX + 10, ammoY)
+  ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("MUNICIÓN", panX + 10, ammoY)
   const bW = 7, bH = 7, bSp = 8, bY = ammoY + 8
   for (let i = 0; i < 15; i++) {
     const bx = panX + 10 + i * bSp, has = i < p.ammo; ctx.fillStyle = has ? th.accent : "#222"
@@ -3289,8 +3463,8 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     if (has) { ctx.fillStyle = th.accent; ctx.fillRect(bx + 1, bY + 2, bW - 2, bH - 4); ctx.fillRect(bx + 2, bY + 1, bW - 4, bH - 2) }
   }
   ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(CW - 92, 8, 84, 22, 4); ctx.fill()
-  ctx.fillStyle = th.accent; ctx.font = "bold 11px monospace"; ctx.textAlign = "right"; ctx.fillText(`${g.score}`, CW - 12, 23); ctx.textAlign = "left"
-  ctx.fillStyle = "#888"; ctx.font = "9px monospace"; ctx.fillText("PTS", CW - 86, 23)
+  ctx.fillStyle = th.accent; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`${g.score}`, CW - 12, 23); ctx.textAlign = "left"
+  ctx.fillStyle = "#888"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("PTS", CW - 86, 23)
   const stRatio = p.stamina / p.maxStamina, stW = 84, stH = 10, stX = CW - 92, stY = 34
   ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 3); ctx.fill()
   if (p.exhausted) {
@@ -3298,18 +3472,18 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.strokeStyle = "#FF3300BB"; ctx.lineWidth = 1.5; ctx.strokeRect(stX, stY, stW, stH)
     const cdRatio = p.staminaCooldown / 5.0
     ctx.fillStyle = "#FF330055"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * cdRatio), stH - 2, 2); ctx.fill()
-    ctx.fillStyle = "#FF6600DD"; ctx.font = "7px monospace"; ctx.textAlign = "center"; ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, stX + stW / 2, stY + 8); ctx.textAlign = "left"
+    ctx.fillStyle = "#FF6600DD"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, stX + stW / 2, stY + 8); ctx.textAlign = "left"
   } else {
     const stCol = stRatio > 0.55 ? "#44EE44" : stRatio > 0.25 ? "#EEcc00" : "#FF4400"
     ctx.fillStyle = stCol; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), stH - 2, 2); ctx.fill()
     ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), Math.round(stH / 2) - 1, 1); ctx.fill()
   }
-  ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "7px monospace"
+  ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "9px 'Courier New',monospace"
   ctx.textAlign = "right"; ctx.fillText(p.exhausted ? "AGOTADO" : "STA", stX - 2, stY + 8); ctx.textAlign = "left"
   {
     const djY = stY + 14, sq = 8, sqGap = 5, totalSq = 2 * (sq + sqGap) - sqGap
     const djLabelX = stX - 2, djStartX = stX + (stW - totalSq) / 2
-    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "6px monospace"
+    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "9px 'Courier New',monospace"
     ctx.textAlign = "right"; ctx.fillText("JUMP", djLabelX, djY + 7); ctx.textAlign = "left"
     const j1 = p.onGround || (!p.jh)
     ctx.fillStyle = j1 ? th.accent : th.accent + "44"
@@ -3323,13 +3497,13 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
       pl.mode === "t" && p.x + p.w > pl.x && p.x < pl.x + pl.w && Math.abs((p.y + p.h) - pl.y) <= 8
     )
     if (onPlat) {
-      ctx.fillStyle = th.accent + "BB"; ctx.font = "6px monospace"; ctx.textAlign = "right"
+      ctx.fillStyle = th.accent + "BB"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "right"
       ctx.fillText("S+S↓ bajar", pfLabelX, pfY + 6); ctx.textAlign = "left"
     }
   }
 
   ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.beginPath(); ctx.roundRect(panX, 184, panW, 20, 4); ctx.fill()
-  ctx.fillStyle = th.accent + "99"; ctx.font = "8px monospace"; ctx.fillText(`★ W${g.checkpoint.w + 1} ${WORLD_NAMES[g.checkpoint.w].slice(0, 12)}`, panX + 6, 197)
+  ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText(`★ W${g.checkpoint.w + 1} ${WORLD_NAMES[g.checkpoint.w].slice(0, 12)}`, panX + 6, 197)
   if (g.kennelMsg > 0) {
     const alpha = Math.min(1, g.kennelMsg) * Math.min(1, g.kennelMsg / 0.5)
     const isGfxMsg = !g.explored.has("__gfxmsg__") // distinguir tipo de mensaje
@@ -3341,37 +3515,38 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.save(); ctx.globalAlpha = alpha
     ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW / 2 - 136, CH - 72, 272, 40, 8); ctx.fill()
     ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, CH - 72, 272, 40)
-    ctx.fillStyle = msgColor; ctx.font = "bold 13px monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = msgColor; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(msgText, CW / 2, CH - 46); ctx.textAlign = "left"; ctx.restore()
   }
   if (g.devMode) {
     ctx.fillStyle = "rgba(0,80,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW - 90, 46, 84, 16, 3); ctx.fill()
     ctx.strokeStyle = "#00FF44"; ctx.lineWidth = 1; ctx.strokeRect(CW - 90, 46, 84, 16)
-    ctx.fillStyle = "#00FF44"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = "#00FF44"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     const devFlags = (g.godMode ? "GOD " : "") + (g.infiniteAmmo ? "AMM " : "") + (g.noEnemies ? "NOENM " : "") + (g.ohko ? "OHKO" : "")
     ctx.fillText(`DEV${devFlags ? " | " + devFlags.trim() : ""}`, CW - 48, 57)
     ctx.textAlign = "left"
   }
   if (g.info) {
     ctx.fillStyle = "rgba(0,0,0,.85)"; ctx.beginPath(); ctx.roundRect(panX, 210, 200, 138, 8); ctx.fill()
-    ctx.fillStyle = "#FFF"; ctx.font = "11px monospace"
+    ctx.fillStyle = "#FFF"; ctx.font = "11px 'Courier New',monospace"
     const lines = [`FPS: ${g.lfps.toFixed(0)}`, `GFX: ${["BAJA", "MEDIA", "ALTA"][g.gfx]} [Q ciclar]`, `POS: ${Math.floor(p.x)},${Math.floor(p.y)}`, `SAL: W${curW}.${curC}.${curR}`, `ENEMIGOS: ${g.enemies.length}`, `MUERTOS: ${g.dead.size}`, `CP: W${g.checkpoint.w}`]
     lines.forEach((l, i) => ctx.fillText(l, panX + 8, 226 + i * 18))
   }
 
-  // ── Barra de boss ────────────────────────────────────────────────────
-  const boss = g.enemies.find(e => e.active && !e.dying && e.boss && e.world === curW)
+  // ── Barra de boss — solo visible cuando el jugador está EN la sala del boss ──
+  const inBossRoom = curC === WORLD_EXITS[curW][0] && curR === WORLD_EXITS[curW][1]
+  const boss = inBossRoom ? g.enemies.find(e => e.active && !e.dying && e.boss && e.world === curW) : null
   if (boss) {
     const barW = 420, barH = 14, barX = (CW - barW) / 2, barY = CH - 34
     ctx.fillStyle = "rgba(0,0,0,0.85)"
     ctx.beginPath(); ctx.roundRect(barX - 8, barY - 22, barW + 16, barH + 30, 7); ctx.fill()
     ctx.strokeStyle = th.doorC + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(barX - 8, barY - 22, barW + 16, barH + 30)
     // Nombre del boss y fase
-    ctx.fillStyle = th.doorC; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = th.doorC; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(`⚠ JEFE — ${WORLD_NAMES[boss.world]}`, CW / 2 - 50, barY - 8)
     if ((boss as any).phase === 2) {
       const pulse = 0.7 + 0.3 * Math.sin(Date.now() * 0.008)
-      ctx.fillStyle = `rgba(255,80,0,${pulse})`; ctx.font = "bold 9px monospace"
+      ctx.fillStyle = `rgba(255,80,0,${pulse})`; ctx.font = "bold 9px 'Courier New',monospace"
       ctx.fillText("◈ FASE CRÍTICA ◈", CW / 2 + 80, barY - 8)
     }
     // Fondo de barra
@@ -3394,7 +3569,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
   // ── Indicadores de habilidades desbloqueadas ─────────────────────────
   {
     const aY = 206, aX = panX + 8, aGap = 36
-    ctx.fillStyle = th.accent + "55"; ctx.font = "6px monospace"; ctx.fillText("HABILIDADES", aX, aY)
+    ctx.fillStyle = th.accent + "55"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("HABILIDADES", aX, aY)
     const icons: [string, string, boolean][] = [
       ["DASH", "⚡", g.abilities.has("dash")],
       ["W.JUMP", "↑↑", g.abilities.has("walljump")],
@@ -3405,9 +3580,9 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
       ctx.fillStyle = unlocked ? "rgba(0,0,0,0.7)" : "rgba(0,0,0,0.4)"
       ctx.beginPath(); ctx.roundRect(ix, aY + 4, 30, 22, 3); ctx.fill()
       ctx.strokeStyle = unlocked ? th.accent : "#333"; ctx.lineWidth = 1; ctx.strokeRect(ix, aY + 4, 30, 22)
-      ctx.fillStyle = unlocked ? th.accent : "#444"; ctx.font = "bold 9px monospace"; ctx.textAlign = "center"
+      ctx.fillStyle = unlocked ? th.accent : "#444"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
       ctx.fillText(icon, ix + 15, aY + 14)
-      ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = "5px monospace"
+      ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = "9px 'Courier New',monospace"
       ctx.fillText(label, ix + 15, aY + 23); ctx.textAlign = "left"
     })
   }
@@ -3420,7 +3595,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.beginPath(); ctx.roundRect(cx2 - 90, cy2 - 18, 180, 32, 6); ctx.fill()
     const hue = Math.max(0, 55 - g.combo * 4)
     ctx.fillStyle = `hsl(${hue}, 100%, 65%)`
-    ctx.font = `bold ${11 + Math.min(g.combo, 8)}px monospace`; ctx.textAlign = "center"
+    ctx.font = `bold ${11 + Math.min(g.combo, 8)}px 'Courier New',monospace`; ctx.textAlign = "center"
     ctx.fillText(`× ${g.combo}  COMBO`, cx2, cy2)
     ctx.restore()
   }
@@ -3433,11 +3608,11 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.fillStyle = "rgba(0,0,0,0.92)"
     ctx.beginPath(); ctx.roundRect(CW / 2 - 175, CH / 2 - 48, 350, 88, 12); ctx.fill()
     ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(CW / 2 - 175, CH / 2 - 48, 350, 88)
-    ctx.fillStyle = th.accent; ctx.font = "bold 10px monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = th.accent; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText("✦  NUEVA HABILIDAD DESBLOQUEADA  ✦", CW / 2, CH / 2 - 24)
-    ctx.fillStyle = "#FFFFFF"; ctx.font = `bold 16px monospace`
+    ctx.fillStyle = "#FFFFFF"; ctx.font = `bold 16px 'Courier New',monospace`
     ctx.fillText(g.abilityNotif.text, CW / 2, CH / 2 + 12)
-    ctx.fillStyle = th.accent + "99"; ctx.font = "9px monospace"
+    ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"
     ctx.fillText("Elimina al siguiente jefe para la próxima habilidad", CW / 2, CH / 2 + 32)
     ctx.textAlign = "left"; ctx.restore()
   }
@@ -3451,12 +3626,12 @@ function drawWorldTransition(ctx: CanvasRenderingContext2D, g: G) {
   ctx.globalAlpha = a.alpha
   ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1
   ctx.beginPath(); ctx.moveTo(CW * 0.08, CH / 2 - 60); ctx.lineTo(CW * 0.92, CH / 2 - 60); ctx.stroke()
-  ctx.fillStyle = th.accent; ctx.font = "bold 11px monospace"; ctx.textAlign = "center"
+  ctx.fillStyle = th.accent; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText(`// SECTOR ${wi + 1} DE ${NW} //`, CW / 2, CH / 2 - 68)
-  ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 58px monospace"
+  ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 58px 'Courier New',monospace"
   ctx.shadowColor = th.accent; ctx.shadowBlur = 24 * a.alpha
   ctx.fillText(a.name, CW / 2, CH / 2 + 8); ctx.shadowBlur = 0
-  ctx.fillStyle = th.accent + "CC"; ctx.font = "italic 15px monospace"
+  ctx.fillStyle = th.accent + "CC"; ctx.font = "italic 15px 'Courier New',monospace"
   ctx.fillText(a.sub, CW / 2, CH / 2 + 38)
   ctx.strokeStyle = th.accent + "88"; ctx.beginPath(); ctx.moveTo(CW * 0.08, CH / 2 + 54); ctx.lineTo(CW * 0.92, CH / 2 + 54); ctx.stroke()
   ctx.textAlign = "left"; ctx.restore()
@@ -3564,7 +3739,7 @@ export default function ProyectoLuly() {
   const G = useRef<G>(mkG_lazy())
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
-  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false })
+  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false })
   // "start" = menú inicio  |  "playing" = partida activa
   const [screen, setScreen] = useState<"start" | "playing">("start")
   const gameActiveRef = useRef(false)
@@ -3626,7 +3801,7 @@ export default function ProyectoLuly() {
         }
       }
     }
-    const gpFullscreen = () => { const el = document.fullscreenElement; if (!el) (containerRef.current || document.documentElement).requestFullscreen().catch(() => { }); else document.exitFullscreen().catch(() => { }) }
+    const gpFullscreen = () => handleToggleFS()
     const loop = (now: number) => {
       const g = G.current, dt = Math.min((now - last) / 1000, .05); last = now
       g.fps.push(1 / Math.max(dt, .001)); if (g.fps.length > 60) g.fps.shift()
@@ -3647,7 +3822,7 @@ export default function ProyectoLuly() {
         // // Garantía absoluta: gfx=0 nunca debería ocurrir via autoGfx
         // if (g.gfx < 1) g.gfx = 1
         // FIX: incluir showDevMap en el estado UI para controlar el overlay de pausa
-        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap })
+        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap })
       }
       raf = requestAnimationFrame(loop)
     }
@@ -3701,7 +3876,7 @@ export default function ProyectoLuly() {
         }
       }
       if (k === "tab") { g.showMap = !g.showMap; g.paused = g.showMap }
-      if (k === "f") { const el = document.fullscreenElement; if (!el) (containerRef.current || document.documentElement).requestFullscreen().catch(() => { }); else document.exitFullscreen().catch(() => { }) }
+      if (k === "f") handleToggleFS()
       if (k === "escape") {
         if (g.tpMenu?.open) { g.tpMenu = null; return }
         if (g.showMap) { g.showMap = false; g.paused = false }
@@ -3777,14 +3952,91 @@ export default function ProyectoLuly() {
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isPseudoFS, setIsPseudoFS] = useState(false)   // iOS pseudo-fullscreen via CSS
+  const [isPortrait, setIsPortrait] = useState(false)
+  const [isTouchDevice, setIsTouchDevice] = useState(false)
+  const [showControls, setShowControls] = useState(true)
   const [gpadConnected, setGpadConnected] = useState(false)
+  // Dimensiones reales de la ventana visible (sin barra del navegador iOS)
+  const [winDims, setWinDims] = useState({ w: typeof window !== "undefined" ? window.innerWidth : CW, h: typeof window !== "undefined" ? window.innerHeight : CH })
+  const dpadTapRef = useRef({ left: 0, right: 0 })      // para doble-tap → run
   const devHoverRef = useRef<{ w: number; c: number; r: number } | null>(null)
 
+  // ── Helpers cross-browser para fullscreen ──────────────────────────────
+  const isIOS = typeof window !== "undefined" && (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  )
+  const getFSElement = () =>
+    document.fullscreenElement ||
+    (document as any).webkitFullscreenElement ||
+    (document as any).mozFullScreenElement ||
+    (document as any).msFullscreenElement
+
+  const tryFullscreen = (el: HTMLElement) => {
+    if (isIOS) {
+      // iOS Safari no soporta la API Fullscreen — usamos pseudo-fullscreen CSS
+      setIsPseudoFS(true)
+      return
+    }
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {})
+    else if ((el as any).webkitRequestFullscreen) (el as any).webkitRequestFullscreen()
+    else if ((el as any).mozRequestFullScreen)    (el as any).mozRequestFullScreen()
+    else if ((el as any).msRequestFullscreen)     (el as any).msRequestFullscreen()
+  }
+
+  const exitFS = () => {
+    if (isPseudoFS) { setIsPseudoFS(false); return }
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {})
+    else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen()
+    else if ((document as any).mozCancelFullScreen)  (document as any).mozCancelFullScreen()
+    else if ((document as any).msExitFullscreen)     (document as any).msExitFullscreen()
+  }
+
+  const isFullscreenEffective = isFullscreen || isPseudoFS
+
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!document.fullscreenElement)
+    const onChange = () => setIsFullscreen(!!getFSElement())
     document.addEventListener("fullscreenchange", onChange)
-    return () => document.removeEventListener("fullscreenchange", onChange)
+    document.addEventListener("webkitfullscreenchange", onChange)
+    document.addEventListener("mozfullscreenchange", onChange)
+    document.addEventListener("MSFullscreenChange", onChange)
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange)
+      document.removeEventListener("webkitfullscreenchange", onChange)
+      document.removeEventListener("mozfullscreenchange", onChange)
+      document.removeEventListener("MSFullscreenChange", onChange)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Detección de dispositivo táctil y orientación (iOS + Android + escritorio)
+  useEffect(() => {
+    const checkOrientation = () => {
+      const iw = window.innerWidth, ih = window.innerHeight
+      const portrait = ih > iw
+      setIsPortrait(portrait)
+      // Actualizar dimensiones reales de la ventana (excluye barra del nav en iOS)
+      setWinDims({ w: iw, h: ih })
+      // Auto-fullscreen al girar a landscape en dispositivos táctiles
+      if (!portrait && isTouchDevice && !getFSElement() && !isPseudoFS) {
+        tryFullscreen(containerRef.current || document.documentElement)
+      }
+    }
+    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    setIsTouchDevice(touch)
+    checkOrientation()
+    window.addEventListener('resize', checkOrientation)
+    window.addEventListener('orientationchange', checkOrientation)
+    // screen.orientation API (Android moderno)
+    if (window.screen.orientation) window.screen.orientation.addEventListener('change', checkOrientation)
+    return () => {
+      window.removeEventListener('resize', checkOrientation)
+      window.removeEventListener('orientationchange', checkOrientation)
+      if (window.screen.orientation) window.screen.orientation.removeEventListener('change', checkOrientation)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTouchDevice, isPseudoFS])
 
   useEffect(() => {
     const onConnect = (e: GamepadEvent) => { G.current.gpadIdx = e.gamepad.index; setGpadConnected(true) }
@@ -3795,17 +4047,24 @@ export default function ProyectoLuly() {
     return () => { window.removeEventListener("gamepadconnected", onConnect); window.removeEventListener("gamepaddisconnected", onDisconnect) }
   }, [])
 
-  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false }) }
+  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false }) }
 
   const handlePlay = () => {
     gameActiveRef.current = true
     setScreen("playing")
+    if (!getFSElement() && !isPseudoFS) {
+      tryFullscreen(containerRef.current || document.documentElement)
+    }
+  }
+  const handleToggleFS = () => {
+    if (getFSElement() || isPseudoFS) exitFS()
+    else tryFullscreen(containerRef.current || document.documentElement)
   }
   const handleExit = () => { try { window.close() } catch (_e) { } }
   const handleRestart = () => { reset(); setScreen("start"); gameActiveRef.current = false }
   const handlePlayAgain = () => { reset(); handlePlay() }
 
-  const canvasStyle = isFullscreen
+  const canvasStyle = isFullscreenEffective
     ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%", objectFit: "contain" as const, border: "none", borderRadius: 0 }
     : { display: "block", imageRendering: "pixelated" as const, border: "2px solid #1A1A1A", borderRadius: 4 }
 
@@ -3819,9 +4078,177 @@ export default function ProyectoLuly() {
     borderRadius: 3, outline: "none",
   })
 
+  // ── Gamepad virtual táctil ───────────────────────────────────────────
+  const pressKey = (key: string) => { G.current.keys[key] = true }
+  const releaseKey = (key: string) => { G.current.keys[key] = false }
+
+  const vBtnStyle = (size: number, extra: CSSProperties = {}): CSSProperties => ({
+    position: "absolute",
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(255,255,255,0.07)",
+    border: "1.5px solid rgba(255,255,255,0.18)",
+    color: "rgba(255,255,255,0.55)",
+    fontSize: Math.round(size * 0.38),
+    fontFamily: "'Courier New',monospace",
+    fontWeight: "bold",
+    cursor: "pointer",
+    userSelect: "none",
+    touchAction: "none",
+    transition: "background 0.08s",
+    zIndex: 20,
+    ...extra,
+  })
+
+  const vBtnRect = (w: number, h: number, extra: CSSProperties = {}): CSSProperties => ({
+    position: "absolute",
+    width: w,
+    height: h,
+    borderRadius: 8,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(255,255,255,0.07)",
+    border: "1.5px solid rgba(255,255,255,0.18)",
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 9,
+    fontFamily: "'Courier New',monospace",
+    fontWeight: "bold",
+    cursor: "pointer",
+    userSelect: "none",
+    touchAction: "none",
+    zIndex: 20,
+    ...extra,
+  })
+
+  const makeTouch = (
+    downFn: () => void,
+    upFn: () => void,
+  ) => ({
+    onPointerDown: (e: React.PointerEvent) => { e.preventDefault(); downFn() },
+    onPointerUp:   (e: React.PointerEvent) => { e.preventDefault(); upFn() },
+    onPointerLeave: () => upFn(),
+    onPointerCancel: () => upFn(),
+  })
+
+  const VirtualGamepad = () => {
+    if (!isTouchDevice || screen !== "playing" || isPortrait) return null
+    const g = G.current
+    const accent = "#D4C400"
+    const pct = (x: number, y: number): CSSProperties => ({
+      left: `${x}%`, bottom: `${y}%`, transform: "translate(-50%, 50%)",
+    })
+
+    // Doble-tap en D-pad activa correr
+    const dpadPress = (dir: "left" | "right", key: string) => {
+      const now = Date.now()
+      if (now - dpadTapRef.current[dir] < 300) G.current.pl.runMode = true
+      dpadTapRef.current[dir] = now
+      pressKey(key)
+    }
+
+    // Activar checkpoint táctil — replica exactamente la lógica del keydown "e"
+    const activateCheckpoint = () => {
+      if (g.tpAnim) return
+      ;(g as any)._gfxMsg = false
+      const p = g.pl
+      for (const cp of ALL_CPS) {
+        const bdx = p.x + p.w / 2 - (cp.x + PW / 2), bdy = p.y + p.h / 2 - (cp.y + PH)
+        if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
+          g.discoveredCPs.add(cp.id)
+          const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
+          if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3 }
+          break
+        }
+      }
+    }
+
+    return (
+      <>
+        {/* ── TOP: sistema ─────────────────────────────────────────── */}
+        <div style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8, zIndex: 20 }}>
+          <div style={vBtnRect(62, 32, { borderRadius: 8, fontSize: 11 })}
+            {...makeTouch(() => { g.showMap = !g.showMap; g.paused = g.showMap }, () => {})}>
+            🗺 MAPA
+          </div>
+          <div style={vBtnRect(62, 32, { borderRadius: 8, fontSize: 11, borderColor: accent + "88" })}
+            {...makeTouch(() => {
+              if (g.tpMenu?.open) g.tpMenu = null
+              else if (g.discoveredCPs.size >= 2) g.tpMenu = { open: true, idx: 0 }
+            }, () => {})}>
+            ⟳ TELE
+          </div>
+          <div style={vBtnRect(52, 32, { borderRadius: 8, fontSize: 14 })}
+            {...makeTouch(() => { g.paused = !g.paused }, () => {})}>
+            ⏸
+          </div>
+        </div>
+
+        {/* ── CHECKPOINT: botón derecho, encima del DASH ──────────── */}
+        <div style={{ ...vBtnStyle(60, { borderColor: "#FFD700CC", background: "rgba(255,215,0,0.11)" }), ...pct(70, 28) }}
+          {...makeTouch(activateCheckpoint, () => {})}>
+          <span style={{ fontSize: 9, lineHeight: 1.2, textAlign: "center" }}>
+            <span style={{ fontSize: 18, display: "block" }}>★</span>CP
+          </span>
+        </div>
+
+        {/* ── IZQUIERDA: D-pad (doble-tap = correr) ────────────────── */}
+        {/* ← */}
+        <div style={{ ...vBtnStyle(74), ...pct(7, 13) }}
+          {...makeTouch(() => dpadPress("left", "arrowleft"), () => { releaseKey("arrowleft"); G.current.pl.runMode = false })}>
+          ◀
+        </div>
+        {/* → */}
+        <div style={{ ...vBtnStyle(74), ...pct(18.5, 13) }}
+          {...makeTouch(() => dpadPress("right", "arrowright"), () => { releaseKey("arrowright"); G.current.pl.runMode = false })}>
+          ▶
+        </div>
+        {/* ↓ agachar */}
+        <div style={{ ...vBtnStyle(58, { borderRadius: 12 }), ...pct(12.8, 3) }}
+          {...makeTouch(() => pressKey("arrowdown"), () => releaseKey("arrowdown"))}>
+          ▼
+        </div>
+        {/* Indicador doble-tap */}
+        <div style={{ ...pct(12.8, 26), position: "absolute", fontSize: 9, color: "rgba(124,252,0,0.35)", fontFamily: "'Courier New',monospace", whiteSpace: "nowrap", transform: "translate(-50%, 50%)" }}>
+          2× = RUN
+        </div>
+
+        {/* ── DERECHA: Acciones ────────────────────────────────────── */}
+        {/* SALTAR — grande, verde */}
+        <div style={{ ...vBtnStyle(84, { background: "rgba(124,252,0,0.13)", borderColor: accent + "AA", fontSize: 28 }), ...pct(87, 14) }}
+          {...makeTouch(() => pressKey(" "), () => releaseKey(" "))}>
+          ▲
+        </div>
+        {/* LÁTIGO — icono de latigazo "〰W" */}
+        <div style={{ ...vBtnStyle(66, { borderColor: "#FF8C00AA", background: "rgba(255,140,0,0.09)" }), ...pct(76, 7) }}
+          {...makeTouch(() => pressKey("m"), () => releaseKey("m"))}>
+          <span style={{ fontSize: 10, lineHeight: 1, textAlign: "center" }}>
+            <span style={{ fontSize: 16, display: "block" }}>〰</span>WHP
+          </span>
+        </div>
+        {/* DISPARAR HUESO — icono de hueso */}
+        <div style={{ ...vBtnStyle(66, { borderColor: "#00BFFFAA", background: "rgba(0,191,255,0.09)" }), ...pct(93, 7) }}
+          {...makeTouch(() => pressKey("n"), () => releaseKey("n"))}>
+          <span style={{ fontSize: 10, lineHeight: 1, textAlign: "center" }}>
+            <span style={{ fontSize: 16, display: "block" }}>🦴</span>TIRO
+          </span>
+        </div>
+        {/* DASH */}
+        <div style={{ ...vBtnStyle(56, { borderColor: "#FFD700AA", background: "rgba(255,215,0,0.08)", fontSize: 22 }), ...pct(84, 28) }}
+          {...makeTouch(() => pressKey("shift"), () => releaseKey("shift"))}>
+          ⚡
+        </div>
+      </>
+    )
+  }
+
   return (
     <div className="w-full h-screen bg-black flex flex-col items-center justify-center overflow-hidden select-none">
-      <div ref={containerRef} className="relative" style={isFullscreen ? { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999 } : { boxShadow: "0 0 60px rgba(0,0,0,.95)" }}>
+      <div ref={containerRef} className="relative" style={isFullscreenEffective ? { position: "fixed", top: 0, left: 0, width: winDims.w, height: winDims.h, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999 } : { boxShadow: "0 0 60px rgba(0,0,0,.95)" }}>
 
         {/* ── Canvas del juego ── */}
         <canvas ref={canvasRef} width={CW} height={CH} style={{ ...canvasStyle, display: screen === "playing" ? "block" : "none" }} />
@@ -3830,22 +4257,27 @@ export default function ProyectoLuly() {
             PANTALLA DE INICIO
         ══════════════════════════════════════════════════ */}
         {screen === "start" && (
-          <div style={{
-            width: CW, height: CH,
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            position: "relative", overflow: "hidden",
-            // Fondo: imagen configurable + gradiente de respaldo
-            backgroundImage: `url(${asset("/assets/menu_bg.png")}), linear-gradient(180deg,#040804 0%,#091409 55%,#020502 100%)`,
-            backgroundSize: "cover", backgroundPosition: "center",
-            border: "2px solid #1A1A1A", borderRadius: 4,
-            fontFamily: "monospace",
-          }}>
+          <div
+            style={{
+              width: isFullscreenEffective ? winDims.w : CW,
+              height: isFullscreenEffective ? winDims.h : CH,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              position: "relative", overflow: "hidden",
+              backgroundImage: `url(${asset("/assets/menu_bg.png")}), linear-gradient(180deg,#040804 0%,#091409 55%,#020502 100%)`,
+              backgroundSize: "cover", backgroundPosition: "center",
+              border: isFullscreenEffective ? "none" : "2px solid #1A1A1A",
+              borderRadius: isFullscreenEffective ? 0 : 4,
+              fontFamily: "'Courier New',monospace",
+            }}
+            onClick={() => { if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement) }}
+            onTouchStart={() => { if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement) }}
+          >
             {/* Capa oscura sobre el fondo */}
             <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.58)", zIndex: 0 }} />
 
             {/* Línea decorativa superior */}
-            <div style={{ position: "absolute", top: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#7CFC0055,#7CFC00AA,#7CFC0055,transparent)", zIndex: 1 }} />
-            <div style={{ position: "absolute", bottom: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#7CFC0055,#7CFC00AA,#7CFC0055,transparent)", zIndex: 1 }} />
+            <div style={{ position: "absolute", top: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#D4C40055,#D4C400AA,#D4C40055,transparent)", zIndex: 1 }} />
+            <div style={{ position: "absolute", bottom: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#D4C40055,#D4C400AA,#D4C40055,transparent)", zIndex: 1 }} />
 
             {/* Contenido centrado */}
             <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
@@ -3859,7 +4291,7 @@ export default function ProyectoLuly() {
               <h1 style={{
                 fontSize: 58, fontWeight: "900", letterSpacing: "0.08em", margin: 0,
                 color: "#EEFFEE",
-                textShadow: "0 0 28px #7CFC00CC, 0 0 60px #3A8A0066, 0 2px 0 #000",
+                textShadow: "0 0 28px #D4C400CC, 0 0 60px #3A8A0066, 0 2px 0 #000",
                 lineHeight: 1.05,
               }}>
                 PROYECTO LULY
@@ -3873,10 +4305,11 @@ export default function ProyectoLuly() {
               {/* Botones */}
               <div style={{ display: "flex", flexDirection: "column", gap: 14, width: 260, alignItems: "stretch" }}>
                 <button
-                  style={menuBtn("#7CFC00")}
-                  onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(124,252,0,0.15)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #7CFC0066" }}
+                  style={menuBtn("#D4C400")}
+                  onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(124,252,0,0.15)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #D4C40066" }}
                   onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.boxShadow = "none" }}
                   onClick={handlePlay}
+                  onTouchEnd={e => { e.preventDefault(); handlePlay() }}
                 >
                   ▶  JUGAR
                 </button>
@@ -3892,12 +4325,12 @@ export default function ProyectoLuly() {
 
               {/* Controles resumidos */}
               <div style={{ marginTop: 38, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 28px", fontSize: 10, color: "#3A5A3A", textAlign: "center" }}>
-                <span><span style={{ color: "#7CFC0088" }}>WASD</span> mover</span>
-                <span><span style={{ color: "#7CFC0088" }}>ESPACIO</span> saltar</span>
-                <span><span style={{ color: "#7CFC0088" }}>N</span> disparar</span>
-                <span><span style={{ color: "#7CFC0088" }}>M</span> látigo</span>
-                <span><span style={{ color: "#7CFC0088" }}>SHIFT</span> dash*</span>
-                <span><span style={{ color: "#7CFC0088" }}>TAB</span> mapa</span>
+                <span><span style={{ color: "#D4C40088" }}>WASD</span> mover</span>
+                <span><span style={{ color: "#D4C40088" }}>ESPACIO</span> saltar</span>
+                <span><span style={{ color: "#D4C40088" }}>N</span> disparar</span>
+                <span><span style={{ color: "#D4C40088" }}>M</span> látigo</span>
+                <span><span style={{ color: "#D4C40088" }}>SHIFT</span> dash*</span>
+                <span><span style={{ color: "#D4C40088" }}>TAB</span> mapa</span>
               </div>
               <p style={{ marginTop: 8, fontSize: 9, color: "#2A3A2A" }}>* se desbloquea derrotando al primer jefe</p>
             </div>
@@ -3909,28 +4342,219 @@ export default function ProyectoLuly() {
           </div>
         )}
 
+        {/* ── Overlay: girar dispositivo ── */}
+        {isTouchDevice && isPortrait && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "#000",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 20,
+          }}>
+            <div style={{ fontSize: 72, animation: "spin 2s linear infinite" }}>↻</div>
+            <p style={{ color: "#D4C400", fontFamily: "'Courier New',monospace", fontSize: 18, fontWeight: "bold", letterSpacing: "0.15em" }}>
+              GIRA TU DISPOSITIVO
+            </p>
+            <p style={{ color: "#3A5A3A", fontFamily: "'Courier New',monospace", fontSize: 12 }}>
+              El juego requiere modo horizontal
+            </p>
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
+
         {/* ── FPS y gamepad (solo en juego) ── */}
         {screen === "playing" && (
           <div className="absolute top-1 left-2 text-xs font-mono opacity-40 flex items-center gap-2" style={{ color: "#888" }}>
             <span>{ui.fps}fps</span>
-            {gpadConnected && <span style={{ color: "#7CFC00", opacity: 0.9 }} title="Control Xbox detectado">🎮</span>}
+            {gpadConnected && <span style={{ color: "#D4C400", opacity: 0.9 }} title="Control Xbox detectado">🎮</span>}
           </div>
         )}
 
-        {/* ── Pausa ── */}
-        {screen === "playing" && ui.paused && !ui.over && !ui.won && !ui.showDevMap && (
-          <div className="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center">
-            <div className="text-center p-8 border border-gray-700 rounded-xl" style={{ background: "#0D0D0D" }}>
-              <div className="text-3xl mb-2">⏸</div>
-              <h2 className="text-xl font-bold text-gray-200 mb-2" style={{ fontFamily: "monospace" }}>// PAUSADO</h2>
-              <p className="text-gray-500 text-sm font-mono mb-4">P → continuar</p>
-              <button
-                onClick={handleRestart}
-                className="px-4 py-1 border border-gray-600 text-gray-400 font-mono text-sm hover:bg-gray-800 transition-colors"
-              >[ MENÚ PRINCIPAL ]</button>
+        {/* ── Gamepad táctil ── */}
+        <VirtualGamepad />
+
+        {/* ── Pausa ── (solo cuando no está el mapa ni el devmap abiertos) */}
+        {screen === "playing" && ui.paused && !ui.over && !ui.won && !ui.showDevMap && !ui.showMap && (() => {
+          const g = G.current; const p = g.pl
+          const curW = getWorldAtX(g.cx); const th = THEMES[curW]
+          const MAX_POSSIBLE_HP = 4  // 3 base + 1 por hpup (boss W2)
+          const abilities = [
+            { key: "dash", icon: "⚡", name: "DASH", desc: "Esquiva instantánea" },
+            { key: "walljump", icon: "↑↑", name: "WALL JUMP", desc: "Salta en las paredes" },
+            { key: "hpup", icon: "❤+", name: "HP MÁXIMO", desc: "+2 corazones extra" },
+          ]
+          return (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+              {/* Fondo con gradiente y overlay */}
+              <div style={{ position: "absolute", inset: 0, background: `linear-gradient(135deg, #08060E 0%, ${th.bg0} 100%)`, opacity: 0.88 }} />
+              {/* Panel principal */}
+              <div style={{
+                position: "relative", width: "min(740px, 96vw)", maxHeight: "92%", overflowY: "auto",
+                border: `1px solid ${th.accent}44`, borderRadius: 12,
+                boxShadow: `0 0 60px ${th.accent}22`,
+                fontFamily: "'Courier New', monospace",
+                background: "rgba(0,0,0,0.72)",
+              }}>
+                {/* ── Header ── */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 18px", borderBottom: `1px solid ${th.accent}33` }}>
+                  <span style={{ fontSize: 10, color: th.accent + "88", letterSpacing: "0.15em" }}>// PROYECTO LULY</span>
+                  <span style={{ fontSize: 13, color: th.accent, letterSpacing: "0.35em", fontWeight: "bold" }}>— PAUSA —</span>
+                  <span style={{ fontSize: 10, color: th.accent + "88", letterSpacing: "0.1em" }}>{WORLD_NAMES[curW]}</span>
+                </div>
+
+                {/* ── 3 columnas ── */}
+                <div style={{ display: "flex", minHeight: 220 }}>
+                  {/* LEFT: ESTADO */}
+                  <div style={{ flex: 1, padding: 16, borderRight: `1px solid ${th.accent}22` }}>
+                    <div style={{ fontSize: 9, color: th.accent + "8C", letterSpacing: "0.3em", marginBottom: 12 }}>ESTADO</div>
+
+                    {/* HP: llenos | vacíos | bloqueados */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 9, color: "#666", letterSpacing: "0.2em", marginBottom: 4 }}>HP  <span style={{ color: "#444" }}>{p.hp}/{p.maxHp}</span></div>
+                      <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+                        {Array.from({ length: MAX_POSSIBLE_HP }, (_, i) => {
+                          if (i < p.hp) return <span key={i} style={{ fontSize: 16 }}>❤️</span>                 // lleno
+                          if (i < p.maxHp) return <span key={i} style={{ fontSize: 16, opacity: 0.25 }}>❤️</span>  // vacío
+                          return <span key={i} style={{ fontSize: 14, opacity: 0.3, filter: "grayscale(1)" }} title="Se desbloquea al derrotar al jefe W2">🔒</span>  // bloqueado
+                        })}
+                      </div>
+                    </div>
+
+                    {/* STAMINA */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 9, color: "#666", letterSpacing: "0.2em", marginBottom: 4 }}>STAMINA</div>
+                      <div style={{ height: 5, background: "#222", borderRadius: 3, overflow: "hidden", width: "100%" }}>
+                        <div style={{ height: "100%", width: `${Math.round((p.stamina / p.maxStamina) * 100)}%`, background: th.accent, borderRadius: 3, transition: "width 0.2s" }} />
+                      </div>
+                    </div>
+
+                    {/* VIDAS */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 9, color: "#666", letterSpacing: "0.2em", marginBottom: 4 }}>VIDAS</div>
+                      <div style={{ fontSize: 14 }}>
+                        {Array.from({ length: Math.max(0, g.lives) }, (_, i) => <span key={i}>⭐</span>)}
+                        {g.lives <= 0 && <span style={{ color: "#444", fontSize: 11 }}>—</span>}
+                      </div>
+                    </div>
+
+                    {/* PUNTOS */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 9, color: "#666", letterSpacing: "0.2em", marginBottom: 4 }}>PUNTOS</div>
+                      <div style={{ fontSize: 15, color: "#FFD700", fontWeight: "bold", letterSpacing: "0.1em" }}>{g.score.toString().padStart(6, "0")}</div>
+                    </div>
+
+                    {/* MUNICIÓN */}
+                    <div>
+                      <div style={{ fontSize: 9, color: "#666", letterSpacing: "0.2em", marginBottom: 4 }}>MUNICIÓN</div>
+                      <div style={{ fontSize: 14, color: "#00BFFF", fontWeight: "bold" }}>{p.ammo}</div>
+                    </div>
+                  </div>
+
+                  {/* CENTER: PERSONAJE */}
+                  <div style={{ flex: 1, padding: 16, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, borderRight: `1px solid ${th.accent}22` }}>
+                    {/* Retrato — sprite idle real del personaje */}
+                    <div style={{ width: 96, height: 144, borderRadius: 12, border: `2px solid ${th.accent}88`, background: `radial-gradient(circle at 50% 40%, ${th.accent}18, ${th.bg0})`, overflow: "hidden", boxShadow: `0 0 24px ${th.accent}33` }}>
+                      <canvas
+                        width={96} height={144}
+                        style={{ imageRendering: "pixelated", width: "100%", height: "100%" }}
+                        ref={(canvas) => {
+                          if (!canvas) return
+                          const ctx2d = canvas.getContext("2d")
+                          if (!ctx2d) return
+                          ctx2d.clearRect(0, 0, 96, 144)
+                          const spr = sprs.current["player_idle"]
+                          if (spr && spr.complete && spr.naturalWidth > 0) {
+                            // Spritesheet 4×4: frame 0 = columna 0, fila 0
+                            const fw = spr.width / 4, fh = spr.height / 4
+                            ctx2d.drawImage(spr, 0, 0, fw, fh, 0, 0, 96, 144)
+                          } else {
+                            // Fallback pixel art de Luly si el sprite no carga
+                            const sc = 96 / 48
+                            ctx2d.save(); ctx2d.scale(sc, sc)
+                            ctx2d.fillStyle = "#D2B48C"; ctx2d.fillRect(4, 16, 22, 26); ctx2d.fillRect(6, 2, 20, 18)
+                            ctx2d.fillStyle = "#555"; ctx2d.fillRect(3, 0, 26, 12); ctx2d.fillRect(2, 4, 28, 10)
+                            ctx2d.fillStyle = "#888"; ctx2d.fillRect(8, 2, 16, 8)
+                            ctx2d.fillStyle = "#00BFFF44"; ctx2d.fillRect(8, 4, 16, 7)
+                            ctx2d.fillStyle = "#FFF"; ctx2d.fillRect(9, 6, 4, 3); ctx2d.fillRect(19, 6, 4, 3)
+                            ctx2d.fillStyle = "#111"; ctx2d.fillRect(10, 7, 2, 2); ctx2d.fillRect(20, 7, 2, 2)
+                            ctx2d.fillStyle = "#FFD700"; ctx2d.fillRect(13, 23, 6, 2)
+                            ctx2d.restore()
+                          }
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 16, color: "#EEE", letterSpacing: "0.4em", fontWeight: "bold", marginTop: 4 }}>L U L Y</div>
+                    <div style={{ fontSize: 10, color: th.accent, letterSpacing: "0.25em" }}>AGENTE CANINO</div>
+                    <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.15em" }}>W{curW + 1} — {WORLD_NAMES[curW]}</div>
+
+                    {/* Dots de mundos */}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+                      {THEMES.map((t, i) => (
+                        <div key={i} style={{
+                          width: 10, height: 10, borderRadius: "50%",
+                          background: g.cw.has(i) ? t.accent : "#333",
+                          outline: i === curW ? "2px solid #FFF" : "none",
+                          outlineOffset: 2,
+                        }} />
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.15em" }}>MUNDOS: {g.cw.size}/4</div>
+                  </div>
+
+                  {/* RIGHT: HABILIDADES */}
+                  <div style={{ flex: 1, padding: 16 }}>
+                    <div style={{ fontSize: 9, color: th.accent + "8C", letterSpacing: "0.3em", marginBottom: 12 }}>HABILIDADES</div>
+
+                    {abilities.map(ab => {
+                      const unlocked = g.abilities.has(ab.key)
+                      return (
+                        <div key={ab.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, opacity: unlocked ? 1 : 0.35 }}>
+                          <span style={{ fontSize: 18, minWidth: 22, textAlign: "center" }}>{ab.icon}</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10, color: unlocked ? th.accent : "#666", letterSpacing: "0.15em" }}>{ab.name}</div>
+                            <div style={{ fontSize: 8, color: "#555", marginTop: 1 }}>{ab.desc}</div>
+                          </div>
+                          <span style={{ fontSize: 13, color: unlocked ? th.accent : "#444" }}>{unlocked ? "✓" : "✗"}</span>
+                        </div>
+                      )
+                    })}
+
+                    {/* PODERES BASE */}
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${th.accent}22` }}>
+                      <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.2em", marginBottom: 8 }}>PODERES BASE</div>
+                      <div style={{ display: "flex", gap: 6, fontSize: 9, color: "#555" }}>
+                        <span>🦴 TIRO</span>
+                        <span style={{ color: "#333" }}>|</span>
+                        <span>〰 LÁTIGO</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Barra inferior info ── */}
+                <div style={{ display: "flex", gap: 20, padding: "8px 18px", borderTop: `1px solid ${th.accent}22`, borderBottom: `1px solid ${th.accent}22`, fontSize: 9, color: "#555", letterSpacing: "0.15em" }}>
+                  <span>★ W{g.checkpoint.w + 1} {WORLD_NAMES[g.checkpoint.w].slice(0, 12)}</span>
+                  <span>☠ ABATIDOS: {g.dead.size}</span>
+                  <span>🗺 SALAS: {g.explored.size}</span>
+                </div>
+
+                {/* ── Botones ── */}
+                <div style={{ display: "flex", gap: 12, padding: "14px 18px", justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }}
+                    style={{ padding: "8px 20px", background: th.accent + "22", border: `1px solid ${th.accent}88`, color: th.accent, fontFamily: "'Courier New', monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}
+                  >▶ CONTINUAR</button>
+                  <button
+                    onClick={handleRestart}
+                    style={{ padding: "8px 20px", background: "transparent", border: "1px solid #444", color: "#888", fontFamily: "'Courier New', monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}
+                  >↩ MENÚ PRINCIPAL</button>
+                  {isTouchDevice && (
+                    <span style={{ fontSize: 9, color: "#444", letterSpacing: "0.15em" }}>[ P ] continuar</span>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ── Game Over ── */}
         {screen === "playing" && ui.over && (
@@ -3965,14 +4589,14 @@ export default function ProyectoLuly() {
       </div>
 
       {/* ── Controles detallados (solo fuera de fullscreen y en juego) ── */}
-      {!isFullscreen && screen === "playing" && (
+      {!isFullscreenEffective && screen === "playing" && (
         <>
           <div className="mt-3 grid grid-cols-5 gap-4 text-xs font-mono max-w-3xl w-full px-4" style={{ color: "#666" }}>
-            <div><span className="text-gray-300 block mb-1">// mover</span>WASD | Flechas<br /><span style={{ color: "#7CFC00" }}>2×</span> izq/der: correr</div>
-            <div><span className="text-gray-300 block mb-1">// combate</span>Espacio: saltar | N: disparar<br />M: látigo | <span style={{ color: "#7CFC00" }}>SHIFT</span>: dash*</div>
-            <div><span className="text-gray-300 block mb-1">// checkpoint</span><span style={{ color: "#7CFC00" }}>E</span>: guardar perrera<br />★ reapareces ahí</div>
-            <div><span className="text-gray-300 block mb-1">// sistema</span>P: pausa | Tab: mapa<br /><span style={{ color: "#7CFC00" }}>Z</span>: zoom | <span style={{ color: "#7CFC00" }}>F</span>: fullscreen</div>
-            <div><span className="text-gray-300 block mb-1">// plataformas</span><span style={{ color: "#7CFC00" }}>S</span> agachado+S: bajar<br />Espacio+S: caer</div>
+            <div><span className="text-gray-300 block mb-1">// mover</span>WASD | Flechas<br /><span style={{ color: "#D4C400" }}>2×</span> izq/der: correr</div>
+            <div><span className="text-gray-300 block mb-1">// combate</span>Espacio: saltar | N: disparar<br />M: látigo | <span style={{ color: "#D4C400" }}>SHIFT</span>: dash*</div>
+            <div><span className="text-gray-300 block mb-1">// checkpoint</span><span style={{ color: "#D4C400" }}>E</span>: guardar perrera<br />★ reapareces ahí</div>
+            <div><span className="text-gray-300 block mb-1">// sistema</span>P: pausa | Tab: mapa<br /><span style={{ color: "#D4C400" }}>Z</span>: zoom | <span style={{ color: "#D4C400" }}>F</span>: fullscreen</div>
+            <div><span className="text-gray-300 block mb-1">// plataformas</span><span style={{ color: "#D4C400" }}>S</span> agachado+S: bajar<br />Espacio+S: caer</div>
           </div>
           <div className="mt-1 text-xs font-mono" style={{ color: "#2A2A2A" }}>
             * dash se desbloquea al matar el primer jefe
