@@ -86,6 +86,8 @@ type G = {
   staCircleAlpha: number
   // Mobile zoom: "far" = full world (default), "close" = zoom-in (personaje más grande)
   mobileZoom: "far" | "close"
+  // Fade-to-black al morir (0=transparente → 1=negro)
+  overFade: number
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1044,6 +1046,7 @@ function mkG_lazy(): G {
     staDisplay: "circle",
     staCircleAlpha: 0,
     mobileZoom: "far",
+    overFade: 0,
   } as G
 }
 
@@ -2294,7 +2297,7 @@ function activateWorld(g: G, newWorld: number) {
 
 function tickCamera(g: G) {
   const p = g.pl
-  const sc = g.mobileZoom === "close" ? 1.6 : 1.0
+  const sc = g.mobileZoom === "close" ? 1.25 : 1.0
   const vpW = CW / sc, vpH = CH / sc
   const activeW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const minCX = activeW * NC * RW
@@ -3528,7 +3531,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
   if (g.showMap) { drawFullMap(ctx, g); return }
   // ── Zoom móvil + screen shake (solo afectan al mundo, no al HUD) ────
-  const sc = g.mobileZoom === "close" ? 1.6 : 1.0
+  const sc = g.mobileZoom === "close" ? 1.25 : 1.0
   const hasShake = g.shakeX !== 0 || g.shakeY !== 0
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
@@ -3545,6 +3548,11 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
     if (g.tpAnim.phase === 0 && alpha > 0.3) {
       ctx.fillStyle = `rgba(150,255,150,${(alpha - 0.3) * 0.5})`; ctx.fillRect(0, 0, CW, CH)
     }
+  }
+  // ── Fade-to-black al morir ──────────────────────────────────────────────
+  if (g.over && g.overFade > 0) {
+    ctx.fillStyle = `rgba(0,0,0,${g.overFade * 0.82})`
+    ctx.fillRect(0, 0, CW, CH)
   }
   drawMinimap(ctx, g); drawHUD(ctx, g); drawTPMenu(ctx, g); drawWorldTransition(ctx, g)
 }
@@ -3608,7 +3616,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     // Círculo de stamina junto al personaje (screen-space)
     ctx.save()
     ctx.globalAlpha = g.staCircleAlpha
-    const _sc = g.mobileZoom === "close" ? 1.6 : 1.0
+    const _sc = g.mobileZoom === "close" ? 1.25 : 1.0
     const scx = (p.x - g.cx + PW / 2) * _sc      // centro X en pantalla (ajustado al zoom)
     const scy = (p.y - g.cy - 20) * _sc           // justo encima del personaje
     const rad = 13, lw = 3.5
@@ -3687,7 +3695,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.fillText(`DEV${devFlags ? " | " + devFlags.trim() : ""}`, CW - 48, 57)
     ctx.textAlign = "left"
   }
-  if (g.info) {
+  if (g.devMode && g.info) {
     ctx.fillStyle = "rgba(0,0,0,.85)"; ctx.beginPath(); ctx.roundRect(panX, 210, 200, 138, 8); ctx.fill()
     ctx.fillStyle = "#FFF"; ctx.font = "11px 'Courier New',monospace"
     const lines = [`FPS: ${g.lfps.toFixed(0)}`, `GFX: ${["BAJA", "MEDIA", "ALTA"][g.gfx]} [Q ciclar]`, `POS: ${Math.floor(p.x)},${Math.floor(p.y)}`, `SAL: W${curW}.${curC}.${curR}`, `ENEMIGOS: ${g.enemies.length}`, `MUERTOS: ${g.dead.size}`, `CP: W${g.checkpoint.w}`]
@@ -3975,7 +3983,11 @@ export default function ProyectoLuly() {
         accum += dt; let st = 0
         while (accum >= STEP && st < 4) { tick(g); accum -= STEP; st++ }
         if (accum > STEP * 2) accum = 0
-      } else accum = 0
+      } else {
+        accum = 0
+        // Fade-to-black progresivo al morir
+        if (g.over) g.overFade = Math.min(1, g.overFade + dt * 1.4)
+      }
       if (gameActiveRef.current) draw(g, ctx, sprs.current, devHoverRef.current)
       ut += dt; if (ut > .25) {
         ut = 0
@@ -4221,9 +4233,8 @@ export default function ProyectoLuly() {
   const handlePlay = () => {
     gameActiveRef.current = true
     setScreen("playing")
-    if (!getFSElement() && !isPseudoFS) {
-      tryFullscreen(containerRef.current || document.documentElement)
-    }
+    // Forzar fullscreen siempre al iniciar
+    tryFullscreen(containerRef.current || document.documentElement)
   }
   const handleToggleFS = () => {
     if (getFSElement() || isPseudoFS) exitFS()
@@ -4289,8 +4300,7 @@ export default function ProyectoLuly() {
   }
 
   // En modo close+fullscreen: objectFit cover llena toda la pantalla sin barras negras.
-  // El zoom interno (1.6×) ya redujo el viewport de mundo visible, así que los bordes
-  // recortados por "cover" son mínimos (≈ 6 px en landscape típico).
+  // El zoom interno (1.25×) reduce el viewport de mundo visible levemente.
   const mobileClose = G.current.mobileZoom === "close"
   const canvasStyle = isFullscreenEffective
     ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%",
@@ -4625,10 +4635,10 @@ export default function ProyectoLuly() {
           </div>
         )}
 
-        {/* ── FPS y gamepad (solo en juego) ── */}
+        {/* ── FPS (solo en devMode) y gamepad ── */}
         {screen === "playing" && (
           <div className="absolute top-1 left-2 text-xs font-mono opacity-40 flex items-center gap-2" style={{ color: "#888" }}>
-            <span>{ui.fps}fps</span>
+            {ui.showDevMap || G.current.devMode ? <span>{ui.fps}fps</span> : null}
             {gpadConnected && <span style={{ color: "#D4C400", opacity: 0.9 }} title="Control Xbox detectado">🎮</span>}
           </div>
         )}
@@ -4797,29 +4807,41 @@ export default function ProyectoLuly() {
           )
         })()}
 
-        {/* ── Game Over ── */}
-        {screen === "playing" && ui.over && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(2px)" }}>
-            <div className="text-center p-8 rounded-xl" style={{ background: "#0D0000", border: "1px solid #4A0000", boxShadow: "0 0 60px #FF000033, 0 0 120px #80000022", maxWidth: 340 }}>
-              <div style={{ fontSize: 52, lineHeight: 1, marginBottom: 8 }}>☠</div>
-              <h2 style={{ fontFamily: "monospace", fontSize: 26, fontWeight: "bold", color: "#FF3333", letterSpacing: "0.15em", marginBottom: 6 }}>GAME OVER</h2>
-              <p style={{ fontFamily: "monospace", fontSize: 12, color: "#AA7700", marginBottom: 4 }}>Luly ha caído… pero no está sola.</p>
-              <p style={{ fontFamily: "monospace", fontSize: 11, color: "#664400", marginBottom: 20 }}>puntuación: {ui.score}</p>
+        {/* ── Game Over ── aparece una vez que el fade llega a ~70% ── */}
+        {screen === "playing" && ui.over && G.current.overFade > 0.6 && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)"
+          }}>
+            <div style={{
+              textAlign: "center", padding: "36px 40px", borderRadius: 14,
+              background: "#0A0000", border: "1px solid #5A0000",
+              boxShadow: "0 0 80px #FF000044, 0 0 200px #60000033",
+              maxWidth: 360, width: "90vw", fontFamily: "'Courier New', monospace"
+            }}>
+              <div style={{ fontSize: 56, lineHeight: 1, marginBottom: 10 }}>☠</div>
+              <h2 style={{ fontSize: 28, fontWeight: "bold", color: "#FF3333", letterSpacing: "0.15em", margin: "0 0 8px" }}>GAME OVER</h2>
+              <p style={{ fontSize: 12, color: "#AA7700", margin: "0 0 4px" }}>Luly ha caído… pero él no se rinde.</p>
+              <p style={{ fontSize: 11, color: "#553300", margin: "0 0 24px" }}>puntuación: {ui.score}</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {hasSave && (
-                  <button onClick={handleContinueFromSave}
-                    style={{ padding: "10px 20px", border: "1px solid #AA5500", color: "#FFAA44", background: "#1A0800", fontFamily: "monospace", fontSize: 13, letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer" }}>
-                    ★ CONTINUAR desde guardado
-                  </button>
+                  <button onClick={handleContinueFromSave} style={{
+                    padding: "12px 20px", border: "1px solid #AA5500", color: "#FFAA44",
+                    background: "#1A0800", fontFamily: "inherit", fontSize: 13,
+                    letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer"
+                  }}>★ CONTINUAR desde guardado</button>
                 )}
-                <button onClick={handlePlayAgain}
-                  style={{ padding: "8px 20px", border: "1px solid #550000", color: "#FF4444", background: "#0D0000", fontFamily: "monospace", fontSize: 12, letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer" }}>
-                  [ REINTENTAR desde el inicio ]
-                </button>
-                <button onClick={handleRestart}
-                  style={{ padding: "8px 20px", border: "1px solid #333", color: "#666", background: "transparent", fontFamily: "monospace", fontSize: 11, letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer" }}>
-                  [ MENÚ PRINCIPAL ]
-                </button>
+                <button onClick={handlePlayAgain} style={{
+                  padding: "9px 20px", border: "1px solid #550000", color: "#FF4444",
+                  background: "#0D0000", fontFamily: "inherit", fontSize: 12,
+                  letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer"
+                }}>[ REINTENTAR desde el inicio ]</button>
+                <button onClick={handleRestart} style={{
+                  padding: "9px 20px", border: "1px solid #333", color: "#666",
+                  background: "transparent", fontFamily: "inherit", fontSize: 11,
+                  letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer"
+                }}>[ MENÚ PRINCIPAL ]</button>
               </div>
             </div>
           </div>
@@ -4831,7 +4853,7 @@ export default function ProyectoLuly() {
             <div className="text-center p-8 border border-yellow-700 rounded-xl" style={{ background: "#0D0A00" }}>
               <div className="text-4xl mb-3">⭐</div>
               <h2 className="text-2xl font-bold text-yellow-400 mb-1" style={{ fontFamily: "monospace" }}>LIBERTAD_CANINA</h2>
-              <p className="text-gray-400 font-mono text-sm mb-3">La resistencia perrina ha triunfado.</p>
+              <p className="text-gray-400 font-mono text-sm mb-3">La resistencia perruna ha triunfado.</p>
               <p className="text-yellow-500 font-mono font-bold mb-5">score_final: {ui.score}</p>
               <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
                 <button onClick={handlePlayAgain} className="px-5 py-2 border border-yellow-700 text-yellow-400 font-mono hover:bg-yellow-900 transition-colors">[ JUGAR DE NUEVO ]</button>

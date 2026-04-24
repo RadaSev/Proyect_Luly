@@ -20,7 +20,7 @@ import type { Metadata, Viewport } from "next"
 
 export const metadata: Metadata = {
   title: "Proyecto Luly — Metroidvania",
-  description: "Un metroidvania protagonizado por una perrita llamada Luly",
+  description: "Un metroidvania protagonizado por un perrito llamado Luly",
   other: {
     // iOS Safari: permite modo standalone al añadir al inicio
     "apple-mobile-web-app-capable": "yes",
