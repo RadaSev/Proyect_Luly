@@ -81,6 +81,9 @@ type G = {
   discoveredCPs: Set<string>
   tpMenu: { open: boolean; idx: number } | null
   tpAnim: { timer: number; phase: 0 | 1; destX: number; destY: number } | null
+  // Stamina display mode: "bar" = classic top-right bar, "circle" = circle near player
+  staDisplay: "bar" | "circle"
+  staCircleAlpha: number
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -308,7 +311,7 @@ function lrDoorY_rel(w: number, leftC: number, r: number): number {
     Math.floor((RH - WT - DH) * 0.28),
     Math.floor((RH - WT - DH) * 0.52),
     Math.floor((RH - WT - DH) * 0.74),
-    RH - WT - DH - 8,
+    RH - WT - DH,
   ]
   return slots[h % 5]
 }
@@ -1036,6 +1039,8 @@ function mkG_lazy(): G {
     discoveredCPs: new Set<string>(["0_0_4"]),
     tpMenu: null,
     tpAnim: null,
+    staDisplay: "circle",
+    staCircleAlpha: 0,
   } as G
 }
 
@@ -1253,18 +1258,19 @@ function tickPlayer(g: G) {
   } else {
     p.stamina = Math.min(p.maxStamina, p.stamina + (moving ? STA_RCH_WALK : STA_RCH_IDLE) * STEP)
   }
+  // Fade stamina circle in/out
+  const staActive = p.exhausted || p.stamina < p.maxStamina - 0.5
+  g.staCircleAlpha = staActive
+    ? Math.min(1, g.staCircleAlpha + STEP * 6)
+    : Math.max(0, g.staCircleAlpha - STEP * 1.2)
   const exhaustedMult = p.exhausted ? 0.65 : 1
   const run = actuallyRunning, spd = run ? RUN : Math.round(WALK * exhaustedMult)
   const left = k["a"] || k["arrowleft"], right = k["d"] || k["arrowright"]
   const downKey = k["s"] || k["arrowdown"], jk = k[" "] || k["arrowup"]
   const wantCrouch = downKey && p.onGround && !jk
-  if (wantCrouch && !p.crouching) { p.y += (PH - PH_CROUCH); p.h = PH_CROUCH; p.crouching = true; p.pa = "jump"; p.vx = 0 }
-  else if (!wantCrouch && p.crouching) {
-    const headRoom = p.y - (PH - PH_CROUCH)
-    if (!activePlats(g).some(pl => pl.mode === "s" && pl.y + pl.h <= p.y + 2 && pl.y + pl.h > headRoom && pl.x < p.x + p.w && pl.x + pl.w > p.x)) { p.y -= (PH - PH_CROUCH); p.h = PH; p.crouching = false }
-  }
-  if (p.crouching) { p.vx = 0 }
-  else if (left && !right) { p.vx = -spd; p.facing = -1; p.pa = run ? "run" : "walk" }
+  if (wantCrouch && !p.crouching) { p.crouching = true }
+  else if (!wantCrouch && p.crouching) { p.crouching = false }
+  if (left && !right) { p.vx = -spd; p.facing = -1; p.pa = run ? "run" : "walk" }
   else if (right && !left) { p.vx = spd; p.facing = 1; p.pa = run ? "run" : "walk" }
   else { p.vx = 0; if (p.onGround) p.pa = "idle" }
 
@@ -1351,7 +1357,7 @@ function tickPlayer(g: G) {
 
   if (p.onGround && !standingOnOneWay_plat) p.dropThruPlatform = false
 
-  if (k["n"] && p.ammo > 0 && !p.crouching) {
+  if (k["n"] && p.ammo > 0) {
     const mkP = () => { const d = getDir(g); const px = p.x + (p.facing === 1 ? p.w : 0), py = p.y + p.h / 2; g.projs.push({ x: px, y: py, vx: d.x * PSPD, vy: d.y * PSPD - 1, active: true, pl: true, star: false, rot: Math.atan2(d.y, d.x) * 180 / Math.PI, life: 3.5, dist: 0, ox: px, oy: py }); p.ammo-- }
     if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = "attack" }
     else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = "attack" }
@@ -3295,7 +3301,7 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
   ctx.fillText("// MODO DESARROLLADOR — MAPA TELEPORT //", CW / 2, 20)
   ctx.fillStyle = "#1A6622"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText(
-    `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
+    `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    STA: ${g.staDisplay === "circle" ? "● CIRC" : "▬ BAR"} [J]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
     CW / 2, 36
   )
   ctx.textAlign = "left"
@@ -3517,24 +3523,65 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
   ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(CW - 92, 8, 84, 22, 4); ctx.fill()
   ctx.fillStyle = th.accent; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`${g.score}`, CW - 12, 23); ctx.textAlign = "left"
   ctx.fillStyle = "#888"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("PTS", CW - 86, 23)
-  const stRatio = p.stamina / p.maxStamina, stW = 84, stH = 10, stX = CW - 92, stY = 34
-  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 3); ctx.fill()
-  if (p.exhausted) {
-    if (Math.floor(Date.now() / 250) % 2 === 0) { ctx.fillStyle = "#FF220044"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, stW - 2, stH - 2, 2); ctx.fill() }
-    ctx.strokeStyle = "#FF3300BB"; ctx.lineWidth = 1.5; ctx.strokeRect(stX, stY, stW, stH)
-    const cdRatio = p.staminaCooldown / 5.0
-    ctx.fillStyle = "#FF330055"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * cdRatio), stH - 2, 2); ctx.fill()
-    ctx.fillStyle = "#FF6600DD"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, stX + stW / 2, stY + 8); ctx.textAlign = "left"
-  } else {
-    const stCol = stRatio > 0.55 ? "#44EE44" : stRatio > 0.25 ? "#EEcc00" : "#FF4400"
-    ctx.fillStyle = stCol; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), stH - 2, 2); ctx.fill()
-    ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), Math.round(stH / 2) - 1, 1); ctx.fill()
+  // ── STAMINA: BAR (legacy) o CIRCLE (junto al personaje) ──────────────────
+  const stRatio = p.stamina / p.maxStamina
+  if (g.staDisplay === "bar") {
+    const stW = 84, stH = 10, stX = CW - 92, stY = 34
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 3); ctx.fill()
+    if (p.exhausted) {
+      if (Math.floor(Date.now() / 250) % 2 === 0) { ctx.fillStyle = "#FF220044"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, stW - 2, stH - 2, 2); ctx.fill() }
+      ctx.strokeStyle = "#FF3300BB"; ctx.lineWidth = 1.5; ctx.strokeRect(stX, stY, stW, stH)
+      const cdRatio = p.staminaCooldown / 5.0
+      ctx.fillStyle = "#FF330055"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * cdRatio), stH - 2, 2); ctx.fill()
+      ctx.fillStyle = "#FF6600DD"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, stX + stW / 2, stY + 8); ctx.textAlign = "left"
+    } else {
+      const stCol = stRatio > 0.55 ? "#44EE44" : stRatio > 0.25 ? "#EEcc00" : "#FF4400"
+      ctx.fillStyle = stCol; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), stH - 2, 2); ctx.fill()
+      ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), Math.round(stH / 2) - 1, 1); ctx.fill()
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "9px 'Courier New',monospace"
+    ctx.textAlign = "right"; ctx.fillText(p.exhausted ? "AGOTADO" : "STA", stX - 2, stY + 8); ctx.textAlign = "left"
+  } else if (g.staCircleAlpha > 0.01) {
+    // Círculo de stamina junto al personaje (screen-space)
+    ctx.save()
+    ctx.globalAlpha = g.staCircleAlpha
+    const scx = p.x - g.cx + PW / 2         // centro X en pantalla
+    const scy = p.y - g.cy - 20             // justo encima del personaje
+    const rad = 13, lw = 3.5
+    // Fondo del círculo
+    ctx.beginPath(); ctx.arc(scx, scy, rad, 0, Math.PI * 2)
+    ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fill()
+    // Arco de relleno (de arriba = -π/2, sentido horario)
+    const startA = -Math.PI / 2
+    if (p.exhausted) {
+      // Parpadeo rojo + countdown
+      const blink = Math.floor(Date.now() / 280) % 2 === 0
+      ctx.strokeStyle = blink ? "#FF2200" : "#FF6600"
+      ctx.lineWidth = lw
+      const cdRatio = Math.max(0, p.staminaCooldown / 4.5)
+      ctx.beginPath(); ctx.arc(scx, scy, rad, startA, startA + cdRatio * Math.PI * 2)
+      ctx.stroke()
+      ctx.fillStyle = blink ? "#FF4400DD" : "#FF6600BB"
+      ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"
+      ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, scx, scy)
+      ctx.textBaseline = "alphabetic"
+    } else {
+      const arcCol = stRatio > 0.55 ? "#44EE44" : stRatio > 0.25 ? "#EECC00" : "#FF4400"
+      ctx.strokeStyle = arcCol; ctx.lineWidth = lw; ctx.lineCap = "round"
+      ctx.beginPath(); ctx.arc(scx, scy, rad, startA, startA + stRatio * Math.PI * 2)
+      ctx.stroke()
+    }
+    // Borde exterior sutil
+    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.arc(scx, scy, rad, 0, Math.PI * 2); ctx.stroke()
+    ctx.restore()
+    ctx.textAlign = "left"
   }
-  ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "9px 'Courier New',monospace"
-  ctx.textAlign = "right"; ctx.fillText(p.exhausted ? "AGOTADO" : "STA", stX - 2, stY + 8); ctx.textAlign = "left"
+  // ── JUMP / PLAT indicators (siempre visibles) ─────────────────────────────
   {
-    const djY = stY + 14, sq = 8, sqGap = 5, totalSq = 2 * (sq + sqGap) - sqGap
-    const djLabelX = stX - 2, djStartX = stX + (stW - totalSq) / 2
+    const _stX = CW - 92, _stY = 34, _stW = 84
+    const djY = _stY + 14, sq = 8, sqGap = 5, totalSq = 2 * (sq + sqGap) - sqGap
+    const djLabelX = _stX - 2, djStartX = _stX + (_stW - totalSq) / 2
     ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "9px 'Courier New',monospace"
     ctx.textAlign = "right"; ctx.fillText("JUMP", djLabelX, djY + 7); ctx.textAlign = "left"
     const j1 = p.onGround || (!p.jh)
@@ -3542,9 +3589,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.beginPath(); ctx.roundRect(djStartX, djY, sq, sq, 2); ctx.fill()
     ctx.fillStyle = p.djumpAvail ? "#00DDFF" : "#FFFFFF22"
     ctx.beginPath(); ctx.roundRect(djStartX + sq + sqGap, djY, sq, sq, 2); ctx.fill()
-  }
-  {
-    const pfY = stY + 14 + 12, pfLabelX = stX - 2
+    const pfY = _stY + 14 + 12, pfLabelX = _stX - 2
     const onPlat = p.onGround && activePlats(g).some(pl =>
       pl.mode === "t" && p.x + p.w > pl.x && p.x < pl.x + pl.w && Math.abs((p.y + p.h) - pl.y) <= 8
     )
@@ -3916,6 +3961,7 @@ export default function ProyectoLuly() {
       if (g.devMode && k === "o") g.infiniteAmmo = !g.infiniteAmmo
       if (g.devMode && k === "k") g.noEnemies = !g.noEnemies
       if (g.devMode && k === "u") g.ohko = !g.ohko
+      if (g.devMode && k === "j") g.staDisplay = g.staDisplay === "circle" ? "bar" : "circle"
       if (g.devMode && k === "h") {
         g.showDevMap = !g.showDevMap
         g.paused = g.showDevMap
