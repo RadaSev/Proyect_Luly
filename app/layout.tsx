@@ -39,7 +39,6 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",   // extiende a la pantalla completa (muescas/notch)
-  interactiveWidget: "resizes-content",
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

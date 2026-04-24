@@ -2347,6 +2347,15 @@ function tickCheckpoints(g: G) {
       spawnExplosion(g, g.tpAnim.destX + PW / 2, g.tpAnim.destY + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88", "#88FFFF"], 16, 4.5)
       g.tpAnim.phase = 1; g.tpAnim.timer = 0
     } else if (g.tpAnim.phase === 1 && g.tpAnim.timer >= 0.42) {
+      // Al llegar: actualizar checkpoint al destino y guardar automáticamente
+      const arrived = ALL_CPS.find(cp =>
+        Math.abs(cp.x - g.tpAnim!.destX) < 8 && Math.abs(cp.y - g.tpAnim!.destY) < 8
+      )
+      if (arrived) {
+        g.checkpoint = { w: arrived.w, x: arrived.x, y: arrived.y }
+        saveGame(g)
+        g.kennelMsg = 3   // muestra el mensaje de guardado
+      }
       g.tpAnim = null
     }
   }
@@ -3892,7 +3901,9 @@ export default function ProyectoLuly() {
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
   const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false })
-  const [hasSave, setHasSave] = useState(() => loadSaveData() !== null)
+  // Diferir la lectura de localStorage al cliente para evitar hydration mismatch
+  const [hasSave, setHasSave] = useState(false)
+  useEffect(() => { setHasSave(loadSaveData() !== null) }, [])
   // "start" = menú inicio  |  "playing" = partida activa
   const [screen, setScreen] = useState<"start" | "playing">("start")
   const gameActiveRef = useRef(false)
@@ -4277,8 +4288,14 @@ export default function ProyectoLuly() {
     )
   }
 
+  // En modo close+fullscreen: objectFit cover llena toda la pantalla sin barras negras.
+  // El zoom interno (1.6×) ya redujo el viewport de mundo visible, así que los bordes
+  // recortados por "cover" son mínimos (≈ 6 px en landscape típico).
+  const mobileClose = G.current.mobileZoom === "close"
   const canvasStyle = isFullscreenEffective
-    ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%", objectFit: "contain" as const, border: "none", borderRadius: 0 }
+    ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%",
+        objectFit: (mobileClose ? "cover" : "contain") as "cover" | "contain",
+        border: "none", borderRadius: 0 }
     : { display: "block", imageRendering: "pixelated" as const, border: "2px solid #1A1A1A", borderRadius: 4 }
 
   // Estilo común de botón para la pantalla de inicio
@@ -4461,7 +4478,7 @@ export default function ProyectoLuly() {
 
   return (
     <div className="w-full h-screen bg-black flex flex-col items-center justify-center overflow-hidden select-none">
-      <div ref={containerRef} className="relative" style={isFullscreenEffective ? { position: "fixed", top: 0, left: 0, width: winDims.w, height: winDims.h, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999 } : { boxShadow: "0 0 60px rgba(0,0,0,.95)" }}>
+      <div ref={containerRef} className="relative" style={isFullscreenEffective ? { position: "fixed", top: 0, left: 0, width: winDims.w, height: winDims.h, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999, overflow: "hidden" } : { boxShadow: "0 0 60px rgba(0,0,0,.95)" }}>
 
         {/* ── Canvas del juego ── */}
         <canvas ref={canvasRef} width={CW} height={CH} style={{ ...canvasStyle, display: screen === "playing" ? "block" : "none" }} />
