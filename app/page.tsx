@@ -3161,6 +3161,129 @@ function getCratesInRoom(w: number, c: number, r: number, g: G): number {
   return g.crates.filter(cr => cr.active && cr.x >= x0 && cr.x < x0 + RW && cr.y >= y0 && cr.y < y0 + RH).length
 }
 
+// ══════════════════════════════════════════════════════════════
+//  Panel DEV — canvas interno, debajo del minimap
+// ══════════════════════════════════════════════════════════════
+function drawDevPanel(ctx: CanvasRenderingContext2D, g: G) {
+  if (!g.devMode) return
+  const p = g.pl
+  const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
+  const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
+  const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
+
+  // Misma geometría que el minimap para alinearse perfectamente
+  const large = !!g.keys["z"]
+  const rw = large ? 16 : 9, rh = large ? 11 : 6, gap = large ? 2 : 1
+  const gridW = NC * (rw + gap) - gap, gridH = NR * (rh + gap) - gap
+  const mpad = 8, mw = gridW + mpad * 2, mh = gridH + mpad * 2 + 14
+  const mx = CW - mw - 6, my = CH - mh - 6
+
+  const panX = 4, panY = my
+  const panW = mx - panX - 4
+  const panH = mh
+
+  // Fondo del panel
+  ctx.fillStyle = "rgba(0,10,0,0.92)"
+  ctx.beginPath(); ctx.roundRect(panX, panY, panW, panH, 6); ctx.fill()
+  ctx.strokeStyle = "#22AA4488"; ctx.lineWidth = 1
+  ctx.strokeRect(panX, panY, panW, panH)
+
+  const font9 = "10px 'Courier New',monospace"
+  const font9b = "bold 10px 'Courier New',monospace"
+  const LH = 12   // line height
+  const TOP = panY + 14  // primera línea de datos (header en TOP-2)
+  const nCols = 5
+  const colW = Math.floor(panW / nCols)
+
+  // Helper: dibuja un header de sección
+  const hdr = (label: string, col: number) => {
+    ctx.fillStyle = "#22AA44"; ctx.font = font9b; ctx.textAlign = "left"
+    ctx.fillText(label, panX + col * colW + 6, panY + 10)
+    ctx.fillStyle = "#22AA4455"; ctx.fillRect(panX + col * colW + 5, panY + 12, colW - 10, 1)
+  }
+  // Helper: dibuja una fila col=índice, row=fila(0-based), key=amarillo, val=verde claro
+  const row = (col: number, r: number, key: string, val: string, valColor = "#AAFFAA") => {
+    const x = panX + col * colW + 6
+    const y = TOP + r * LH
+    ctx.font = font9b; ctx.fillStyle = "#FFDD44"; ctx.textAlign = "left"
+    ctx.fillText(key, x, y)
+    ctx.font = font9; ctx.fillStyle = valColor
+    ctx.fillText(val, x + ctx.measureText(key).width + 3, y)
+  }
+  // Helper: fila de toggle ON/OFF
+  const tog = (col: number, r: number, keyLabel: string, name: string, on: boolean) => {
+    const x = panX + col * colW + 6
+    const y = TOP + r * LH
+    ctx.font = font9b; ctx.fillStyle = "#FFDD44"; ctx.textAlign = "left"
+    ctx.fillText(`[${keyLabel}]`, x, y)
+    const kw = ctx.measureText(`[${keyLabel}]`).width + 3
+    ctx.font = font9b
+    ctx.fillStyle = on ? "#FF4444" : "#555555"
+    ctx.fillText(`${name}:`, x + kw, y)
+    const nw = ctx.measureText(`${name}:`).width + 3
+    ctx.fillStyle = on ? "#FF8888" : "#444444"
+    ctx.fillText(on ? "■ON" : "□OFF", x + kw + nw, y)
+  }
+
+  // ── Col 0: ESTADO ──────────────────────────────────────────
+  hdr("ESTADO", 0)
+  row(0, 0, "FPS:", `${g.lfps.toFixed(0)}`, g.lfps < 45 ? "#FF6644" : "#AAFFAA")
+  row(0, 1, "HP:", `${p.hp}/${p.maxHp}`)
+  row(0, 2, "STA:", `${Math.floor(p.stamina)}/${p.maxStamina}${p.exhausted ? " !EX" : ""}`, p.exhausted ? "#FF6644" : "#AAFFAA")
+  row(0, 3, "POS:", `${Math.floor(p.x)},${Math.floor(p.y)}`)
+  row(0, 4, "SALA:", `W${curW}.${curC}.${curR}`)
+  row(0, 5, "KILLS:", `${g.dead.size}`)
+  row(0, 6, "CP:", `W${g.checkpoint.w} ${Math.floor(g.checkpoint.x)},${Math.floor(g.checkpoint.y)}`)
+
+  // ── Col 1: MOVER ────────────────────────────────────────────
+  hdr("MOVER", 1)
+  row(1, 0, "W/A/D", "→ caminar/saltar")
+  row(1, 1, "S", "→ caída rápida")
+  row(1, 2, "SHIFT", "→ dash")
+  row(1, 3, "SPACE", "→ saltar")
+  row(1, 4, "Z", "→ minimap zoom")
+  row(1, 5, "ESC", "→ pausa/menú")
+  row(1, 6, "TAB", "→ mapa completo")
+
+  // ── Col 2: COMBATE ──────────────────────────────────────────
+  hdr("COMBATE", 2)
+  row(2, 0, "N", "→ disparar (AMMO)")
+  row(2, 1, "M", "→ látigo/parry")
+  row(2, 2, "F", "→ interactuar")
+  row(2, 3, "↑+N", "→ disparo arriba")
+  row(2, 4, "↓+N", "→ disparo abajo")
+  row(2, 5, "GND+↓", "→ caer plataforma")
+  row(2, 6, "AMMO:", `${p.ammo}/15`)
+
+  // ── Col 3: DEV TOGGLES ──────────────────────────────────────
+  hdr("DEV MODE", 3)
+  tog(3, 0, "I", "GOD", g.godMode)
+  tog(3, 1, "O", "AMM∞", g.infiniteAmmo)
+  tog(3, 2, "K", "NOENM", g.noEnemies)
+  tog(3, 3, "U", "OHKO", g.ohko)
+  tog(3, 4, "J", g.staDisplay === "circle" ? "STA●" : "STA▬", g.staDisplay === "circle")
+  tog(3, 5, "P", g.mobileZoom === "close" ? "ZOOM×" : "ZOOM○", g.mobileZoom === "close")
+  row(3, 6, "[L]", "→ DEVMAP  [J] modo dev")
+
+  // ── Col 4: FLAGS / ESTADÍSTICAS ─────────────────────────────
+  hdr("ESTADÍSTICAS", 4)
+  const activeFlags = [
+    g.godMode && "GOD",
+    g.infiniteAmmo && "AMM∞",
+    g.noEnemies && "NOENM",
+    g.ohko && "OHKO",
+  ].filter(Boolean) as string[]
+  row(4, 0, "FLAGS:", activeFlags.length ? activeFlags.join(" ") : "ninguno", activeFlags.length ? "#FF8888" : "#555555")
+  row(4, 1, "ENEMS:", `${g.enemies.filter(e => e.active && !e.dying).length} vivos / ${g.enemies.length} total`)
+  row(4, 2, "SCORE:", `${g.score}`)
+  row(4, 3, "LIVES:", `${g.lives}`)
+  row(4, 4, "GFX:", `${["BAJA", "MEDIA", "ALTA"][g.gfx]} [Q] ciclar`)
+  row(4, 5, "PROJS:", `${g.projs.filter(pr => pr.active).length}`)
+  row(4, 6, "SPARKS:", `${g.sparks.filter(s => s.life > 0).length}`)
+
+  ctx.textAlign = "left"
+}
+
 function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
   const p = g.pl
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
@@ -3554,7 +3677,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
     ctx.fillStyle = `rgba(0,0,0,${g.overFade * 0.82})`
     ctx.fillRect(0, 0, CW, CH)
   }
-  drawMinimap(ctx, g); drawHUD(ctx, g); drawTPMenu(ctx, g); drawWorldTransition(ctx, g)
+  drawMinimap(ctx, g); drawDevPanel(ctx, g); drawHUD(ctx, g); drawTPMenu(ctx, g); drawWorldTransition(ctx, g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -3688,20 +3811,14 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.fillText(msgText, CW / 2, CH - 46); ctx.textAlign = "left"; ctx.restore()
   }
   if (g.devMode) {
-    ctx.fillStyle = "rgba(0,80,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW - 90, 46, 84, 16, 3); ctx.fill()
-    ctx.strokeStyle = "#00FF44"; ctx.lineWidth = 1; ctx.strokeRect(CW - 90, 46, 84, 16)
+    // Badge debajo de los indicadores JUMP/PLAT (que terminan en ~y≈70)
+    ctx.fillStyle = "rgba(0,80,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW - 90, 76, 84, 16, 3); ctx.fill()
+    ctx.strokeStyle = "#00FF44"; ctx.lineWidth = 1; ctx.strokeRect(CW - 90, 76, 84, 16)
     ctx.fillStyle = "#00FF44"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     const devFlags = (g.godMode ? "GOD " : "") + (g.infiniteAmmo ? "AMM " : "") + (g.noEnemies ? "NOENM " : "") + (g.ohko ? "OHKO" : "")
-    ctx.fillText(`DEV${devFlags ? " | " + devFlags.trim() : ""}`, CW - 48, 57)
+    ctx.fillText(`DEV${devFlags ? " | " + devFlags.trim() : ""}`, CW - 48, 87)
     ctx.textAlign = "left"
   }
-  if (g.devMode && g.info) {
-    ctx.fillStyle = "rgba(0,0,0,.85)"; ctx.beginPath(); ctx.roundRect(panX, 210, 200, 138, 8); ctx.fill()
-    ctx.fillStyle = "#FFF"; ctx.font = "11px 'Courier New',monospace"
-    const lines = [`FPS: ${g.lfps.toFixed(0)}`, `GFX: ${["BAJA", "MEDIA", "ALTA"][g.gfx]} [Q ciclar]`, `POS: ${Math.floor(p.x)},${Math.floor(p.y)}`, `SAL: W${curW}.${curC}.${curR}`, `ENEMIGOS: ${g.enemies.length}`, `MUERTOS: ${g.dead.size}`, `CP: W${g.checkpoint.w}`]
-    lines.forEach((l, i) => ctx.fillText(l, panX + 8, 226 + i * 18))
-  }
-
   // ── Barra de boss — solo visible cuando el jugador está EN la sala del boss ──
   const inBossRoom = curC === WORLD_EXITS[curW][0] && curR === WORLD_EXITS[curW][1]
   const boss = inBossRoom ? g.enemies.find(e => e.active && !e.dying && e.boss && e.world === curW) : null
@@ -3908,7 +4025,7 @@ export default function ProyectoLuly() {
   const G = useRef<G>(mkG_lazy())
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
-  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false })
+  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false })
   // Diferir la lectura de localStorage al cliente para evitar hydration mismatch
   const [hasSave, setHasSave] = useState(false)
   useEffect(() => { setHasSave(loadSaveData() !== null) }, [])
@@ -3998,7 +4115,7 @@ export default function ProyectoLuly() {
         // // Garantía absoluta: gfx=0 nunca debería ocurrir via autoGfx
         // if (g.gfx < 1) g.gfx = 1
         // FIX: incluir showDevMap en el estado UI para controlar el overlay de pausa
-        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap })
+        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap, devMode: g.devMode })
       }
       raf = requestAnimationFrame(loop)
     }
@@ -4034,7 +4151,7 @@ export default function ProyectoLuly() {
         g.kennelMsg = 1.8
       }
       if (k === "r") G.current = mkG_lazy()
-      if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false } }
+      if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
       if (g.devMode && k === "i") g.godMode = !g.godMode
       if (g.devMode && k === "o") g.infiniteAmmo = !g.infiniteAmmo
       if (g.devMode && k === "k") g.noEnemies = !g.noEnemies
@@ -4202,10 +4319,12 @@ export default function ProyectoLuly() {
         tryFullscreen(containerRef.current || document.documentElement)
       }
     }
+    // touch=true en MacBooks con trackpad (maxTouchPoints=5) — no es "móvil"
     const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
     setIsTouchDevice(touch)
-    // Zoom móvil automático: pantallas pequeñas → vista cercana por defecto
-    if (touch || window.innerWidth < 900) G.current.mobileZoom = "close"
+    // Zoom close solo en pantallas verdaderamente pequeñas (<900px)
+    // NO activar solo por maxTouchPoints>0 — los MacBooks con trackpad tienen eso
+    if (window.innerWidth < 900) G.current.mobileZoom = "close"
     checkOrientation()
     window.addEventListener('resize', checkOrientation)
     window.addEventListener('orientationchange', checkOrientation)
@@ -4228,7 +4347,7 @@ export default function ProyectoLuly() {
     return () => { window.removeEventListener("gamepadconnected", onConnect); window.removeEventListener("gamepaddisconnected", onDisconnect) }
   }, [])
 
-  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false }) }
+  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false }) }
 
   const handlePlay = () => {
     gameActiveRef.current = true
@@ -4250,7 +4369,7 @@ export default function ProyectoLuly() {
       applyLoad(G.current, save)
       setHasSave(true)
     }
-    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false })
+    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false })
     setScreen("playing")
     gameActiveRef.current = true
     if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement)
@@ -4299,14 +4418,25 @@ export default function ProyectoLuly() {
     )
   }
 
-  // En modo close+fullscreen: objectFit cover llena toda la pantalla sin barras negras.
-  // El zoom interno (1.25×) reduce el viewport de mundo visible levemente.
+  // ── Canvas CSS: object-fit:contain via CSS min() ────────────────────────────
+  // El canvas HTML interno es siempre CW×CH (1050×600) — esa es la resolución
+  // lógica del juego. El CSS lo escala al mayor tamaño que cabe en la ventana
+  // SIN deformar la relación 1050:600 (1.75:1).
+  //
+  // Técnica: width = min(100vw, 100vh × 1.75)  +  height = auto
+  //   · Si la pantalla es más ancha que 1.75:1 → se limita por altura  (pillar-box)
+  //   · Si la pantalla es más estrecha que 1.75:1 → se limita por anchura (letter-box)
+  //   · No usa objectFit (no soportado en <canvas> en Safari)
+  //   · No requiere JS ni winDims → inmune a SSR/hidratación
+  const canvasStyle: React.CSSProperties = {
+    display: "block",
+    imageRendering: "pixelated",
+    width:  `min(100%, calc(${CW / CH} * 100vh))`,
+    height: "auto",
+    border: "none",
+    borderRadius: 0,
+  }
   const mobileClose = G.current.mobileZoom === "close"
-  const canvasStyle = isFullscreenEffective
-    ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%",
-        objectFit: (mobileClose ? "cover" : "contain") as "cover" | "contain",
-        border: "none", borderRadius: 0 }
-    : { display: "block", imageRendering: "pixelated" as const, border: "2px solid #1A1A1A", borderRadius: 4 }
 
   // Estilo común de botón para la pantalla de inicio
   const menuBtn = (accent: string): CSSProperties => ({
@@ -4488,7 +4618,9 @@ export default function ProyectoLuly() {
 
   return (
     <div className="w-full h-screen bg-black flex flex-col items-center justify-center overflow-hidden select-none">
-      <div ref={containerRef} className="relative" style={isFullscreenEffective ? { position: "fixed", top: 0, left: 0, width: winDims.w, height: winDims.h, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999, overflow: "hidden" } : { boxShadow: "0 0 60px rgba(0,0,0,.95)" }}>
+      {/* El contenedor SIEMPRE llena el viewport — top/left/right/bottom:0 es más robusto
+           que width/height numérico (inmune a winDims stale y a iOS safari address bar) */}
+      <div ref={containerRef} className="relative" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#000", zIndex: 9999, overflow: "hidden" }}>
 
         {/* ── Canvas del juego ── */}
         <canvas ref={canvasRef} width={CW} height={CH} style={{ ...canvasStyle, display: screen === "playing" ? "block" : "none" }} />
@@ -4499,14 +4631,14 @@ export default function ProyectoLuly() {
         {screen === "start" && (
           <div
             style={{
-              width: isFullscreenEffective ? winDims.w : CW,
-              height: isFullscreenEffective ? winDims.h : CH,
+              width: "100%",
+              height: "100%",
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
               position: "relative", overflow: "hidden",
               backgroundImage: `url(${asset("/assets/menu_bg.png")}), linear-gradient(180deg,#040804 0%,#091409 55%,#020502 100%)`,
               backgroundSize: "cover", backgroundPosition: "center",
-              border: isFullscreenEffective ? "none" : "2px solid #1A1A1A",
-              borderRadius: isFullscreenEffective ? 0 : 4,
+              border: "none",
+              borderRadius: 0,
               fontFamily: "'Courier New',monospace",
             }}
             onClick={() => { if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement) }}
@@ -4864,20 +4996,6 @@ export default function ProyectoLuly() {
         )}
       </div>
 
-      {/* ── Controles detallados (solo fuera de fullscreen y en juego) ── */}
-      {!isFullscreenEffective && screen === "playing" && (
-        <>
-          <div className="mt-3 grid grid-cols-5 gap-4 text-xs font-mono max-w-3xl w-full px-4" style={{ color: "#666" }}>
-            <div><span className="text-gray-300 block mb-1">// mover</span>WASD | Flechas<br /><span style={{ color: "#D4C400" }}>2×</span> izq/der: correr</div>
-            <div><span className="text-gray-300 block mb-1">// combate</span>Espacio: saltar | N: disparar<br />M: látigo | <span style={{ color: "#D4C400" }}>SHIFT</span>: dash*</div>
-            <div><span className="text-gray-300 block mb-1">// checkpoint</span><span style={{ color: "#D4C400" }}>E</span>: guardar perrera<br />★ reapareces ahí</div>
-            <div><span className="text-gray-300 block mb-1">// sistema</span>P: pausa | Tab: mapa<br /><span style={{ color: "#D4C400" }}>Z</span>: zoom | <span style={{ color: "#D4C400" }}>F</span>: fullscreen</div>
-            <div><span className="text-gray-300 block mb-1">// plataformas</span><span style={{ color: "#D4C400" }}>S</span> agachado+S: bajar<br />Espacio+S: caer</div>
-          </div>
-          <div className="mt-1 text-xs font-mono" style={{ color: "#2A2A2A" }}>
-            * dash se desbloquea al matar el primer jefe
-          </div>
-      </>)}
     </div>
   )
 }
