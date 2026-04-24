@@ -61,7 +61,7 @@ type WorldSnapshot = {
   explored: Set<string>
 }
 type G = {
-  pl: Player; enemies: Enemy[]; projs: Proj[]; bones: Bone[]; whip: Whip | null; drops: Drop[]; crates: Crate[]; cx: number; cy: number; keys: Record<string, boolean>; lives: number; score: number; dead: Set<string>; cw: Set<number>; paused: boolean; over: boolean; won: boolean; info: boolean; gfx: 0 | 1 | 2; autoGfx: boolean; fps: number[]; lfps: number; dropThru: boolean; showMap: boolean; explored: Set<string>; checkpoint: { w: number; x: number; y: number }; lastWorld: number; worldAnim: WorldAnim | null; kennelMsg: number; minimapLarge: boolean; sparks: Spark[]; gpadIdx: number; devMode: boolean; godMode: boolean; infiniteAmmo: boolean;
+  pl: Player; enemies: Enemy[]; projs: Proj[]; bones: Bone[]; whip: Whip | null; drops: Drop[]; crates: Crate[]; cx: number; cy: number; keys: Record<string, boolean>; lives: number; score: number; kills: number; dead: Set<string>; cw: Set<number>; paused: boolean; over: boolean; won: boolean; info: boolean; gfx: 0 | 1 | 2; autoGfx: boolean; fps: number[]; lfps: number; dropThru: boolean; showMap: boolean; explored: Set<string>; checkpoint: { w: number; x: number; y: number }; lastWorld: number; worldAnim: WorldAnim | null; kennelMsg: number; minimapLarge: boolean; sparks: Spark[]; gpadIdx: number; devMode: boolean; godMode: boolean; infiniteAmmo: boolean;
   noEnemies: boolean;
   showDevMap: boolean; devMapWorld: number;
   // FIX: cursor celda a celda en dev map (reemplaza mapScrollX/Y)
@@ -99,6 +99,41 @@ const THEMES: Theme[] = [
 ]
 const WORLD_NAMES = ["LAS PERRERAS", "FÁBRICA CANINA", "LOS TUBOS", "CTRL. CENTRAL"]
 const WORLD_SUBS = ["Libertad o destino", "Engranajes de opresión", "Las venas del sistema", "El corazón del control"]
+
+// ══════════════════════════════════════════════════════════════
+//  SISTEMA DE GUARDADO
+// ══════════════════════════════════════════════════════════════
+const SAVE_KEY = "proyecto_luly_v2"
+
+interface LulySave {
+  version: 2; savedAt: number; score: number; lives: number; kills: number
+  hp: number; maxHp: number; ammo: number
+  checkpoint: { w: number; x: number; y: number }
+  dead: string[]; explored: string[]; discoveredCPs: string[]
+  cw: number[]; abilities: string[]
+}
+
+function saveGame(g: G): void {
+  try {
+    const s: LulySave = {
+      version: 2, savedAt: Date.now(), score: g.score, lives: g.lives, kills: g.kills,
+      hp: g.pl.hp, maxHp: g.pl.maxHp, ammo: g.pl.ammo,
+      checkpoint: { ...g.checkpoint },
+      dead: [...g.dead], explored: [...g.explored],
+      discoveredCPs: [...g.discoveredCPs], cw: [...g.cw], abilities: [...g.abilities],
+    }
+    localStorage.setItem(SAVE_KEY, JSON.stringify(s))
+  } catch (_) {}
+}
+
+function loadSaveData(): LulySave | null {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    if (!raw) return null
+    const s = JSON.parse(raw) as LulySave
+    return s.version === 2 ? s : null
+  } catch (_) { return null }
+}
 
 function generateWorldMaze(w: number): { H: [number, number][]; V: [number, number][] } {
   let s = 42 + w * 1337
@@ -975,7 +1010,7 @@ function mkG_lazy(): G {
     enemies: enemies0,
     projs: [], bones: [], whip: null, drops: [],
     crates: crates0,
-    cx: 0, cy: 0, keys: {}, lives: 3, score: 0,
+    cx: 0, cy: 0, keys: {}, lives: 3, score: 0, kills: 0,
     dead, cw: new Set(),
     paused: false, over: false, won: false, info: false,
     gfx: 2, autoGfx: false, fps: [], lfps: 60,
@@ -1109,6 +1144,7 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
   }
   g.dead.add(e.originalId)
   g.dead.add(e.id)
+  g.kills++
 
   const originalWorld = parseInt(e.originalId.split("_")[0]) || e.world
   g.pl.ammo = Math.min(15, g.pl.ammo + 1)
@@ -1157,7 +1193,7 @@ function checkWorldClear(g: G, w: number) {
       if (!isSpawnDead(g.dead, w, c, r, i)) { allDead = false; break outer }
     }
   }
-  if (allDead) { g.cw.add(w); if (g.cw.size >= NW) setTimeout(() => { g.won = true }, 1200) }
+  if (allDead) { g.cw.add(w); saveGame(g); if (g.cw.size >= NW) setTimeout(() => { g.won = true }, 1200) }
 }
 
 // Helper: todos los enemigos normales (no boss) del mundo w están muertos
@@ -2178,6 +2214,22 @@ function suspendWorld(g: G, w: number) {
   // Invalidar cache
   _apCache2 = null
   _apLoadedKey = ""
+}
+
+function applyLoad(g: G, s: LulySave): void {
+  g.score = s.score; g.lives = s.lives; g.kills = s.kills || 0
+  g.pl.hp = s.hp; g.pl.maxHp = s.maxHp; g.pl.ammo = s.ammo
+  g.checkpoint = { ...s.checkpoint }
+  g.pl.x = s.checkpoint.x; g.pl.y = s.checkpoint.y
+  g.dead = new Set(s.dead); g.explored = new Set(s.explored)
+  g.discoveredCPs = new Set(s.discoveredCPs)
+  g.cw = new Set(s.cw as number[]); g.abilities = new Set(s.abilities)
+  // Reload worlds with the restored dead set
+  g.loadedWorlds.clear(); g.enemies = []; g.crates = []
+  loadWorld(g, 0)
+  const tw = s.checkpoint.w; if (tw !== 0) loadWorld(g, tw)
+  // Center camera on checkpoint
+  g.cx = s.checkpoint.x - CW / 2; g.cy = s.checkpoint.y - CH / 2
 }
 
 // Activa un mundo y pone en stand-by el actual (si es diferente).
@@ -3740,6 +3792,7 @@ export default function ProyectoLuly() {
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
   const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false })
+  const [hasSave, setHasSave] = useState(() => loadSaveData() !== null)
   // "start" = menú inicio  |  "playing" = partida activa
   const [screen, setScreen] = useState<"start" | "playing">("start")
   const gameActiveRef = useRef(false)
@@ -3890,7 +3943,7 @@ export default function ProyectoLuly() {
           if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
             g.discoveredCPs.add(cp.id)
             const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
-            if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3 }
+            if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g) }
             break
           }
         }
@@ -3973,16 +4026,17 @@ export default function ProyectoLuly() {
     (document as any).mozFullScreenElement ||
     (document as any).msFullscreenElement
 
-  const tryFullscreen = (el: HTMLElement) => {
+  const tryFullscreen = (_el: HTMLElement) => {
     if (isIOS) {
       // iOS Safari no soporta la API Fullscreen — usamos pseudo-fullscreen CSS
       setIsPseudoFS(true)
       return
     }
-    if (el.requestFullscreen) el.requestFullscreen().catch(() => {})
-    else if ((el as any).webkitRequestFullscreen) (el as any).webkitRequestFullscreen()
-    else if ((el as any).mozRequestFullScreen)    (el as any).mozRequestFullScreen()
-    else if ((el as any).msRequestFullscreen)     (el as any).msRequestFullscreen()
+    const target = document.documentElement
+    if (target.requestFullscreen) target.requestFullscreen().catch(() => {})
+    else if ((target as any).webkitRequestFullscreen) (target as any).webkitRequestFullscreen()
+    else if ((target as any).mozRequestFullScreen) (target as any).mozRequestFullScreen()
+    else if ((target as any).msRequestFullscreen) (target as any).msRequestFullscreen()
   }
 
   const exitFS = () => {
@@ -4063,6 +4117,40 @@ export default function ProyectoLuly() {
   const handleExit = () => { try { window.close() } catch (_e) { } }
   const handleRestart = () => { reset(); setScreen("start"); gameActiveRef.current = false }
   const handlePlayAgain = () => { reset(); handlePlay() }
+
+  // Componente de retrato animado de Luly para la pantalla de pausa
+  const PausePortrait = ({ thAccent, thBg0 }: { thAccent: string; thBg0: string }) => {
+    const [frame, setFrame] = useState(0)
+    const portraitRef = useRef<HTMLCanvasElement>(null)
+    useEffect(() => {
+      const id = setInterval(() => setFrame(f => (f + 1) % 16), 120)
+      return () => clearInterval(id)
+    }, [])
+    useEffect(() => {
+      const canvas = portraitRef.current; if (!canvas) return
+      const ctx2d = canvas.getContext("2d"); if (!ctx2d) return
+      ctx2d.clearRect(0, 0, 96, 144)
+      const spr = sprs.current["player_idle"]
+      if (spr && spr.complete && spr.naturalWidth > 0) {
+        const fw = spr.width / 4, fh = spr.height / 4
+        ctx2d.drawImage(spr, (frame % 4) * fw, Math.floor(frame / 4) * fh, fw, fh, 0, 0, 96, 144)
+      } else {
+        ctx2d.save(); const sc = 96 / 48; ctx2d.scale(sc, sc)
+        ctx2d.fillStyle = "#D2B48C"; ctx2d.fillRect(4, 16, 22, 26); ctx2d.fillRect(6, 2, 20, 18)
+        ctx2d.fillStyle = "#555"; ctx2d.fillRect(3, 0, 26, 12); ctx2d.fillRect(2, 4, 28, 10)
+        ctx2d.fillStyle = "#888"; ctx2d.fillRect(8, 2, 16, 8)
+        ctx2d.fillStyle = "#FFF"; ctx2d.fillRect(9, 6, 4, 3); ctx2d.fillRect(19, 6, 4, 3)
+        ctx2d.fillStyle = "#111"; ctx2d.fillRect(10, 7, 2, 2); ctx2d.fillRect(20, 7, 2, 2)
+        ctx2d.fillStyle = "#FFD700"; ctx2d.fillRect(13, 23, 6, 2)
+        ctx2d.restore()
+      }
+    }, [frame])
+    return (
+      <div style={{ width: 96, height: 144, borderRadius: 12, border: `2px solid ${thAccent}88`, background: `radial-gradient(circle at 50% 40%, ${thAccent}18, ${thBg0})`, overflow: "hidden", boxShadow: `0 0 24px ${thAccent}33` }}>
+        <canvas ref={portraitRef} width={96} height={144} style={{ imageRendering: "pixelated" as const, width: "100%", height: "100%" }} />
+      </div>
+    )
+  }
 
   const canvasStyle = isFullscreenEffective
     ? { display: "block", imageRendering: "pixelated" as const, width: "100%", height: "100%", objectFit: "contain" as const, border: "none", borderRadius: 0 }
@@ -4161,7 +4249,7 @@ export default function ProyectoLuly() {
         if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
           g.discoveredCPs.add(cp.id)
           const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
-          if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3 }
+          if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g) }
           break
         }
       }
@@ -4304,6 +4392,30 @@ export default function ProyectoLuly() {
 
               {/* Botones */}
               <div style={{ display: "flex", flexDirection: "column", gap: 14, width: 260, alignItems: "stretch" }}>
+                {hasSave && (() => {
+                  const sv = loadSaveData()!
+                  const d = new Date(sv.savedAt)
+                  const timeStr = `${d.getDate()}/${d.getMonth()+1} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`
+                  return (
+                    <button
+                      style={{ ...menuBtn("#D4C400"), marginBottom: 6 }}
+                      onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(212,196,0,0.18)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #D4C40066" }}
+                      onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.boxShadow = "none" }}
+                      onClick={() => {
+                        const sv2 = loadSaveData()
+                        if (!sv2) { handlePlay(); return }
+                        const g = G.current
+                        gameActiveRef.current = true
+                        applyLoad(g, sv2)
+                        setScreen("playing")
+                        if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement)
+                      }}
+                      onTouchEnd={e => { e.preventDefault(); const sv2 = loadSaveData(); if (!sv2) { handlePlay(); return }; const g = G.current; gameActiveRef.current = true; applyLoad(g, sv2); setScreen("playing"); if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement) }}
+                    >
+                      ★  CONTINUAR  <span style={{ fontSize: 9, opacity: 0.6 }}>· {timeStr}</span>
+                    </button>
+                  )
+                })()}
                 <button
                   style={menuBtn("#D4C400")}
                   onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(124,252,0,0.15)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #D4C40066" }}
@@ -4313,6 +4425,16 @@ export default function ProyectoLuly() {
                 >
                   ▶  JUGAR
                 </button>
+                {!isTouchDevice && !isFullscreenEffective && (
+                  <button
+                    style={menuBtn("#556655")}
+                    onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(85,102,85,0.18)"; (e.target as HTMLElement).style.color = "#88AA88" }}
+                    onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.color = "#556655" }}
+                    onClick={() => tryFullscreen(document.documentElement)}
+                  >
+                    ⛶  PANTALLA COMPLETA
+                  </button>
+                )}
                 <button
                   style={menuBtn("#556655")}
                   onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(85,102,85,0.18)"; (e.target as HTMLElement).style.color = "#88AA88" }}
@@ -4451,37 +4573,8 @@ export default function ProyectoLuly() {
 
                   {/* CENTER: PERSONAJE */}
                   <div style={{ flex: 1, padding: 16, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, borderRight: `1px solid ${th.accent}22` }}>
-                    {/* Retrato — sprite idle real del personaje */}
-                    <div style={{ width: 96, height: 144, borderRadius: 12, border: `2px solid ${th.accent}88`, background: `radial-gradient(circle at 50% 40%, ${th.accent}18, ${th.bg0})`, overflow: "hidden", boxShadow: `0 0 24px ${th.accent}33` }}>
-                      <canvas
-                        width={96} height={144}
-                        style={{ imageRendering: "pixelated", width: "100%", height: "100%" }}
-                        ref={(canvas) => {
-                          if (!canvas) return
-                          const ctx2d = canvas.getContext("2d")
-                          if (!ctx2d) return
-                          ctx2d.clearRect(0, 0, 96, 144)
-                          const spr = sprs.current["player_idle"]
-                          if (spr && spr.complete && spr.naturalWidth > 0) {
-                            // Spritesheet 4×4: frame 0 = columna 0, fila 0
-                            const fw = spr.width / 4, fh = spr.height / 4
-                            ctx2d.drawImage(spr, 0, 0, fw, fh, 0, 0, 96, 144)
-                          } else {
-                            // Fallback pixel art de Luly si el sprite no carga
-                            const sc = 96 / 48
-                            ctx2d.save(); ctx2d.scale(sc, sc)
-                            ctx2d.fillStyle = "#D2B48C"; ctx2d.fillRect(4, 16, 22, 26); ctx2d.fillRect(6, 2, 20, 18)
-                            ctx2d.fillStyle = "#555"; ctx2d.fillRect(3, 0, 26, 12); ctx2d.fillRect(2, 4, 28, 10)
-                            ctx2d.fillStyle = "#888"; ctx2d.fillRect(8, 2, 16, 8)
-                            ctx2d.fillStyle = "#00BFFF44"; ctx2d.fillRect(8, 4, 16, 7)
-                            ctx2d.fillStyle = "#FFF"; ctx2d.fillRect(9, 6, 4, 3); ctx2d.fillRect(19, 6, 4, 3)
-                            ctx2d.fillStyle = "#111"; ctx2d.fillRect(10, 7, 2, 2); ctx2d.fillRect(20, 7, 2, 2)
-                            ctx2d.fillStyle = "#FFD700"; ctx2d.fillRect(13, 23, 6, 2)
-                            ctx2d.restore()
-                          }
-                        }}
-                      />
-                    </div>
+                    {/* Retrato — sprite idle animado del personaje */}
+                    <PausePortrait thAccent={th.accent} thBg0={th.bg0} />
                     <div style={{ fontSize: 16, color: "#EEE", letterSpacing: "0.4em", fontWeight: "bold", marginTop: 4 }}>L U L Y</div>
                     <div style={{ fontSize: 10, color: th.accent, letterSpacing: "0.25em" }}>AGENTE CANINO</div>
                     <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.15em" }}>W{curW + 1} — {WORLD_NAMES[curW]}</div>
@@ -4533,7 +4626,7 @@ export default function ProyectoLuly() {
                 {/* ── Barra inferior info ── */}
                 <div style={{ display: "flex", gap: 20, padding: "8px 18px", borderTop: `1px solid ${th.accent}22`, borderBottom: `1px solid ${th.accent}22`, fontSize: 9, color: "#555", letterSpacing: "0.15em" }}>
                   <span>★ W{g.checkpoint.w + 1} {WORLD_NAMES[g.checkpoint.w].slice(0, 12)}</span>
-                  <span>☠ ABATIDOS: {g.dead.size}</span>
+                  <span>☠ ABATIDOS: {g.kills}</span>
                   <span>🗺 SALAS: {g.explored.size}</span>
                 </div>
 
@@ -4547,6 +4640,12 @@ export default function ProyectoLuly() {
                     onClick={handleRestart}
                     style={{ padding: "8px 20px", background: "transparent", border: "1px solid #444", color: "#888", fontFamily: "'Courier New', monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}
                   >↩ MENÚ PRINCIPAL</button>
+                  <button
+                    onClick={() => { try { localStorage.removeItem(SAVE_KEY) } catch(_){} setHasSave(false) }}
+                    style={{ padding: "8px 16px", background: "transparent", border: "1px solid #330000", color: "#553333", fontFamily: "'Courier New', monospace", fontSize: 10, letterSpacing: "0.15em", cursor: "pointer", borderRadius: 6 }}
+                  >
+                    ✕ borrar guardado
+                  </button>
                   {isTouchDevice && (
                     <span style={{ fontSize: 9, color: "#444", letterSpacing: "0.15em" }}>[ P ] continuar</span>
                   )}
