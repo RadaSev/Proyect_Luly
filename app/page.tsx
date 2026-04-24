@@ -47,7 +47,7 @@ type Enemy = {
   alertDelay: number
   phase: number
 }
-type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number }
+type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
 type Drop = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" }
@@ -84,6 +84,8 @@ type G = {
   // Stamina display mode: "bar" = classic top-right bar, "circle" = circle near player
   staDisplay: "bar" | "circle"
   staCircleAlpha: number
+  // Mobile zoom: "far" = full world (default), "close" = zoom-in (personaje más grande)
+  mobileZoom: "far" | "close"
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1041,6 +1043,7 @@ function mkG_lazy(): G {
     tpAnim: null,
     staDisplay: "circle",
     staCircleAlpha: 0,
+    mobileZoom: "far",
   } as G
 }
 
@@ -1113,9 +1116,10 @@ function dmgPlayer(g: G, dmg: number) {
     triggerShake(g, 12, 0.5)
     g.lives--; if (g.lives <= 0) { g.over = true; return }
     g.pl.hp = g.pl.maxHp
-    const kp = KENNEL_WORLD_POS[g.checkpoint.w]
-    g.pl.x = kp.x; g.pl.y = kp.y; g.pl.vx = 0; g.pl.vy = 0; g.pl.crouching = false; g.pl.h = PH
-    g.pl.dash = false; g.pl.wallSliding = false
+    g.pl.vx = 0; g.pl.vy = 0; g.pl.crouching = false; g.pl.h = PH
+    g.pl.dash = false; g.pl.wallSliding = false; g.pl.inv = 2
+    // Reaparece en el último checkpoint con animación de teletransporte
+    g.tpAnim = { timer: 0, phase: 0, destX: g.checkpoint.x, destY: g.checkpoint.y }
   }
 }
 
@@ -2064,11 +2068,32 @@ function tickProjs(g: G) {
     }
     if (pr.pl) {
       const PR = 9
+      // ── Esquiva de enemigos ante proyectiles desviados ─────────────────
+      if (pr.parried) {
+        for (const e of g.enemies) {
+          if (!e.active || e.dying) continue
+          const ex = e.x + e.w / 2, ey = e.y + e.h / 2
+          const dist = Math.sqrt((pr.x - ex) ** 2 + (pr.y - ey) ** 2)
+          const approaching = (pr.vx > 0 ? pr.x < ex : pr.x > ex)
+          if (dist < 180 && approaching) {
+            // Intento de esquiva: saltar o correr al lado opuesto
+            if (e.vy === 0 && Math.random() < 0.08) e.vy = -9  // salto de esquiva
+            e.vx = (pr.x < ex ? 2.5 : -2.5)  // correr en dirección contraria
+          }
+        }
+      }
       for (const e of g.enemies) {
         if (!e.active || e.dying) continue
         const ecx = e.x + EN_HBX, ecy = e.y + EN_HBT, ecw = e.w - 2 * EN_HBX, ech = e.h - EN_HBT
         const nearX = Math.max(ecx, Math.min(pr.x, ecx + ecw)), nearY = Math.max(ecy, Math.min(pr.y, ecy + ech))
-        if ((pr.x - nearX) ** 2 + (pr.y - nearY) ** 2 < PR * PR) { pr.active = false; dmgEnemy(g, e, 1); break }
+        if ((pr.x - nearX) ** 2 + (pr.y - nearY) ** 2 < PR * PR) {
+          pr.active = false
+          // Proyectil desviado: daño mínimo = mitad del HP máximo del enemigo
+          const dmg = pr.parried ? Math.max(1, Math.ceil(e.mhp * 0.5)) : 1
+          dmgEnemy(g, e, dmg)
+          if (pr.parried) spawnExplosion(g, pr.x, pr.y, ["#FFFFFF", "#FF8800", "#FFFF00"], 12, 5, false)
+          break
+        }
       }
       if (!pr.active) continue
       for (const c of g.crates) {
@@ -2107,8 +2132,27 @@ function tickWhip(g: G) {
   }
   const back = Math.max(0, bestT - 2 / WLEN)
   w.ex = w.x + (tx - w.x) * back; w.ey = w.y + (ty - w.y) * back
-  if (!w.dealt) {
-    const mg = 22, wx = Math.min(w.x, w.ex) - mg, wy = Math.min(w.y, w.ey) - mg, ww = Math.abs(w.ex - w.x) + mg * 2, wh = Math.abs(w.ey - w.y) + mg * 2
+  const mg = 22, wx = Math.min(w.x, w.ex) - mg, wy = Math.min(w.y, w.ey) - mg, ww = Math.abs(w.ex - w.x) + mg * 2, wh = Math.abs(w.ey - w.y) + mg * 2
+  // ── PARRY: desviar proyectiles enemigos con el látigo ─────────────────
+  let parried = false
+  for (const pr of g.projs) {
+    if (!pr.active || pr.pl) continue  // solo projs enemigos
+    if (pr.x > wx && pr.x < wx + ww && pr.y > wy && pr.y < wy + wh) {
+      const staCost = p.maxStamina * 0.5
+      if (p.exhausted) break  // sin stamina, no se puede desviar
+      p.stamina = Math.max(0, p.stamina - staCost)
+      if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
+      // Convertir en proyectil del jugador con dirección revertida y reforzada
+      const spd = Math.sqrt(pr.vx * pr.vx + pr.vy * pr.vy) * 1.3 + 2
+      const ang = Math.atan2(-pr.vy, -pr.vx)  // dirección opuesta
+      pr.pl = true; pr.parried = true
+      pr.vx = Math.cos(ang) * spd; pr.vy = Math.sin(ang) * spd
+      pr.life = 4; pr.dist = 0; pr.ox = pr.x; pr.oy = pr.y
+      spawnExplosion(g, pr.x, pr.y, ["#FFFFFF", "#88FFFF", "#FFFF88"], 8, 3.5, false)
+      parried = true
+    }
+  }
+  if (!w.dealt && !parried) {
     for (const e of g.enemies) {
       if (!e.active || e.dying) continue
       const ecx = e.x + EN_HBX, ecy = e.y + EN_HBT, ecw = e.w - 2 * EN_HBX, ech = e.h - EN_HBT
@@ -2250,14 +2294,16 @@ function activateWorld(g: G, newWorld: number) {
 
 function tickCamera(g: G) {
   const p = g.pl
+  const sc = g.mobileZoom === "close" ? 1.6 : 1.0
+  const vpW = CW / sc, vpH = CH / sc
   const activeW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const minCX = activeW * NC * RW
-  const maxCX = (activeW + 1) * NC * RW - CW
+  const maxCX = Math.max(minCX, (activeW + 1) * NC * RW - vpW)
   g.cx = Math.max(minCX, Math.min(g.cx, maxCX))
-  g.cx += (p.x + p.w / 2 - CW / 2 - g.cx) * 0.10
-  g.cy += (p.y + p.h / 2 - CH / 2 - g.cy) * 0.10
-  g.cx = Math.max(0, Math.min(g.cx, TOT_W - CW))
-  g.cy = Math.max(0, Math.min(g.cy, TOT_H - CH))
+  g.cx += (p.x + p.w / 2 - vpW / 2 - g.cx) * 0.10
+  g.cy += (p.y + p.h / 2 - vpH / 2 - g.cy) * 0.10
+  g.cx = Math.max(0, Math.min(g.cx, TOT_W - vpW))
+  g.cy = Math.max(0, Math.min(g.cy, TOT_H - vpH))
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
   const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
@@ -3039,10 +3085,17 @@ function drawProjs(ctx: CanvasRenderingContext2D, g: G) {
     if (sx < -20 || sx > CW + 20 || sy < -20 || sy > CH + 20) continue
     ctx.save(); ctx.translate(sx, sy)
     if (pr.pl) {
-      ctx.rotate(pr.rot * Math.PI / 180); ctx.fillStyle = "#F4E4C4"; ctx.fillRect(-9, -3, 18, 6)
+      ctx.rotate(pr.rot * Math.PI / 180)
+      const col = pr.parried ? "#44FFFF" : "#F4E4C4"
+      if (pr.parried) {
+        // Aura de parry: brillo cian
+        ctx.shadowColor = "#00FFFF"; ctx.shadowBlur = 10
+      }
+      ctx.fillStyle = col; ctx.fillRect(-9, -3, 18, 6)
       ctx.beginPath(); ctx.arc(-9, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(9, 0, 5, 0, Math.PI * 2); ctx.fill()
       ctx.beginPath(); ctx.arc(-9, -4, 3, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(-9, 4, 3, 0, Math.PI * 2); ctx.fill()
       ctx.beginPath(); ctx.arc(9, -4, 3, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(9, 4, 3, 0, Math.PI * 2); ctx.fill()
+      ctx.shadowBlur = 0
     } else if (pr.star) { ctx.rotate(pr.rot * Math.PI / 180); ctx.fillStyle = th.doorC; ctx.fillRect(-6, -1.5, 12, 3); ctx.fillRect(-1.5, -6, 3, 12) }
     else { ctx.fillStyle = th.doorC + "DD"; ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = th.doorC; ctx.lineWidth = 2; ctx.stroke() }
     ctx.restore()
@@ -3301,7 +3354,7 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
   ctx.fillText("// MODO DESARROLLADOR — MAPA TELEPORT //", CW / 2, 20)
   ctx.fillStyle = "#1A6622"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText(
-    `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    STA: ${g.staDisplay === "circle" ? "● CIRC" : "▬ BAR"} [J]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
+    `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    STA: ${g.staDisplay === "circle" ? "● CIRC" : "▬ BAR"} [J]    ZOOM: ${g.mobileZoom === "close" ? "🔍 CLOSE" : "🌍 FAR"} [P]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
     CW / 2, 36
   )
   ctx.textAlign = "left"
@@ -3465,16 +3518,17 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.clearRect(0, 0, CW, CH)
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
   if (g.showMap) { drawFullMap(ctx, g); return }
-  // ── Screen shake: solo afecta al mundo, no al HUD ──────────────────
+  // ── Zoom móvil + screen shake (solo afectan al mundo, no al HUD) ────
+  const sc = g.mobileZoom === "close" ? 1.6 : 1.0
   const hasShake = g.shakeX !== 0 || g.shakeY !== 0
-  if (hasShake) { ctx.save(); ctx.translate(g.shakeX, g.shakeY) }
+  ctx.save()
+  if (sc !== 1) ctx.scale(sc, sc)
+  if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
   drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawWhip(ctx, g)
-  drawSparks(ctx, g)
-  if (hasShake) ctx.restore()
-  // ── Niebla sala del boss ──
-  drawBossRoomFog(ctx, g)
-  // ── Efecto de teletransportación ──
+  drawSparks(ctx, g); drawBossRoomFog(ctx, g)
+  ctx.restore()
+  // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
   if (g.tpAnim) {
     const prog = g.tpAnim.timer / 0.42
     const alpha = g.tpAnim.phase === 0 ? Math.min(1, prog * 1.2) : Math.max(0, 1 - prog)
@@ -3545,8 +3599,9 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     // Círculo de stamina junto al personaje (screen-space)
     ctx.save()
     ctx.globalAlpha = g.staCircleAlpha
-    const scx = p.x - g.cx + PW / 2         // centro X en pantalla
-    const scy = p.y - g.cy - 20             // justo encima del personaje
+    const _sc = g.mobileZoom === "close" ? 1.6 : 1.0
+    const scx = (p.x - g.cx + PW / 2) * _sc      // centro X en pantalla (ajustado al zoom)
+    const scy = (p.y - g.cy - 20) * _sc           // justo encima del personaje
     const rad = 13, lw = 3.5
     // Fondo del círculo
     ctx.beginPath(); ctx.arc(scx, scy, rad, 0, Math.PI * 2)
@@ -3962,6 +4017,7 @@ export default function ProyectoLuly() {
       if (g.devMode && k === "k") g.noEnemies = !g.noEnemies
       if (g.devMode && k === "u") g.ohko = !g.ohko
       if (g.devMode && k === "j") g.staDisplay = g.staDisplay === "circle" ? "bar" : "circle"
+      if (g.devMode && k === "p") g.mobileZoom = g.mobileZoom === "far" ? "close" : "far"
       if (g.devMode && k === "h") {
         g.showDevMap = !g.showDevMap
         g.paused = g.showDevMap
@@ -4125,6 +4181,8 @@ export default function ProyectoLuly() {
     }
     const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
     setIsTouchDevice(touch)
+    // Zoom móvil automático: pantallas pequeñas → vista cercana por defecto
+    if (touch || window.innerWidth < 900) G.current.mobileZoom = "close"
     checkOrientation()
     window.addEventListener('resize', checkOrientation)
     window.addEventListener('orientationchange', checkOrientation)
@@ -4163,34 +4221,55 @@ export default function ProyectoLuly() {
   const handleExit = () => { try { window.close() } catch (_e) { } }
   const handleRestart = () => { reset(); setScreen("start"); gameActiveRef.current = false }
   const handlePlayAgain = () => { reset(); handlePlay() }
+  const handleContinueFromSave = () => {
+    const save = loadSaveData()
+    reset()
+    if (save) {
+      applyLoad(G.current, save)
+      setHasSave(true)
+    }
+    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false })
+    setScreen("playing")
+    gameActiveRef.current = true
+    if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement)
+  }
 
-  // Componente de retrato animado de Luly para la pantalla de pausa
+  // Componente de retrato animado de Luly — usa rAF con timestamp exacto (igual al juego: 120 ms/frame idle)
   const PausePortrait = ({ thAccent, thBg0 }: { thAccent: string; thBg0: string }) => {
-    const [frame, setFrame] = useState(0)
     const portraitRef = useRef<HTMLCanvasElement>(null)
+    const rafRef = useRef(0)
+    const frameRef = useRef(0)
+    const lastRef = useRef(0)
     useEffect(() => {
-      const id = setInterval(() => setFrame(f => (f + 1) % 16), 120)
-      return () => clearInterval(id)
-    }, [])
-    useEffect(() => {
-      const canvas = portraitRef.current; if (!canvas) return
-      const ctx2d = canvas.getContext("2d"); if (!ctx2d) return
-      ctx2d.clearRect(0, 0, 96, 144)
-      const spr = sprs.current["player_idle"]
-      if (spr && spr.complete && spr.naturalWidth > 0) {
-        const fw = spr.width / 4, fh = spr.height / 4
-        ctx2d.drawImage(spr, (frame % 4) * fw, Math.floor(frame / 4) * fh, fw, fh, 0, 0, 96, 144)
-      } else {
-        ctx2d.save(); const sc = 96 / 48; ctx2d.scale(sc, sc)
-        ctx2d.fillStyle = "#D2B48C"; ctx2d.fillRect(4, 16, 22, 26); ctx2d.fillRect(6, 2, 20, 18)
-        ctx2d.fillStyle = "#555"; ctx2d.fillRect(3, 0, 26, 12); ctx2d.fillRect(2, 4, 28, 10)
-        ctx2d.fillStyle = "#888"; ctx2d.fillRect(8, 2, 16, 8)
-        ctx2d.fillStyle = "#FFF"; ctx2d.fillRect(9, 6, 4, 3); ctx2d.fillRect(19, 6, 4, 3)
-        ctx2d.fillStyle = "#111"; ctx2d.fillRect(10, 7, 2, 2); ctx2d.fillRect(20, 7, 2, 2)
-        ctx2d.fillStyle = "#FFD700"; ctx2d.fillRect(13, 23, 6, 2)
-        ctx2d.restore()
+      const FRAME_MS = 120  // igual que sp.idle en el juego
+      const fn = (now: number) => {
+        if (now - lastRef.current >= FRAME_MS) {
+          lastRef.current = now
+          frameRef.current = (frameRef.current + 1) % 16
+          const canvas = portraitRef.current; if (!canvas) return
+          const ctx2d = canvas.getContext("2d"); if (!ctx2d) return
+          ctx2d.clearRect(0, 0, 96, 144)
+          const spr = sprs.current["player_idle"]
+          const f = frameRef.current
+          if (spr && spr.complete && spr.naturalWidth > 0) {
+            const fw = spr.width / 4, fh = spr.height / 4
+            ctx2d.drawImage(spr, (f % 4) * fw, Math.floor(f / 4) * fh, fw, fh, 0, 0, 96, 144)
+          } else {
+            ctx2d.save(); const sc = 96 / 48; ctx2d.scale(sc, sc)
+            ctx2d.fillStyle = "#D2B48C"; ctx2d.fillRect(4, 16, 22, 26); ctx2d.fillRect(6, 2, 20, 18)
+            ctx2d.fillStyle = "#555"; ctx2d.fillRect(3, 0, 26, 12); ctx2d.fillRect(2, 4, 28, 10)
+            ctx2d.fillStyle = "#888"; ctx2d.fillRect(8, 2, 16, 8)
+            ctx2d.fillStyle = "#FFF"; ctx2d.fillRect(9, 6, 4, 3); ctx2d.fillRect(19, 6, 4, 3)
+            ctx2d.fillStyle = "#111"; ctx2d.fillRect(10, 7, 2, 2); ctx2d.fillRect(20, 7, 2, 2)
+            ctx2d.fillStyle = "#FFD700"; ctx2d.fillRect(13, 23, 6, 2)
+            ctx2d.restore()
+          }
+        }
+        rafRef.current = requestAnimationFrame(fn)
       }
-    }, [frame])
+      rafRef.current = requestAnimationFrame(fn)
+      return () => cancelAnimationFrame(rafRef.current)
+    }, [])
     return (
       <div style={{ width: 96, height: 144, borderRadius: 12, border: `2px solid ${thAccent}88`, background: `radial-gradient(circle at 50% 40%, ${thAccent}18, ${thBg0})`, overflow: "hidden", boxShadow: `0 0 24px ${thAccent}33` }}>
         <canvas ref={portraitRef} width={96} height={144} style={{ imageRendering: "pixelated" as const, width: "100%", height: "100%" }} />
@@ -4703,14 +4782,27 @@ export default function ProyectoLuly() {
 
         {/* ── Game Over ── */}
         {screen === "playing" && ui.over && (
-          <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
-            <div className="text-center p-8 border border-red-900 rounded-xl" style={{ background: "#0D0000" }}>
-              <div className="text-4xl mb-3">☠</div>
-              <h2 className="text-2xl font-bold text-red-500 mb-2" style={{ fontFamily: "monospace" }}>GAME_OVER</h2>
-              <p className="text-yellow-600 font-mono mb-5">score: {ui.score}</p>
-              <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-                <button onClick={handlePlayAgain} className="px-5 py-2 border border-red-700 text-red-400 font-mono hover:bg-red-900 transition-colors">[ REINTENTAR ]</button>
-                <button onClick={handleRestart} className="px-5 py-2 border border-gray-700 text-gray-400 font-mono hover:bg-gray-800 transition-colors">[ MENÚ ]</button>
+          <div className="absolute inset-0 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(2px)" }}>
+            <div className="text-center p-8 rounded-xl" style={{ background: "#0D0000", border: "1px solid #4A0000", boxShadow: "0 0 60px #FF000033, 0 0 120px #80000022", maxWidth: 340 }}>
+              <div style={{ fontSize: 52, lineHeight: 1, marginBottom: 8 }}>☠</div>
+              <h2 style={{ fontFamily: "monospace", fontSize: 26, fontWeight: "bold", color: "#FF3333", letterSpacing: "0.15em", marginBottom: 6 }}>GAME OVER</h2>
+              <p style={{ fontFamily: "monospace", fontSize: 12, color: "#AA7700", marginBottom: 4 }}>Luly ha caído… pero no está sola.</p>
+              <p style={{ fontFamily: "monospace", fontSize: 11, color: "#664400", marginBottom: 20 }}>puntuación: {ui.score}</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {hasSave && (
+                  <button onClick={handleContinueFromSave}
+                    style={{ padding: "10px 20px", border: "1px solid #AA5500", color: "#FFAA44", background: "#1A0800", fontFamily: "monospace", fontSize: 13, letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer" }}>
+                    ★ CONTINUAR desde guardado
+                  </button>
+                )}
+                <button onClick={handlePlayAgain}
+                  style={{ padding: "8px 20px", border: "1px solid #550000", color: "#FF4444", background: "#0D0000", fontFamily: "monospace", fontSize: 12, letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer" }}>
+                  [ REINTENTAR desde el inicio ]
+                </button>
+                <button onClick={handleRestart}
+                  style={{ padding: "8px 20px", border: "1px solid #333", color: "#666", background: "transparent", fontFamily: "monospace", fontSize: 11, letterSpacing: "0.1em", borderRadius: 6, cursor: "pointer" }}>
+                  [ MENÚ PRINCIPAL ]
+                </button>
               </div>
             </div>
           </div>
