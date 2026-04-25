@@ -96,6 +96,8 @@ type G = {
   pickups: Pickup[]
   activePower: string | null          // poder seleccionado actualmente
   bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
+  // Quest del perrito viejo (NPC en TROW [1,4] de W0)
+  viejoDogState: "waiting" | "quest_active" | "quest_done" | "surprised"
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -161,6 +163,7 @@ interface LulySave {
   cw: number[]; abilities: string[]
   pickedUpItems: string[]             // IDs de pickups recogidos
   bossRewardedCPs: string[]           // IDs de boss-CPs que ya dieron recompensa
+  viejoDogState?: string              // estado de quest del perrito viejo
 }
 
 function saveGame(g: G): void {
@@ -173,6 +176,7 @@ function saveGame(g: G): void {
       discoveredCPs: [...g.discoveredCPs], cw: [...g.cw], abilities: [...g.abilities],
       pickedUpItems: g.pickups.filter(p => !p.active).map(p => p.id),
       bossRewardedCPs: [...g.bossRewardedCPs],
+      viejoDogState: g.viejoDogState,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -302,23 +306,33 @@ const CP_LOCS_P2: [number, number][] = [[2, 5], [6, 5], [1, 7], [5, 7]]
 const CP_LOCS_BOSS: [number, number, "p1" | "ultra" | "p2"][] = [
   [8, 1, "p1"], [4, 4, "ultra"], [8, 7, "p2"]
 ]
-// Posición del muro secreto y pickup de la pelota de tenis
-// Sala oculta: World 0, cubículo [1, 3] — izquierda de P1, última fila antes del TROW
-// El jugador tiene que caminar DENTRO del pilar (no tiene colisión) para reclamar el poder
-const TBALL_SECRET_C = 1, TBALL_SECRET_R = 3
+// Muro secreto de la pelota de tenis
+// Sala: World 0, cubículo [0, 2] — columna izquierda, fila 2 (callejón sin salida a la izquierda)
+// El muro falso está PEGADO a la pared límite izquierda de la sala — parece un engrosamiento
+// arquitectónico natural de la pared. No tiene colisión: el jugador la traspasa al presionar
+// contra la pared izquierda y recibe el pickup desde adentro.
+const TBALL_SECRET_C = 0, TBALL_SECRET_R = 2
 const { x: _TBALL_RX, y: _TBALL_RY } = ro(0, TBALL_SECRET_C, TBALL_SECRET_R)
-// Pilar falso: pegado a la pared izquierda, baja desde el techo — parece parte de la arquitectura
 const TBALL_WALL = {
-  x: _TBALL_RX + WT,                       // justo a la derecha de la pared izquierda real
-  y: _TBALL_RY + WT,                        // empieza en el techo
-  w: WT * 3,                                // 3 tiles de ancho (72 px) → suficiente para ocultar la pelota
-  h: Math.floor(RH * 0.55),               // 55 % de altura de sala
+  x: _TBALL_RX + WT,                        // comienza justo donde termina la pared límite real
+  y: _TBALL_RY + Math.floor(RH * 0.22),     // empieza al 22% de altura (no toca el techo)
+  w: WT * 2,                                 // 48 px de ancho — 2 tiles, parece engrosamiento
+  h: Math.floor(RH * 0.65),                 // 65% de alto — baja casi hasta el suelo
 }
-// Pickup centrado dentro del pilar (completamente oculto)
+// Pickup cerca de la base izquierda del muro (se activa cuando el jugador presiona contra la pared)
 const TBALL_PICKUP_POS = {
-  x: TBALL_WALL.x + Math.floor(TBALL_WALL.w / 2),
-  y: TBALL_WALL.y + Math.floor(TBALL_WALL.h * 0.38),
+  x: TBALL_WALL.x + 14,                    // 14 px dentro del muro desde el borde izquierdo
+  y: _TBALL_RY + Math.floor(RH * 0.78),   // altura similar al centro del jugador parado
 }
+// Posición y constantes del perrito viejo NPC (World 0, cubículo [1, TROW])
+const VIEJO_DOG_C = 1, VIEJO_DOG_R = TROW
+const { x: _VDX, y: _VDY } = ro(0, VIEJO_DOG_C, VIEJO_DOG_R)
+const VIEJO_DOG_POS = {
+  x: _VDX + Math.floor(RW * 0.28),        // lado izquierdo de la sala, cerca de la entrada
+  y: _VDY + RH - WT - 50,                 // parado sobre el suelo
+}
+const VIEJO_DOG_TALK_R = 115              // radio para activar diálogo
+const TBALL_QUEST_KILLS = 10             // kills de P1 necesarios para que revele el secreto
 type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string; bossKind?: "p1" | "ultra" | "p2" }
 // ALL_CPS se define más abajo, después de getWorldPlats, para poder validar contra plataformas
 const CP_RADIUS = 115  // radio de descubrimiento/uso
@@ -1219,6 +1233,7 @@ function mkG_lazy(): G {
     pickups: [{ id: "tball_w0", kind: "tball", x: TBALL_PICKUP_POS.x, y: TBALL_PICKUP_POS.y, active: true, floatPhase: 0 }],
     activePower: null,
     bossRewardedCPs: new Set<string>(),
+    viejoDogState: "waiting",
   } as G
 }
 
@@ -2351,6 +2366,46 @@ function tickProjs(g: G) {
   g.projs = g.projs.filter(pr => pr.active)
 }
 
+// ── Quest del perrito viejo ───────────────────────────────────────────────────
+function countP1KillsW0(dead: Set<string>): number {
+  let count = 0
+  for (let c = 0; c < NC; c++) {
+    for (let r = 0; r < TROW; r++) {
+      const sp = getEnemySpawns(0, c, r)
+      for (let i = 0; i < sp.length; i++) {
+        if (isSpawnDead(dead, 0, c, r, i)) count++
+      }
+    }
+  }
+  return count
+}
+
+function tickViejoDog(g: G) {
+  // Solo aplica en World 0
+  const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
+  if (curW !== 0) return
+  const p = g.pl
+  const dx = p.x + PW / 2 - VIEJO_DOG_POS.x
+  const dy = p.y + PH / 2 - VIEJO_DOG_POS.y
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist > VIEJO_DOG_TALK_R) return
+
+  if (g.viejoDogState === "waiting") {
+    // Primera vez que el jugador se acerca
+    if (g.abilities.has("tball")) {
+      g.viejoDogState = "surprised"   // ya encontró la pelota solo
+    } else {
+      g.viejoDogState = "quest_active"
+    }
+  } else if (g.viejoDogState === "quest_active") {
+    // Chequear si ya mató suficientes perros de P1
+    if (countP1KillsW0(g.dead) >= TBALL_QUEST_KILLS) {
+      g.viejoDogState = "quest_done"
+      saveGame(g)
+    }
+  }
+}
+
 // ── Pickups de habilidades de combate ────────────────────────────────────────
 function tickPickups(g: G) {
   const p = g.pl
@@ -2359,7 +2414,7 @@ function tickPickups(g: G) {
     pk.floatPhase += STEP * 2.4  // oscilación de flotación
     // Colisión con el jugador (hitbox generosa)
     const dx = p.x + p.w / 2 - pk.x, dy = p.y + p.h / 2 - pk.y
-    if (Math.sqrt(dx * dx + dy * dy) < 55) {
+    if (Math.sqrt(dx * dx + dy * dy) < 70) {
       pk.active = false
       if (pk.kind === "tball" && !g.abilities.has("tball")) {
         g.abilities.add("tball")
@@ -2367,6 +2422,10 @@ function tickPickups(g: G) {
         g.activePower = "tball"
         g.abilityNotif = { text: "🎾 PELOTA REBOTANTE — 5 balas  [V / botón 🎾]", timer: 5.5 }
         spawnExplosion(g, pk.x, pk.y, ["#CCFF00", "#88FF44", "#FFFFFF", "#FFFF00"], 18, 5)
+        // Si el jugador encontró la pelota antes de hablar con el perrito viejo
+        if (g.viejoDogState === "waiting" || g.viejoDogState === "quest_active") {
+          g.viejoDogState = "surprised"
+        }
         saveGame(g)
       }
     }
@@ -2628,6 +2687,7 @@ function applyLoad(g: G, s: LulySave): void {
   // Restaurar pickups recogidos y boss CPs recompensados
   if (s.pickedUpItems) for (const id of s.pickedUpItems) { const p = g.pickups.find(pk => pk.id === id); if (p) p.active = false }
   g.bossRewardedCPs = new Set(s.bossRewardedCPs || [])
+  g.viejoDogState = (s.viejoDogState as G["viejoDogState"]) || "waiting"
   // Restaurar poder activo según habilidades guardadas
   if (g.abilities.has("tball")) g.activePower = "tball"
   // Reload worlds with the restored dead set
@@ -2746,7 +2806,7 @@ function tickCheckpoints(g: G) {
 function tick(g: G) {
   if (g.tpAnim && g.tpAnim.phase === 0) { tickCheckpoints(g); return }  // congelar juego durante fade-out
   const now = performance.now()
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -3197,17 +3257,36 @@ function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
   const { cx, cy } = g, t = Date.now() * 0.001
   const tbPickup = g.pickups.find(p => p.id === "tball_w0")
 
-  // ── 1. Pickups flotantes primero (quedan ocultos bajo el muro) ────────────
+  // ── Calcular desvanecimiento del muro según proximidad del jugador ────────
+  // El muro se desvanece progresivamente cuando el jugador se acerca a la pared izquierda
+  // (el jugador presiona ←, su borde derecho se acerca a TBALL_WALL.x)
+  let wallAlpha = 1.0
+  if (tbPickup?.active) {
+    // El jugador está en la misma sala vertical (mismo rango Y de la sala)
+    const inSameRow = g.pl.y >= _TBALL_RY && g.pl.y < _TBALL_RY + RH
+    if (inSameRow) {
+      // distancia entre el borde derecho del jugador y el borde izquierdo del muro falso
+      const plRight = g.pl.x + PW
+      const fadeStart = 90  // empieza a desvanecerse a 90px del muro
+      const dist = Math.max(0, TBALL_WALL.x - plRight)  // 0 cuando el jugador "toca" el muro
+      wallAlpha = dist >= fadeStart ? 1.0 : Math.max(0.06, dist / fadeStart)
+    }
+  }
+
+  // ── 1. Pelota flotante PRIMERO (bajo el muro, se hace visible al desvanecer) ─
   for (const pk of g.pickups) {
     if (!pk.active) continue
     const sx = pk.x - cx, sy = pk.y - cy + Math.sin(pk.floatPhase) * 5
     if (sx < -60 || sx > CW + 60 || sy < -60 || sy > CH + 60) continue
 
     if (pk.kind === "tball") {
-      // Halo tenue (dentro del pilar, apenas visible desde afuera)
-      const halo = ctx.createRadialGradient(sx, sy, 3, sx, sy, 28)
-      halo.addColorStop(0, "rgba(180,255,60,0.4)"); halo.addColorStop(1, "rgba(100,220,0,0)")
-      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sx, sy, 28, 0, Math.PI * 2); ctx.fill()
+      // Visibilidad inversa al muro — más visible cuanto más desvanecido está el muro
+      const ballAlpha = Math.max(0.05, 1.0 - wallAlpha * 0.82)
+      ctx.save(); ctx.globalAlpha = ballAlpha
+      // Halo
+      const halo = ctx.createRadialGradient(sx, sy, 3, sx, sy, 30)
+      halo.addColorStop(0, "rgba(180,255,60,0.5)"); halo.addColorStop(1, "rgba(100,220,0,0)")
+      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sx, sy, 30, 0, Math.PI * 2); ctx.fill()
       // Pelota
       const ballGrad = ctx.createRadialGradient(sx - 3, sy - 3, 1, sx, sy, 12)
       ballGrad.addColorStop(0, "#DDFF44"); ballGrad.addColorStop(0.5, "#88CC00"); ballGrad.addColorStop(1, "#446600")
@@ -3216,25 +3295,32 @@ function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
       ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.5
       ctx.beginPath(); ctx.arc(sx, sy, 12, -0.8, 0.8); ctx.stroke()
       ctx.beginPath(); ctx.arc(sx, sy, 12, Math.PI - 0.8, Math.PI + 0.8); ctx.stroke()
-      // Sombra
-      ctx.fillStyle = "rgba(0,0,0,0.15)"; ctx.beginPath(); ctx.ellipse(sx, sy + 14, 9, 3, 0, 0, Math.PI * 2); ctx.fill()
-      // Sin etiqueta exterior — solo visible cuando el jugador entra al pilar
+      // Etiqueta (solo cuando el muro está muy desvanecido)
+      if (wallAlpha < 0.3) {
+        ctx.globalAlpha = (0.3 - wallAlpha) / 0.3
+        ctx.fillStyle = "#CCFF88"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("¡PODER!", sx, sy - 22); ctx.textAlign = "left"
+      }
+      ctx.restore()
     }
   }
 
-  // ── 2. Muro secreto encima (cubre la pelota desde fuera) ─────────────────
+  // ── 2. Muro secreto encima — se desvanece al acercarse ───────────────────
   if (tbPickup?.active) {
     const sx = TBALL_WALL.x - cx, sy = TBALL_WALL.y - cy
     if (sx + TBALL_WALL.w > -10 && sx < CW + 10 && sy + TBALL_WALL.h > -10 && sy < CH + 10) {
+      ctx.save()
+      ctx.globalAlpha = wallAlpha
       const pWi = 0
       const hash = ((TBALL_WALL.x * 7 + TBALL_WALL.y * 13) >>> 0) % 16
-      // Dibujar como tile sólido — misma apariencia que las paredes reales
+      // Mismo aspecto que la pared real — integrado con la arquitectura
       drawSolidTile(ctx, sx, sy, TBALL_WALL.w, TBALL_WALL.h, pWi, hash, g.gfx, TBALL_WALL.x, TBALL_WALL.y, "p1")
-      // Brillo verde MUY sutil — pista apenas perceptible, solo si te fijas
-      const glow = 0.018 + 0.010 * Math.sin(t * 1.7)
+      // Brillo verde MUY sutil — apenas perceptible, solo si te quedas mirando
+      const glow = 0.014 + 0.008 * Math.sin(t * 1.5)
       ctx.fillStyle = `rgba(0,255,80,${glow})`; ctx.fillRect(sx, sy, TBALL_WALL.w, TBALL_WALL.h)
-      ctx.strokeStyle = `rgba(0,255,80,${glow * 2.5})`; ctx.lineWidth = 0.8
+      ctx.strokeStyle = `rgba(0,255,80,${glow * 2})`; ctx.lineWidth = 0.6
       ctx.strokeRect(sx + 1, sy + 1, TBALL_WALL.w - 2, TBALL_WALL.h - 2)
+      ctx.restore()
     }
   }
 }
@@ -3267,6 +3353,140 @@ function drawTBalls(ctx: CanvasRenderingContext2D, g: G) {
       ctx.fillText(`${b.bounces}`, sx, sy - TB_R - 2); ctx.textAlign = "left"
     }
   }
+}
+
+// ── Perrito Viejo NPC — placeholder gráfico + burbuja de diálogo ─────────────
+function drawViejoDog(ctx: CanvasRenderingContext2D, g: G) {
+  const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
+  if (curW !== 0) return                           // solo en World 0
+
+  const { cx, cy } = g
+  const nx = VIEJO_DOG_POS.x - cx                  // posición en pantalla
+  const ny = VIEJO_DOG_POS.y - cy
+  if (nx < -80 || nx > CW + 80 || ny < -120 || ny > CH + 40) return
+
+  const t = Date.now() * 0.001
+  // ── Cuerpo del perrito (placeholder con primitivas) ──
+  const bx = nx, by = ny                            // base (pies)
+
+  // Sombra
+  ctx.fillStyle = "rgba(0,0,0,0.22)"
+  ctx.beginPath(); ctx.ellipse(bx, by + 2, 16, 5, 0, 0, Math.PI * 2); ctx.fill()
+
+  // Cola (curva pequeña, vieja → caída)
+  ctx.strokeStyle = "#6B4226"; ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.moveTo(bx + 11, by - 22)
+  ctx.quadraticCurveTo(bx + 22, by - 18, bx + 18, by - 30)
+  ctx.stroke()
+
+  // Cuerpo
+  ctx.fillStyle = "#8B5E3C"
+  ctx.beginPath(); ctx.roundRect(bx - 12, by - 38, 24, 28, 7); ctx.fill()
+  ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.strokeRect(bx - 12, by - 38, 24, 28)
+
+  // Bastón (signo de vejez)
+  ctx.strokeStyle = "#7B4A2A"; ctx.lineWidth = 2
+  ctx.beginPath(); ctx.moveTo(bx + 11, by - 32); ctx.lineTo(bx + 20, by + 1); ctx.stroke()
+  ctx.beginPath(); ctx.arc(bx + 11, by - 32, 4, -Math.PI * 0.9, -Math.PI * 0.1); ctx.stroke()
+
+  // Cabeza
+  ctx.fillStyle = "#9B6E4C"
+  ctx.beginPath(); ctx.arc(bx, by - 50, 14, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.stroke()
+
+  // Orejas caídas (viejas)
+  ctx.fillStyle = "#7A4E2E"
+  ctx.beginPath(); ctx.ellipse(bx - 12, by - 50, 5, 11, -0.3, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(bx + 12, by - 50, 5, 11, 0.3, 0, Math.PI * 2); ctx.fill()
+
+  // Ojos (cansados, medio cerrados)
+  ctx.fillStyle = "#2A1A0A"
+  ctx.beginPath(); ctx.ellipse(bx - 5, by - 52, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(bx + 5, by - 52, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
+
+  // Arrugas de vejez sobre los ojos
+  ctx.strokeStyle = "#5A3A18"; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.arc(bx - 5, by - 57, 4, 0.4, Math.PI - 0.4); ctx.stroke()
+  ctx.beginPath(); ctx.arc(bx + 5, by - 57, 4, 0.4, Math.PI - 0.4); ctx.stroke()
+
+  // Hocico
+  ctx.fillStyle = "#B07848"
+  ctx.beginPath(); ctx.ellipse(bx, by - 45, 6, 4, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = "#3A2218"
+  ctx.beginPath(); ctx.arc(bx, by - 47, 2.5, 0, Math.PI * 2); ctx.fill()
+
+  // Etiqueta [!] flotante cuando el jugador está cerca
+  const p = g.pl
+  const dx = p.x + PW / 2 - VIEJO_DOG_POS.x
+  const dy2 = p.y + PH / 2 - VIEJO_DOG_POS.y
+  const dist = Math.sqrt(dx * dx + dy2 * dy2)
+  const showDialog = dist < VIEJO_DOG_TALK_R
+
+  if (!showDialog) {
+    // Burbuja de atención cuando está lejos pero visible (~200px)
+    if (dist < 220) {
+      const bobY = Math.sin(t * 3) * 3
+      ctx.fillStyle = "rgba(255,220,0,0.9)"
+      ctx.beginPath(); ctx.arc(bx, by - 76 + bobY, 9, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = "#AA8800"; ctx.lineWidth = 1.5; ctx.stroke()
+      ctx.fillStyle = "#3A2800"; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText("!", bx, by - 72 + bobY); ctx.textAlign = "left"
+    }
+    return
+  }
+
+  // ── Burbuja de diálogo ────────────────────────────────────────────────────
+  const kills = countP1KillsW0(g.dead)
+  let dialogLines: string[]
+  let dialogColor = "#E8D8C0"
+
+  if (g.viejoDogState === "surprised") {
+    dialogLines = ["¡Caray! ¡La encontraste", "tú solo! ¡Eres más", "lista de lo que pensaba,", "Luly! 🎾"]
+    dialogColor = "#CCFF88"
+  } else if (g.viejoDogState === "quest_done") {
+    dialogLines = ["¡Lo lograste! Marqué el", "secreto en tu mapa.", "Busca algo que brille en", "verde en la sección P1."]
+    dialogColor = "#AAFFAA"
+  } else if (g.viejoDogState === "quest_active") {
+    dialogLines = [
+      `¡Vas por ${kills}/${TBALL_QUEST_KILLS} perros!`,
+      kills < 5 ? "¡Sigue, jovencita!" : kills < 9 ? "¡Casi lo tienes!" : "¡Ya casi!",
+      "Derrota a los que faltan",
+      "y te revelo el secreto.",
+    ]
+  } else {
+    // waiting → ya cambió a quest_active en tick, pero por si acaso
+    dialogLines = ["¡Oye, tú! Demuestra tu", "fuerza: derrota 10 perros", "de arriba y te revelo", "un gran secreto..."]
+  }
+
+  // Posición y tamaño de la burbuja
+  const bub_x = nx - 100, bub_y = ny - 118
+  const bub_w = 200, bub_lh = 14, bub_pad = 8
+  const bub_h = bub_pad * 2 + dialogLines.length * bub_lh
+
+  ctx.save()
+  ctx.fillStyle = "rgba(20,14,8,0.88)"
+  ctx.beginPath(); ctx.roundRect(bub_x, bub_y, bub_w, bub_h, 8); ctx.fill()
+  ctx.strokeStyle = "#A08060"; ctx.lineWidth = 1.2; ctx.stroke()
+  // Cola de la burbuja (triángulo apuntando al NPC)
+  ctx.fillStyle = "rgba(20,14,8,0.88)"
+  ctx.beginPath()
+  ctx.moveTo(bx - 8, bub_y + bub_h)
+  ctx.lineTo(bx + 8, bub_y + bub_h)
+  ctx.lineTo(bx, bub_y + bub_h + 12)
+  ctx.closePath(); ctx.fill()
+  ctx.strokeStyle = "#A08060"; ctx.lineWidth = 1.2
+  ctx.beginPath()
+  ctx.moveTo(bx - 8, bub_y + bub_h + 1)
+  ctx.lineTo(bx, bub_y + bub_h + 12)
+  ctx.lineTo(bx + 8, bub_y + bub_h + 1)
+  ctx.stroke()
+
+  // Texto
+  ctx.fillStyle = dialogColor; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+  dialogLines.forEach((line, i) => ctx.fillText(line, bub_x + bub_w / 2, bub_y + bub_pad + (i + 1) * bub_lh - 2))
+  ctx.textAlign = "left"
+  ctx.restore()
 }
 
 function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
@@ -3988,24 +4208,26 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
         if (doors.U && r > 0) { ctx.fillStyle = g.explored.has(nbU2) ? knownCol : unknownCol; ctx.fillRect(rx + Math.round((rW - dw2) / 2), ry, dw2, doorW) }
       }
     }
-    // ── Ícono de poder oculto (tball) — solo en W0 en modo dev/mapa ──
+    // ── Ícono de poder oculto (tball) — solo en W0, solo si quest revelada ──
     if (w === 0) {
       const tbPk = g.pickups.find(p => p.id === "tball_w0")
       const tbc = TBALL_SECRET_C, tbr = TBALL_SECRET_R
       const tbRx = gx + tbc * (rW + gap), tbRy = gy + tbr * (rH + gap)
-      if (tbPk?.active) {
-        // No recogida: destello verde pulsante en la celda
+      const questRevealed = g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
+      if (!tbPk?.active) {
+        // Recogida: siempre visible como "ya encontrado"
+        ctx.fillStyle = "#556655"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("🎾✓", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
+      } else if (questRevealed) {
+        // Quest completada: destello verde pulsante
         const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
         ctx.fillStyle = `rgba(0,220,80,${pulse * 0.35})`; ctx.fillRect(tbRx, tbRy, rW, rH)
         ctx.strokeStyle = `rgba(0,255,80,${pulse * 0.9})`; ctx.lineWidth = 1.2
         ctx.strokeRect(tbRx + 1, tbRy + 1, rW - 2, rH - 2)
         ctx.fillStyle = "#AAFFAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("🎾?", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
-      } else {
-        // Recogida: marca gris "ya encontrado"
-        ctx.fillStyle = "#556655"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("🎾✓", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
       }
+      // Si quest no revelada: sin icono en el mapa (secreto intacto)
     }
 
     // ── Iconos de checkpoints en este panel de mundo ───────────────────
@@ -4154,13 +4376,19 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     // Ícono poder oculto tball — solo W0, sala [TBALL_SECRET_C, TBALL_SECRET_R]
     if (w === 0 && c === TBALL_SECRET_C && r === TBALL_SECRET_R) {
       const tbPk = g.pickups.find(pk => pk.id === "tball_w0")
+      const questRev = g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
       const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
-      if (tbPk?.active) {
+      if (!tbPk?.active) {
+        ctx.fillStyle = "#446644"; ctx.fillText("🎾 YA RECOGIDO", rx + rW / 2, ry + 43)
+      } else if (questRev) {
         ctx.fillStyle = `rgba(0,200,80,${pulse * 0.45})`; ctx.fillRect(rx, ry, rW, rH)
         ctx.strokeStyle = `rgba(0,255,80,${pulse})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
         ctx.fillStyle = "#CCFF88"; ctx.fillText("🎾 PODER OCULTO", rx + rW / 2, ry + 43)
-      } else {
-        ctx.fillStyle = "#446644"; ctx.fillText("🎾 YA RECOGIDO", rx + rW / 2, ry + 43)
+      }
+      // Sin marker si quest no revelada (modo dev puede mostrarlo al desarrollador)
+      if (g.devMode && tbPk?.active && !questRev) {
+        ctx.fillStyle = "rgba(0,100,50,0.35)"; ctx.fillRect(rx, ry, rW, rH)
+        ctx.fillStyle = "#336633"; ctx.fillText("🎾 [SECRET]", rx + rW / 2, ry + 43)
       }
     }
     ctx.textAlign = "left"
@@ -4310,7 +4538,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
-  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
+  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
