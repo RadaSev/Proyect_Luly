@@ -4077,6 +4077,14 @@ export default function ProyectoLuly() {
 
   useEffect(() => {
     const canvas = canvasRef.current!, ctx = canvas.getContext("2d")!
+    // ── DPR-aware canvas ────────────────────────────────────────────────────
+    // Multiplicar las dimensiones reales del canvas por devicePixelRatio hace
+    // que el texto y los gráficos se rendericen a resolución Retina/HiDPI.
+    // El CSS sigue mostrándolo al tamaño correcto (min(100%, calc(1.75*100vh))).
+    // Capamos en 2× para no ahogar dispositivos móviles con dpr=3.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    canvas.width  = Math.round(CW * dpr)
+    canvas.height = Math.round(CH * dpr)
     let raf: number, accum = 0, last = performance.now(), ut = 0
     const gpCheckpoint = () => {
       const g = G.current, p = g.pl
@@ -4105,7 +4113,12 @@ export default function ProyectoLuly() {
         // Fade-to-black progresivo al morir
         if (g.over) g.overFade = Math.min(1, g.overFade + dt * 1.4)
       }
-      if (gameActiveRef.current) draw(g, ctx, sprs.current, devHoverRef.current)
+      if (gameActiveRef.current) {
+        // Aplica DPR como transform base antes de cada frame.
+        // ctx.save()/restore() internos del draw se apilan sobre este transform.
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        draw(g, ctx, sprs.current, devHoverRef.current)
+      }
       ut += dt; if (ut > .25) {
         ut = 0
         // if (g.autoGfx) {
@@ -4430,7 +4443,9 @@ export default function ProyectoLuly() {
   //   · No requiere JS ni winDims → inmune a SSR/hidratación
   const canvasStyle: React.CSSProperties = {
     display: "block",
-    imageRendering: "pixelated",
+    // "auto" = suavizado bilineal. Con canvas DPR×2 el downscale da texto nítido.
+    // "pixelated" era necesario cuando escalábamos hacia arriba (DPR=1); ya no aplica.
+    imageRendering: "auto",
     width:  `min(100%, calc(${CW / CH} * 100vh))`,
     height: "auto",
     border: "none",
@@ -4767,11 +4782,10 @@ export default function ProyectoLuly() {
           </div>
         )}
 
-        {/* ── FPS (solo en devMode) y gamepad ── */}
-        {screen === "playing" && (
-          <div className="absolute top-1 left-2 text-xs font-mono opacity-40 flex items-center gap-2" style={{ color: "#888" }}>
-            {ui.showDevMap || G.current.devMode ? <span>{ui.fps}fps</span> : null}
-            {gpadConnected && <span style={{ color: "#D4C400", opacity: 0.9 }} title="Control Xbox detectado">🎮</span>}
+        {/* ── Ícono de gamepad (FPS ya está en el panel DEV canvas) ── */}
+        {screen === "playing" && gpadConnected && (
+          <div className="absolute top-1 left-2 text-xs opacity-80">
+            <span style={{ color: "#D4C400" }} title="Control Xbox detectado">🎮</span>
           </div>
         )}
 
