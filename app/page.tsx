@@ -50,7 +50,7 @@ type Enemy = {
 type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
-type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" }
+type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" | "tba" }
 type TBall  = { x: number; y: number; vx: number; vy: number; active: boolean; bounces: number; life: number }
 type Pickup = { id: string; kind: "tball"; x: number; y: number; active: boolean; floatPhase: number }
 type Crate = { id: number; x: number; y: number; w: number; h: number; active: boolean }
@@ -92,6 +92,7 @@ type G = {
   overFade: number
   // Habilidades de combate y proyectiles especiales
   tBalls: TBall[]
+  tballAmmo: number                   // munición de pelota rebotante
   pickups: Pickup[]
   activePower: string | null          // poder seleccionado actualmente
   bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
@@ -154,7 +155,7 @@ const SAVE_KEY = "proyecto_luly_v2"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
-  hp: number; maxHp: number; ammo: number
+  hp: number; maxHp: number; ammo: number; tballAmmo: number
   checkpoint: { w: number; x: number; y: number }
   dead: string[]; explored: string[]; discoveredCPs: string[]
   cw: number[]; abilities: string[]
@@ -166,7 +167,7 @@ function saveGame(g: G): void {
   try {
     const s: LulySave = {
       version: 2, savedAt: Date.now(), score: g.score, lives: g.lives, kills: g.kills,
-      hp: g.pl.hp, maxHp: g.pl.maxHp, ammo: g.pl.ammo,
+      hp: g.pl.hp, maxHp: g.pl.maxHp, ammo: g.pl.ammo, tballAmmo: g.tballAmmo,
       checkpoint: { ...g.checkpoint },
       dead: [...g.dead], explored: [...g.explored],
       discoveredCPs: [...g.discoveredCPs], cw: [...g.cw], abilities: [...g.abilities],
@@ -301,15 +302,22 @@ const CP_LOCS_P2: [number, number][] = [[2, 5], [6, 5], [1, 7], [5, 7]]
 const CP_LOCS_BOSS: [number, number, "p1" | "ultra" | "p2"][] = [
   [8, 1, "p1"], [4, 4, "ultra"], [8, 7, "p2"]
 ]
-// Posición del muro secreto y pickup de la pelota de tenis (World 0, sala [3,1])
-const { x: _TBALL_RX, y: _TBALL_RY } = ro(0, 3, 1)
+// Posición del muro secreto y pickup de la pelota de tenis
+// Sala oculta: World 0, cubículo [1, 3] — izquierda de P1, última fila antes del TROW
+// El jugador tiene que caminar DENTRO del pilar (no tiene colisión) para reclamar el poder
+const TBALL_SECRET_C = 1, TBALL_SECRET_R = 3
+const { x: _TBALL_RX, y: _TBALL_RY } = ro(0, TBALL_SECRET_C, TBALL_SECRET_R)
+// Pilar falso: pegado a la pared izquierda, baja desde el techo — parece parte de la arquitectura
 const TBALL_WALL = {
-  x: _TBALL_RX + Math.floor(RW * 0.70), y: _TBALL_RY + WT,
-  w: WT * 2, h: Math.floor(RH * 0.55),
+  x: _TBALL_RX + WT,                       // justo a la derecha de la pared izquierda real
+  y: _TBALL_RY + WT,                        // empieza en el techo
+  w: WT * 3,                                // 3 tiles de ancho (72 px) → suficiente para ocultar la pelota
+  h: Math.floor(RH * 0.55),               // 55 % de altura de sala
 }
+// Pickup centrado dentro del pilar (completamente oculto)
 const TBALL_PICKUP_POS = {
-  x: TBALL_WALL.x + TBALL_WALL.w + Math.floor((RW * 0.30 - TBALL_WALL.w - WT) / 2),
-  y: _TBALL_RY + Math.floor(RH * 0.38),
+  x: TBALL_WALL.x + Math.floor(TBALL_WALL.w / 2),
+  y: TBALL_WALL.y + Math.floor(TBALL_WALL.h * 0.38),
 }
 type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string; bossKind?: "p1" | "ultra" | "p2" }
 // ALL_CPS se define más abajo, después de getWorldPlats, para poder validar contra plataformas
@@ -1207,6 +1215,7 @@ function mkG_lazy(): G {
     mobileZoom: "far",
     overFade: 0,
     tBalls: [],
+    tballAmmo: 0,
     pickups: [{ id: "tball_w0", kind: "tball", x: TBALL_PICKUP_POS.x, y: TBALL_PICKUP_POS.y, active: true, floatPhase: 0 }],
     activePower: null,
     bossRewardedCPs: new Set<string>(),
@@ -1460,7 +1469,7 @@ function breakCrate(g: G, c: Crate) {
     g.bones.push({ x: cx2 + (Math.random() - .5) * 20, y: cy2, w: 11, h: 11, vx: Math.cos(a) * spd, vy: -Math.abs(Math.sin(a) * spd) - 1, active: true, life: 12 })
   }
 
-  const drop = (k: "h" | "a") =>
+  const drop = (k: "h" | "a" | "tba") =>
     g.drops.push({ x: cx2 + (Math.random() - .5) * 24, y: cy2 - 4, vx: (Math.random() - .5) * 2, vy: -3.5 - Math.random() * 1.2, active: true, life: 20, kind: k })
 
   // Drop aleatorio puro:
@@ -1473,6 +1482,11 @@ function breakCrate(g: G, c: Crate) {
   else if (roll < 0.70) { drop("a") }
   else if (roll < 0.85) { drop("h"); drop("a") }
   // else: solo fragmentos
+
+  // Bonus: si el jugador tiene tball y le falta munición, 25 % de chance extra
+  if (g.abilities.has("tball") && g.tballAmmo < TB_AMMO_MAX && Math.random() < 0.25) {
+    drop("tba")
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2349,8 +2363,9 @@ function tickPickups(g: G) {
       pk.active = false
       if (pk.kind === "tball" && !g.abilities.has("tball")) {
         g.abilities.add("tball")
+        g.tballAmmo = TB_AMMO_INIT
         g.activePower = "tball"
-        g.abilityNotif = { text: "🎾 PELOTA REBOTANTE  [V / botón 🎾]", timer: 5.0 }
+        g.abilityNotif = { text: "🎾 PELOTA REBOTANTE — 5 balas  [V / botón 🎾]", timer: 5.5 }
         spawnExplosion(g, pk.x, pk.y, ["#CCFF00", "#88FF44", "#FFFFFF", "#FFFF00"], 18, 5)
         saveGame(g)
       }
@@ -2359,16 +2374,20 @@ function tickPickups(g: G) {
 }
 
 // ── Física de las pelotas rebotantes (TBall) ──────────────────────────────────
-const TB_R = 8         // radio de la pelota
-const TB_SPD = 5.5     // velocidad inicial
-const TB_GRAVITY = 0.12 // gravedad leve
+const TB_R = 8          // radio de la pelota
+const TB_SPD = 5.5      // velocidad inicial
+const TB_GRAVITY = 0.12  // gravedad leve
 const TB_MAX_BOUNCES = 5
-const TB_MAX_LIFE = 8   // segundos antes de expirar
-const TB_MAX_ACTIVE = 5  // máximo en pantalla
+const TB_MAX_LIFE = 8    // segundos antes de expirar
+const TB_MAX_SIMULTANEOUS = 3  // máximo en pantalla a la vez (visual)
+const TB_AMMO_INIT = 5   // munición inicial al desbloquear
+const TB_AMMO_MAX = 15   // máximo acumulable
+const TB_AMMO_DROP = 3   // cuánta munición da un drop de caja
 
 function fireTBall(g: G) {
   if (!g.abilities.has("tball")) return
-  if (g.tBalls.filter(b => b.active).length >= TB_MAX_ACTIVE) return
+  if (g.tballAmmo <= 0) return   // sin munición
+  if (g.tBalls.filter(b => b.active).length >= TB_MAX_SIMULTANEOUS) return
   const p = g.pl
   const dx = g.keys["arrowright"] || g.keys["d"] ? 1 : g.keys["arrowleft"] || g.keys["a"] ? -1 : p.facing
   const dy = g.keys["arrowup"] || g.keys["w"] ? -0.5 : g.keys["arrowdown"] || g.keys["s"] ? 0.4 : -0.2
@@ -2376,6 +2395,7 @@ function fireTBall(g: G) {
   const px = p.x + (p.facing === 1 ? p.w + 4 : -TB_R * 2 - 4)
   const py = p.y + p.h * 0.4
   g.tBalls.push({ x: px, y: py, vx: (dx / len) * TB_SPD, vy: (dy / len) * TB_SPD, active: true, bounces: TB_MAX_BOUNCES, life: TB_MAX_LIFE })
+  g.tballAmmo--
   spawnExplosion(g, px, py, ["#CCFF00", "#88FF44"], 4, 1.5)
 }
 
@@ -2517,7 +2537,9 @@ function tickDrops(g: G) {
     }
     if (d.y + 18 >= TOT_H) { d.y = TOT_H - 18; d.vy = 0 }
     if (p.x < d.x + 18 && p.x + p.w > d.x && p.y < d.y + 18 && p.y + p.h > d.y) {
-      if (d.kind === "h") p.hp = Math.min(p.maxHp, p.hp + 1); else p.ammo = Math.min(15, p.ammo + 10)
+      if (d.kind === "h") p.hp = Math.min(p.maxHp, p.hp + 1)
+      else if (d.kind === "a") p.ammo = Math.min(15, p.ammo + 10)
+      else if (d.kind === "tba") g.tballAmmo = Math.min(TB_AMMO_MAX, g.tballAmmo + TB_AMMO_DROP)
       d.active = false
     }
   }
@@ -2597,6 +2619,7 @@ function suspendWorld(g: G, w: number) {
 function applyLoad(g: G, s: LulySave): void {
   g.score = s.score; g.lives = s.lives; g.kills = s.kills || 0
   g.pl.hp = s.hp; g.pl.maxHp = s.maxHp; g.pl.ammo = s.ammo
+  g.tballAmmo = s.tballAmmo ?? 0
   g.checkpoint = { ...s.checkpoint }
   g.pl.x = s.checkpoint.x; g.pl.y = s.checkpoint.y
   g.dead = new Set(s.dead); g.explored = new Set(s.explored)
@@ -3172,37 +3195,21 @@ function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: numb
 // ── Muro secreto + pickup de habilidad ───────────────────────────────────────
 function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
   const { cx, cy } = g, t = Date.now() * 0.001
-
-  // Muro secreto (solo si el pickup aún no fue recogido)
   const tbPickup = g.pickups.find(p => p.id === "tball_w0")
-  if (tbPickup?.active) {
-    const sx = TBALL_WALL.x - cx, sy = TBALL_WALL.y - cy
-    if (sx + TBALL_WALL.w > -10 && sx < CW + 10 && sy + TBALL_WALL.h > -10 && sy < CH + 10) {
-      // Dibujar como tile sólido normal
-      const pWi = 0
-      const hash = ((TBALL_WALL.x * 7 + TBALL_WALL.y * 13) >>> 0) % 16
-      drawSolidTile(ctx, sx, sy, TBALL_WALL.w, TBALL_WALL.h, pWi, hash, g.gfx, TBALL_WALL.x, TBALL_WALL.y, "p1")
-      // Destello verde muy sutil para indicar secreto
-      const glow = 0.06 + 0.04 * Math.sin(t * 2.2)
-      ctx.fillStyle = `rgba(0,255,80,${glow})`; ctx.fillRect(sx, sy, TBALL_WALL.w, TBALL_WALL.h)
-      ctx.strokeStyle = `rgba(0,255,80,${glow * 3})`; ctx.lineWidth = 1
-      ctx.strokeRect(sx + 1, sy + 1, TBALL_WALL.w - 2, TBALL_WALL.h - 2)
-    }
-  }
 
-  // Pickups flotantes
+  // ── 1. Pickups flotantes primero (quedan ocultos bajo el muro) ────────────
   for (const pk of g.pickups) {
     if (!pk.active) continue
-    const sx = pk.x - cx, sy = pk.y - cy + Math.sin(pk.floatPhase) * 7
-    if (sx < -40 || sx > CW + 40 || sy < -40 || sy > CH + 40) continue
+    const sx = pk.x - cx, sy = pk.y - cy + Math.sin(pk.floatPhase) * 5
+    if (sx < -60 || sx > CW + 60 || sy < -60 || sy > CH + 60) continue
 
     if (pk.kind === "tball") {
-      // Halo
-      const halo = ctx.createRadialGradient(sx, sy, 4, sx, sy, 36)
-      halo.addColorStop(0, "rgba(180,255,60,0.35)"); halo.addColorStop(1, "rgba(100,220,0,0)")
-      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sx, sy, 36, 0, Math.PI * 2); ctx.fill()
-      // Pelota verde-amarilla
-      const ballGrad = ctx.createRadialGradient(sx - 4, sy - 4, 2, sx, sy, 12)
+      // Halo tenue (dentro del pilar, apenas visible desde afuera)
+      const halo = ctx.createRadialGradient(sx, sy, 3, sx, sy, 28)
+      halo.addColorStop(0, "rgba(180,255,60,0.4)"); halo.addColorStop(1, "rgba(100,220,0,0)")
+      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sx, sy, 28, 0, Math.PI * 2); ctx.fill()
+      // Pelota
+      const ballGrad = ctx.createRadialGradient(sx - 3, sy - 3, 1, sx, sy, 12)
       ballGrad.addColorStop(0, "#DDFF44"); ballGrad.addColorStop(0.5, "#88CC00"); ballGrad.addColorStop(1, "#446600")
       ctx.fillStyle = ballGrad; ctx.beginPath(); ctx.arc(sx, sy, 12, 0, Math.PI * 2); ctx.fill()
       // Líneas de tenis
@@ -3210,12 +3217,24 @@ function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
       ctx.beginPath(); ctx.arc(sx, sy, 12, -0.8, 0.8); ctx.stroke()
       ctx.beginPath(); ctx.arc(sx, sy, 12, Math.PI - 0.8, Math.PI + 0.8); ctx.stroke()
       // Sombra
-      ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.beginPath(); ctx.ellipse(sx, sy + 16, 10, 4, 0, 0, Math.PI * 2); ctx.fill()
-      // Etiqueta parpadeante
-      if (Math.sin(t * 4) > 0) {
-        ctx.fillStyle = "#AAFFAA"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("🎾", sx, sy - 20); ctx.textAlign = "left"
-      }
+      ctx.fillStyle = "rgba(0,0,0,0.15)"; ctx.beginPath(); ctx.ellipse(sx, sy + 14, 9, 3, 0, 0, Math.PI * 2); ctx.fill()
+      // Sin etiqueta exterior — solo visible cuando el jugador entra al pilar
+    }
+  }
+
+  // ── 2. Muro secreto encima (cubre la pelota desde fuera) ─────────────────
+  if (tbPickup?.active) {
+    const sx = TBALL_WALL.x - cx, sy = TBALL_WALL.y - cy
+    if (sx + TBALL_WALL.w > -10 && sx < CW + 10 && sy + TBALL_WALL.h > -10 && sy < CH + 10) {
+      const pWi = 0
+      const hash = ((TBALL_WALL.x * 7 + TBALL_WALL.y * 13) >>> 0) % 16
+      // Dibujar como tile sólido — misma apariencia que las paredes reales
+      drawSolidTile(ctx, sx, sy, TBALL_WALL.w, TBALL_WALL.h, pWi, hash, g.gfx, TBALL_WALL.x, TBALL_WALL.y, "p1")
+      // Brillo verde MUY sutil — pista apenas perceptible, solo si te fijas
+      const glow = 0.018 + 0.010 * Math.sin(t * 1.7)
+      ctx.fillStyle = `rgba(0,255,80,${glow})`; ctx.fillRect(sx, sy, TBALL_WALL.w, TBALL_WALL.h)
+      ctx.strokeStyle = `rgba(0,255,80,${glow * 2.5})`; ctx.lineWidth = 0.8
+      ctx.strokeRect(sx + 1, sy + 1, TBALL_WALL.w - 2, TBALL_WALL.h - 2)
     }
   }
 }
@@ -3657,10 +3676,23 @@ function drawDrops(ctx: CanvasRenderingContext2D, g: G) {
     if (d.kind === "h") {
       const t = Date.now() * 0.004; ctx.save(); ctx.translate(sx + 9, sy + 9); ctx.scale(.9 + Math.sin(t) * .1, .9 + Math.sin(t) * .1)
       ctx.fillStyle = "#FF1744"; ctx.beginPath(); ctx.moveTo(0, 8); ctx.bezierCurveTo(0, 5, -9, -2, -9, 1); ctx.bezierCurveTo(-9, -4, 0, -8, 0, -3); ctx.bezierCurveTo(0, -8, 9, -4, 9, 1); ctx.bezierCurveTo(9, -2, 0, 5, 0, 8); ctx.fill(); ctx.restore()
-    } else {
+    } else if (d.kind === "a") {
       const t = Date.now() * .003; ctx.save(); ctx.translate(sx + 10, sy + 10); ctx.rotate(t)
       ctx.fillStyle = "#F5DEB3"; ctx.fillRect(-10, -2, 20, 4); ctx.fillRect(-2, -10, 4, 20); ctx.restore()
       ctx.fillStyle = "#FFF"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText("+10", sx + 10, sy - 2); ctx.textAlign = "left"
+    } else if (d.kind === "tba") {
+      // Mini pelota de tenis con label +3
+      const t2 = Date.now() * 0.004; ctx.save(); ctx.translate(sx + 9, sy + 9)
+      ctx.scale(0.88 + Math.sin(t2) * 0.08, 0.88 + Math.sin(t2) * 0.08)
+      const bg = ctx.createRadialGradient(-2, -2, 1, 0, 0, 10)
+      bg.addColorStop(0, "#DDFF44"); bg.addColorStop(0.6, "#88CC00"); bg.addColorStop(1, "#446600")
+      ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.2
+      ctx.beginPath(); ctx.arc(0, 0, 10, -0.7, 0.7); ctx.stroke()
+      ctx.beginPath(); ctx.arc(0, 0, 10, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke()
+      ctx.restore()
+      ctx.fillStyle = "#CCFF44"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText(`+${TB_AMMO_DROP}🎾`, sx + 9, sy - 2); ctx.textAlign = "left"
     }
   }
 }
@@ -3956,6 +3988,26 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
         if (doors.U && r > 0) { ctx.fillStyle = g.explored.has(nbU2) ? knownCol : unknownCol; ctx.fillRect(rx + Math.round((rW - dw2) / 2), ry, dw2, doorW) }
       }
     }
+    // ── Ícono de poder oculto (tball) — solo en W0 en modo dev/mapa ──
+    if (w === 0) {
+      const tbPk = g.pickups.find(p => p.id === "tball_w0")
+      const tbc = TBALL_SECRET_C, tbr = TBALL_SECRET_R
+      const tbRx = gx + tbc * (rW + gap), tbRy = gy + tbr * (rH + gap)
+      if (tbPk?.active) {
+        // No recogida: destello verde pulsante en la celda
+        const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
+        ctx.fillStyle = `rgba(0,220,80,${pulse * 0.35})`; ctx.fillRect(tbRx, tbRy, rW, rH)
+        ctx.strokeStyle = `rgba(0,255,80,${pulse * 0.9})`; ctx.lineWidth = 1.2
+        ctx.strokeRect(tbRx + 1, tbRy + 1, rW - 2, rH - 2)
+        ctx.fillStyle = "#AAFFAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("🎾?", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
+      } else {
+        // Recogida: marca gris "ya encontrado"
+        ctx.fillStyle = "#556655"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("🎾✓", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
+      }
+    }
+
     // ── Iconos de checkpoints en este panel de mundo ───────────────────
     for (const cp of ALL_CPS) {
       if (cp.w !== w) continue
@@ -4099,6 +4151,18 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     else if (isBossP1) { ctx.fillStyle = "#00FF88"; ctx.fillText("JEFE P1", rx + rW / 2, ry + 35) }
     else if (isBossP2) { ctx.fillStyle = "#FF6600"; ctx.fillText("JEFE P2", rx + rW / 2, ry + 35) }
     if (nCr > 0) { ctx.fillStyle = "#FFEE44"; ctx.fillText(`■${nCr} cajas`, rx + rW / 2, ry + 43) }
+    // Ícono poder oculto tball — solo W0, sala [TBALL_SECRET_C, TBALL_SECRET_R]
+    if (w === 0 && c === TBALL_SECRET_C && r === TBALL_SECRET_R) {
+      const tbPk = g.pickups.find(pk => pk.id === "tball_w0")
+      const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
+      if (tbPk?.active) {
+        ctx.fillStyle = `rgba(0,200,80,${pulse * 0.45})`; ctx.fillRect(rx, ry, rW, rH)
+        ctx.strokeStyle = `rgba(0,255,80,${pulse})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
+        ctx.fillStyle = "#CCFF88"; ctx.fillText("🎾 PODER OCULTO", rx + rW / 2, ry + 43)
+      } else {
+        ctx.fillStyle = "#446644"; ctx.fillText("🎾 YA RECOGIDO", rx + rW / 2, ry + 43)
+      }
+    }
     ctx.textAlign = "left"
     const doors = computeDoors(w, c, r), dSz = 8
     ctx.fillStyle = th.accent + "CC"
@@ -4472,21 +4536,22 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
       POWER_LIST.filter(pw => g.abilities.has(pw.id)).forEach((pw, i) => {
         const px2 = panX + 8 + i * pGap
         const isActive = g.activePower === pw.id
-        ctx.fillStyle = isActive ? "rgba(50,200,50,0.25)" : "rgba(0,0,0,0.5)"
-        ctx.beginPath(); ctx.roundRect(px2, pyStart + 4, 30, 24, 3); ctx.fill()
-        ctx.strokeStyle = isActive ? "#44FF44" : "#555"; ctx.lineWidth = isActive ? 1.5 : 1
-        ctx.strokeRect(px2, pyStart + 4, 30, 24)
+        const ammo = pw.id === "tball" ? g.tballAmmo : 0
+        const noAmmo = ammo <= 0
+        ctx.fillStyle = isActive ? (noAmmo ? "rgba(80,0,0,0.35)" : "rgba(50,200,50,0.25)") : "rgba(0,0,0,0.5)"
+        ctx.beginPath(); ctx.roundRect(px2, pyStart + 4, 30, 26, 3); ctx.fill()
+        ctx.strokeStyle = isActive ? (noAmmo ? "#FF4444" : "#44FF44") : "#555"
+        ctx.lineWidth = isActive ? 1.5 : 1; ctx.strokeRect(px2, pyStart + 4, 30, 26)
         ctx.font = "13px sans-serif"; ctx.textAlign = "center"
-        ctx.fillText(pw.icon, px2 + 15, pyStart + 18)
-        ctx.fillStyle = isActive ? "#44FF44" : "#666"; ctx.font = "8px 'Courier New',monospace"
-        ctx.fillText(pw.label, px2 + 15, pyStart + 26); ctx.textAlign = "left"
-        if (isActive) {
-          ctx.fillStyle = "#44FF4466"
-          ctx.beginPath(); ctx.roundRect(px2, pyStart + 4, 30, 24, 3); ctx.fill()
-          // pulsing border glow
+        ctx.fillText(pw.icon, px2 + 15, pyStart + 17)
+        // Contador de munición (reemplaza la etiqueta label)
+        ctx.fillStyle = noAmmo ? "#FF4444" : (isActive ? "#CCFF44" : "#888")
+        ctx.font = "bold 8px 'Courier New',monospace"
+        ctx.fillText(`×${ammo}`, px2 + 15, pyStart + 28); ctx.textAlign = "left"
+        if (isActive && !noAmmo) {
           const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006)
           ctx.strokeStyle = `rgba(68,255,68,${0.3 + 0.3 * pulse})`; ctx.lineWidth = 2
-          ctx.strokeRect(px2 - 1, pyStart + 3, 32, 26)
+          ctx.strokeRect(px2 - 1, pyStart + 3, 32, 28)
         }
       })
     }
