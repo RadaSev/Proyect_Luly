@@ -50,7 +50,9 @@ type Enemy = {
 type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
-type Drop = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" }
+type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" }
+type TBall  = { x: number; y: number; vx: number; vy: number; active: boolean; bounces: number; life: number }
+type Pickup = { id: string; kind: "tball"; x: number; y: number; active: boolean; floatPhase: number }
 type Crate = { id: number; x: number; y: number; w: number; h: number; active: boolean }
 type WorldAnim = { name: string; sub: string; alpha: number; phase: "in" | "hold" | "out"; timer: number }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; r: number; col: string }
@@ -88,6 +90,11 @@ type G = {
   mobileZoom: "far" | "close"
   // Fade-to-black al morir (0=transparente → 1=negro)
   overFade: number
+  // Habilidades de combate y proyectiles especiales
+  tBalls: TBall[]
+  pickups: Pickup[]
+  activePower: string | null          // poder seleccionado actualmente
+  bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -151,6 +158,8 @@ interface LulySave {
   checkpoint: { w: number; x: number; y: number }
   dead: string[]; explored: string[]; discoveredCPs: string[]
   cw: number[]; abilities: string[]
+  pickedUpItems: string[]             // IDs de pickups recogidos
+  bossRewardedCPs: string[]           // IDs de boss-CPs que ya dieron recompensa
 }
 
 function saveGame(g: G): void {
@@ -161,6 +170,8 @@ function saveGame(g: G): void {
       checkpoint: { ...g.checkpoint },
       dead: [...g.dead], explored: [...g.explored],
       discoveredCPs: [...g.discoveredCPs], cw: [...g.cw], abilities: [...g.abilities],
+      pickedUpItems: g.pickups.filter(p => !p.active).map(p => p.id),
+      bossRewardedCPs: [...g.bossRewardedCPs],
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -279,10 +290,28 @@ const KENNEL_WORLD_POS = KENNEL_ROOMS.map(({ w, c, r }) => {
 
 // ── Sistema de Checkpoints (colchoncitos de perro) ────────────────────────────
 // 5 checkpoints por mundo: Oeste, Norte, Este, Sur, Centro
+// CPs originales del kennel + compás cardinal
 const CP_LOCS: [number, number][] = [[0, 4], [4, 0], [8, 4], [4, 8], [4, 4]]
 const CP_COMPASS = ["OESTE", "NORTE", "ESTE", "SUR", "CENTRO"]
 const CP_ICON = ["◀", "▲", "▶", "▼", "◆"]
-type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string }
+// CPs adicionales: 4 por Parte 1 y 4 por Parte 2
+const CP_LOCS_P1: [number, number][] = [[2, 0], [6, 0], [1, 2], [5, 2]]
+const CP_LOCS_P2: [number, number][] = [[2, 5], [6, 5], [1, 7], [5, 7]]
+// CPs de boss (dan recompensa al activarse por primera vez, inactivos hasta que muere el jefe)
+const CP_LOCS_BOSS: [number, number, "p1" | "ultra" | "p2"][] = [
+  [8, 1, "p1"], [4, 4, "ultra"], [8, 7, "p2"]
+]
+// Posición del muro secreto y pickup de la pelota de tenis (World 0, sala [3,1])
+const { x: _TBALL_RX, y: _TBALL_RY } = ro(0, 3, 1)
+const TBALL_WALL = {
+  x: _TBALL_RX + Math.floor(RW * 0.70), y: _TBALL_RY + WT,
+  w: WT * 2, h: Math.floor(RH * 0.55),
+}
+const TBALL_PICKUP_POS = {
+  x: TBALL_WALL.x + TBALL_WALL.w + Math.floor((RW * 0.30 - TBALL_WALL.w - WT) / 2),
+  y: _TBALL_RY + Math.floor(RH * 0.38),
+}
+type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string; bossKind?: "p1" | "ultra" | "p2" }
 // ALL_CPS se define más abajo, después de getWorldPlats, para poder validar contra plataformas
 const CP_RADIUS = 115  // radio de descubrimiento/uso
 
@@ -825,30 +854,40 @@ function getWorldPlats(w: number): WPlat[] {
 // ALL_CPS — validados para que no queden dentro de plataformas sólidas
 const ALL_CPS: CPDef[] = (() => {
   const out: CPDef[] = []
-  for (let w = 0; w < NW; w++)
+
+  const addCP = (w: number, c: number, r: number, label: string, icon: string, bossKind?: "p1" | "ultra" | "p2") => {
+    const { x: x0, y: y0 } = ro(w, c, r)
+    const cpX = x0 + RW / 2 - PW / 2
+    let cpY = y0 + RH - WT - PH
+    const roomPlats = [...makeRoomWalls(w, c, r), ...makeInternalPlats(w, c, r)].filter(p => p.mode === "s")
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const hit = roomPlats.find(p => cpX < p.x + p.w && cpX + PW > p.x && cpY < p.y + p.h && cpY + PH > p.y)
+      if (!hit) break
+      cpY = hit.y - PH - 1
+    }
+    cpY = Math.max(y0 + WT + 4, Math.min(cpY, y0 + RH - WT - PH))
+    const def: CPDef = { id: `${w}_${c}_${r}`, w, c, r, x: cpX, y: cpY, label, icon }
+    if (bossKind) def.bossKind = bossKind
+    out.push(def)
+  }
+
+  for (let w = 0; w < NW; w++) {
+    // CPs originales (kennel + compás)
     for (let i = 0; i < 5; i++) {
       const [c, r] = CP_LOCS[i]
-      const { x: x0, y: y0 } = ro(w, c, r)
-      const cpX = x0 + RW / 2 - PW / 2
-      let cpY = y0 + RH - WT - PH  // posición base: suelo de la sala
-      // Validar contra todas las plataformas sólidas de la sala
-      const roomPlats = [...makeRoomWalls(w, c, r), ...makeInternalPlats(w, c, r)]
-        .filter(p => p.mode === "s")
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const hit = roomPlats.find(p =>
-          cpX < p.x + p.w && cpX + PW > p.x &&
-          cpY < p.y + p.h && cpY + PH > p.y
-        )
-        if (!hit) break
-        cpY = hit.y - PH - 1  // subir por encima de la plataforma
-      }
-      // Nunca salirse del interior de la sala
-      cpY = Math.max(y0 + WT + 4, Math.min(cpY, y0 + RH - WT - PH))
-      out.push({ id: `${w}_${c}_${r}`, w, c, r,
-        x: cpX, y: cpY,
-        label: `W${w + 1} ${WORLD_NAMES[w].slice(0, 10)} — ${CP_COMPASS[i]}`,
-        icon: CP_ICON[i] })
+      addCP(w, c, r, `W${w + 1} ${WORLD_NAMES[w].slice(0, 10)} — ${CP_COMPASS[i]}`, CP_ICON[i])
     }
+    // CPs de Parte 1 (rows 0–3)
+    for (const [c, r] of CP_LOCS_P1)
+      addCP(w, c, r, `W${w + 1} P1 [${c},${r}]`, "●")
+    // CPs de Parte 2 (rows 5–8)
+    for (const [c, r] of CP_LOCS_P2)
+      addCP(w, c, r, `W${w + 1} P2 [${c},${r}]`, "●")
+    // CPs de bosses (inactivos hasta que muere el jefe)
+    for (const [c, r, bk] of CP_LOCS_BOSS)
+      addCP(w, c, r, `W${w + 1} JEFE ${bk.toUpperCase()}`, "★", bk)
+  }
+
   return out
 })()
 
@@ -1167,6 +1206,10 @@ function mkG_lazy(): G {
     staCircleAlpha: 0,
     mobileZoom: "far",
     overFade: 0,
+    tBalls: [],
+    pickups: [{ id: "tball_w0", kind: "tball", x: TBALL_PICKUP_POS.x, y: TBALL_PICKUP_POS.y, active: true, floatPhase: 0 }],
+    activePower: null,
+    bossRewardedCPs: new Set<string>(),
   } as G
 }
 
@@ -2294,6 +2337,102 @@ function tickProjs(g: G) {
   g.projs = g.projs.filter(pr => pr.active)
 }
 
+// ── Pickups de habilidades de combate ────────────────────────────────────────
+function tickPickups(g: G) {
+  const p = g.pl
+  for (const pk of g.pickups) {
+    if (!pk.active) continue
+    pk.floatPhase += STEP * 2.4  // oscilación de flotación
+    // Colisión con el jugador (hitbox generosa)
+    const dx = p.x + p.w / 2 - pk.x, dy = p.y + p.h / 2 - pk.y
+    if (Math.sqrt(dx * dx + dy * dy) < 55) {
+      pk.active = false
+      if (pk.kind === "tball" && !g.abilities.has("tball")) {
+        g.abilities.add("tball")
+        g.activePower = "tball"
+        g.abilityNotif = { text: "🎾 PELOTA REBOTANTE  [V / botón 🎾]", timer: 5.0 }
+        spawnExplosion(g, pk.x, pk.y, ["#CCFF00", "#88FF44", "#FFFFFF", "#FFFF00"], 18, 5)
+        saveGame(g)
+      }
+    }
+  }
+}
+
+// ── Física de las pelotas rebotantes (TBall) ──────────────────────────────────
+const TB_R = 8         // radio de la pelota
+const TB_SPD = 5.5     // velocidad inicial
+const TB_GRAVITY = 0.12 // gravedad leve
+const TB_MAX_BOUNCES = 5
+const TB_MAX_LIFE = 8   // segundos antes de expirar
+const TB_MAX_ACTIVE = 5  // máximo en pantalla
+
+function fireTBall(g: G) {
+  if (!g.abilities.has("tball")) return
+  if (g.tBalls.filter(b => b.active).length >= TB_MAX_ACTIVE) return
+  const p = g.pl
+  const dx = g.keys["arrowright"] || g.keys["d"] ? 1 : g.keys["arrowleft"] || g.keys["a"] ? -1 : p.facing
+  const dy = g.keys["arrowup"] || g.keys["w"] ? -0.5 : g.keys["arrowdown"] || g.keys["s"] ? 0.4 : -0.2
+  const len = Math.sqrt(dx * dx + dy * dy)
+  const px = p.x + (p.facing === 1 ? p.w + 4 : -TB_R * 2 - 4)
+  const py = p.y + p.h * 0.4
+  g.tBalls.push({ x: px, y: py, vx: (dx / len) * TB_SPD, vy: (dy / len) * TB_SPD, active: true, bounces: TB_MAX_BOUNCES, life: TB_MAX_LIFE })
+  spawnExplosion(g, px, py, ["#CCFF00", "#88FF44"], 4, 1.5)
+}
+
+function tickTBalls(g: G) {
+  const ap = activePlats(g)
+  for (const b of g.tBalls) {
+    if (!b.active) continue
+    b.life -= STEP
+    if (b.life <= 0) { b.active = false; continue }
+
+    b.vy += TB_GRAVITY
+    const nx = b.x + b.vx, ny = b.y + b.vy
+
+    // Colisión con plataformas sólidas → rebote
+    let bounced = false
+    for (const pl of ap) {
+      if (pl.mode !== "s" && pl.mode !== "d") continue
+      // Expandir hitbox por radio
+      const left = pl.x - TB_R, right = pl.x + pl.w + TB_R
+      const top  = pl.y - TB_R, bot   = pl.y + pl.h + TB_R
+      if (nx > left && nx < right && ny > top && ny < bot) {
+        // Determinar eje de rebote
+        const fromLeft  = b.x <= pl.x - TB_R + 4
+        const fromRight = b.x >= pl.x + pl.w + TB_R - 4
+        const fromTop   = b.y <= pl.y - TB_R + 4
+        const fromBot   = b.y >= pl.y + pl.h + TB_R - 4
+        if ((fromLeft || fromRight) && !(fromTop || fromBot)) b.vx *= -0.85
+        else if ((fromTop || fromBot) && !(fromLeft || fromRight)) b.vy *= -0.85
+        else { b.vx *= -0.85; b.vy *= -0.85 }
+        b.bounces--; bounced = true
+        spawnExplosion(g, b.x, b.y, ["#CCFF00", "#FFFF44"], 3, 1.2)
+        if (b.bounces <= 0) { b.active = false }
+        break
+      }
+    }
+    if (!b.active) continue
+    if (!bounced) { b.x = nx; b.y = ny }
+
+    // Límites del mundo
+    if (b.x < 0 || b.x > TOT_W || b.y < 0 || b.y > TOT_H) { b.active = false; continue }
+
+    // Colisión con enemigos → daño + rebote
+    for (const e of g.enemies) {
+      if (!e.active || e.dying) continue
+      if (b.x + TB_R > e.x && b.x - TB_R < e.x + e.w && b.y + TB_R > e.y && b.y - TB_R < e.y + e.h) {
+        dmgEnemy(g, e, Math.max(1, Math.floor(e.mhp / 8)))
+        spawnExplosion(g, b.x, b.y, ["#CCFF00", "#88FF44", "#FFFFFF"], 6, 2.5)
+        b.vx *= -0.9; b.vy *= -0.9  // rebota en el enemigo
+        b.bounces--
+        if (b.bounces <= 0) { b.active = false }
+        break
+      }
+    }
+  }
+  g.tBalls = g.tBalls.filter(b => b.active)
+}
+
 function segAABB(ax: number, ay: number, bx: number, by: number, rx: number, ry: number, rw: number, rh: number): number {
   const dx = bx - ax, dy = by - ay
   let tMin = 0, tMax = 1
@@ -2463,6 +2602,11 @@ function applyLoad(g: G, s: LulySave): void {
   g.dead = new Set(s.dead); g.explored = new Set(s.explored)
   g.discoveredCPs = new Set(s.discoveredCPs)
   g.cw = new Set(s.cw as number[]); g.abilities = new Set(s.abilities)
+  // Restaurar pickups recogidos y boss CPs recompensados
+  if (s.pickedUpItems) for (const id of s.pickedUpItems) { const p = g.pickups.find(pk => pk.id === id); if (p) p.active = false }
+  g.bossRewardedCPs = new Set(s.bossRewardedCPs || [])
+  // Restaurar poder activo según habilidades guardadas
+  if (g.abilities.has("tball")) g.activePower = "tball"
   // Reload worlds with the restored dead set
   g.loadedWorlds.clear(); g.enemies = []; g.crates = []
   loadWorld(g, 0)
@@ -2515,11 +2659,37 @@ function tickWorldAnim(g: G) {
   else { a.alpha = Math.max(0, 1 - a.timer / 0.65); if (a.timer >= 0.65) g.worldAnim = null }
 }
 
+// Comprueba si el boss de un CP de boss está muerto
+function isBossCPUnlocked(g: G, cp: CPDef): boolean {
+  if (!cp.bossKind) return true
+  const w = cp.w
+  if (cp.bossKind === "p1")    return isPart1BossDead(g, w)
+  if (cp.bossKind === "p2")    return isPart2BossDead(g, w)
+  if (cp.bossKind === "ultra") return isPart1BossDead(g, w) && isPart2BossDead(g, w)
+  return false
+}
+
+// Spawn de recompensa al activar CP de boss por primera vez
+function spawnBossCPReward(g: G, cp: CPDef) {
+  const cx = cp.x + PW / 2, cy = cp.y
+  for (let i = 0; i < 7; i++) {
+    const a = (Math.random() - 0.5) * Math.PI * 2, spd = 3 + Math.random() * 3
+    g.bones.push({ x: cx, y: cy, w: 11, h: 11, vx: Math.cos(a) * spd, vy: -Math.abs(Math.sin(a) * spd) - 1, active: true, life: 20 })
+  }
+  for (let i = 0; i < 3; i++)
+    g.drops.push({ x: cx + (Math.random() - 0.5) * 80, y: cy - 20, vx: (Math.random() - 0.5) * 2.5, vy: -3 - Math.random() * 1.5, active: true, life: 22, kind: "h" })
+  for (let i = 0; i < 2; i++)
+    g.drops.push({ x: cx + (Math.random() - 0.5) * 60, y: cy - 20, vx: (Math.random() - 0.5) * 2, vy: -3 - Math.random() * 1.5, active: true, life: 22, kind: "a" })
+  triggerShake(g, 8, 0.3)
+  spawnExplosion(g, cx, cy, ["#FFD700", "#FFAA00", "#FFFFFF", "#00FF88"], 20, 6)
+}
+
 function tickCheckpoints(g: G) {
   const p = g.pl
-  // Descubrir checkpoints cercanos automáticamente
+  // Descubrir checkpoints cercanos automáticamente (solo si no son boss-CP bloqueado)
   for (const cp of ALL_CPS) {
     if (g.discoveredCPs.has(cp.id)) continue
+    if (cp.bossKind && !isBossCPUnlocked(g, cp)) continue  // boss CP bloqueado, no descubrir aún
     const bdx = p.x + p.w / 2 - (cp.x + PW / 2)
     const bdy = p.y + p.h / 2 - (cp.y + PH)
     if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) g.discoveredCPs.add(cp.id)
@@ -2553,7 +2723,7 @@ function tickCheckpoints(g: G) {
 function tick(g: G) {
   if (g.tpAnim && g.tpAnim.phase === 0) { tickCheckpoints(g); return }  // congelar juego durante fade-out
   const now = performance.now()
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2999,6 +3169,87 @@ function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: numb
   }
 }
 
+// ── Muro secreto + pickup de habilidad ───────────────────────────────────────
+function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
+  const { cx, cy } = g, t = Date.now() * 0.001
+
+  // Muro secreto (solo si el pickup aún no fue recogido)
+  const tbPickup = g.pickups.find(p => p.id === "tball_w0")
+  if (tbPickup?.active) {
+    const sx = TBALL_WALL.x - cx, sy = TBALL_WALL.y - cy
+    if (sx + TBALL_WALL.w > -10 && sx < CW + 10 && sy + TBALL_WALL.h > -10 && sy < CH + 10) {
+      // Dibujar como tile sólido normal
+      const pWi = 0
+      const hash = ((TBALL_WALL.x * 7 + TBALL_WALL.y * 13) >>> 0) % 16
+      drawSolidTile(ctx, sx, sy, TBALL_WALL.w, TBALL_WALL.h, pWi, hash, g.gfx, TBALL_WALL.x, TBALL_WALL.y, "p1")
+      // Destello verde muy sutil para indicar secreto
+      const glow = 0.06 + 0.04 * Math.sin(t * 2.2)
+      ctx.fillStyle = `rgba(0,255,80,${glow})`; ctx.fillRect(sx, sy, TBALL_WALL.w, TBALL_WALL.h)
+      ctx.strokeStyle = `rgba(0,255,80,${glow * 3})`; ctx.lineWidth = 1
+      ctx.strokeRect(sx + 1, sy + 1, TBALL_WALL.w - 2, TBALL_WALL.h - 2)
+    }
+  }
+
+  // Pickups flotantes
+  for (const pk of g.pickups) {
+    if (!pk.active) continue
+    const sx = pk.x - cx, sy = pk.y - cy + Math.sin(pk.floatPhase) * 7
+    if (sx < -40 || sx > CW + 40 || sy < -40 || sy > CH + 40) continue
+
+    if (pk.kind === "tball") {
+      // Halo
+      const halo = ctx.createRadialGradient(sx, sy, 4, sx, sy, 36)
+      halo.addColorStop(0, "rgba(180,255,60,0.35)"); halo.addColorStop(1, "rgba(100,220,0,0)")
+      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sx, sy, 36, 0, Math.PI * 2); ctx.fill()
+      // Pelota verde-amarilla
+      const ballGrad = ctx.createRadialGradient(sx - 4, sy - 4, 2, sx, sy, 12)
+      ballGrad.addColorStop(0, "#DDFF44"); ballGrad.addColorStop(0.5, "#88CC00"); ballGrad.addColorStop(1, "#446600")
+      ctx.fillStyle = ballGrad; ctx.beginPath(); ctx.arc(sx, sy, 12, 0, Math.PI * 2); ctx.fill()
+      // Líneas de tenis
+      ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(sx, sy, 12, -0.8, 0.8); ctx.stroke()
+      ctx.beginPath(); ctx.arc(sx, sy, 12, Math.PI - 0.8, Math.PI + 0.8); ctx.stroke()
+      // Sombra
+      ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.beginPath(); ctx.ellipse(sx, sy + 16, 10, 4, 0, 0, Math.PI * 2); ctx.fill()
+      // Etiqueta parpadeante
+      if (Math.sin(t * 4) > 0) {
+        ctx.fillStyle = "#AAFFAA"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("🎾", sx, sy - 20); ctx.textAlign = "left"
+      }
+    }
+  }
+}
+
+// ── Pelotas rebotantes en vuelo ───────────────────────────────────────────────
+function drawTBalls(ctx: CanvasRenderingContext2D, g: G) {
+  const { cx, cy } = g, t = Date.now() * 0.001
+  for (const b of g.tBalls) {
+    if (!b.active) continue
+    const sx = b.x - cx, sy = b.y - cy
+    if (sx < -20 || sx > CW + 20 || sy < -20 || sy > CH + 20) continue
+    // Estela
+    ctx.fillStyle = `rgba(180,255,60,${0.25 * (b.bounces / TB_MAX_BOUNCES)})`
+    ctx.beginPath(); ctx.arc(sx - b.vx * 2, sy - b.vy * 2, TB_R + 2, 0, Math.PI * 2); ctx.fill()
+    // Pelota
+    const bGrad = ctx.createRadialGradient(sx - 2, sy - 2, 1, sx, sy, TB_R)
+    bGrad.addColorStop(0, "#EEFF66"); bGrad.addColorStop(0.6, "#88CC00"); bGrad.addColorStop(1, "#336600")
+    ctx.fillStyle = bGrad; ctx.beginPath(); ctx.arc(sx, sy, TB_R, 0, Math.PI * 2); ctx.fill()
+    // Líneas de tenis (rotadas con el movimiento)
+    const rot = t * 8
+    ctx.save(); ctx.translate(sx, sy); ctx.rotate(rot)
+    ctx.strokeStyle = "rgba(200,230,0,0.7)"; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.arc(0, 0, TB_R, -0.7, 0.7); ctx.stroke()
+    ctx.beginPath(); ctx.arc(0, 0, TB_R, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke()
+    ctx.restore()
+    // Contador de rebotes restantes
+    if (g.gfx >= 1 && b.bounces < TB_MAX_BOUNCES) {
+      ctx.fillStyle = b.bounces <= 1 ? "#FF4444" : "#AAFFAA"
+      ctx.font = "bold 7px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText(`${b.bounces}`, sx, sy - TB_R - 2); ctx.textAlign = "left"
+    }
+  }
+}
+
 function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
   const { cx, cy } = g, ap = activePlats(g)
   const wi = getWorldAtX(g.cx)
@@ -3097,9 +3348,29 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
     const discovered = g.discoveredCPs.has(cp.id)
     const isSpawn = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
     const isKennel = KENNEL_ROOMS[cp.w].c === cp.c && KENNEL_ROOMS[cp.w].r === cp.r
+    const isBossCP = !!cp.bossKind
+    const bossUnlocked = isBossCP ? isBossCPUnlocked(g, cp) : true
     const dx = p.x + p.w / 2 - bedCX, dy = p.y + p.h / 2 - (bedCY - PH / 2)
     const near = Math.sqrt(dx * dx + dy * dy) < CP_RADIUS
     const pulse = 0.65 + 0.35 * Math.sin(t * 2.8)
+
+    // Boss CP aún bloqueado: solo dibujar un indicador oscuro con cerradura
+    if (isBossCP && !bossUnlocked) {
+      const lockCol = cp.bossKind === "p1" ? "#00AA44" : cp.bossKind === "p2" ? "#CC0000" : "#FFB300"
+      ctx.fillStyle = `rgba(0,0,0,0.5)`; ctx.beginPath(); ctx.roundRect(sx - 14, sy - 32, 28, 28, 4); ctx.fill()
+      ctx.strokeStyle = lockCol + "88"; ctx.lineWidth = 1; ctx.strokeRect(sx - 14, sy - 32, 28, 28)
+      ctx.fillStyle = lockCol + "AA"; ctx.font = "16px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText("🔒", sx, sy - 11); ctx.textAlign = "left"
+      continue
+    }
+
+    // Boss CP desbloqueado pero no recompensado aún: brillo especial dorado
+    if (isBossCP && !g.bossRewardedCPs.has(cp.id)) {
+      const gld = `rgba(255,215,0,${0.5 + 0.4 * Math.sin(t * 3)})`
+      const grad2 = ctx.createRadialGradient(sx, sy - 20, 4, sx, sy - 20, 48)
+      grad2.addColorStop(0, gld); grad2.addColorStop(1, "rgba(255,200,0,0)")
+      ctx.fillStyle = grad2; ctx.beginPath(); ctx.arc(sx, sy - 20, 48, 0, Math.PI * 2); ctx.fill()
+    }
 
     // ── Halo de radio cuando el jugador está cerca ──
     if (near) {
@@ -3974,8 +4245,8 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
-  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawWhip(ctx, g)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
+  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
@@ -4186,6 +4457,39 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
       ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = "9px 'Courier New',monospace"
       ctx.fillText(label, ix + 15, aY + 23); ctx.textAlign = "left"
     })
+  }
+
+  // ── Selector de poder activo ─────────────────────────────────────────
+  {
+    const POWER_LIST: { id: string; icon: string; label: string; key: string }[] = [
+      { id: "tball", icon: "🎾", label: "T.BALL", key: "V" },
+    ]
+    const hasPowers = POWER_LIST.some(pw => g.abilities.has(pw.id))
+    if (hasPowers) {
+      const pyStart = 236, pGap = 34
+      ctx.fillStyle = th.accent + "55"; ctx.font = "9px 'Courier New',monospace"
+      ctx.fillText("PODER  [V]", panX + 8, pyStart)
+      POWER_LIST.filter(pw => g.abilities.has(pw.id)).forEach((pw, i) => {
+        const px2 = panX + 8 + i * pGap
+        const isActive = g.activePower === pw.id
+        ctx.fillStyle = isActive ? "rgba(50,200,50,0.25)" : "rgba(0,0,0,0.5)"
+        ctx.beginPath(); ctx.roundRect(px2, pyStart + 4, 30, 24, 3); ctx.fill()
+        ctx.strokeStyle = isActive ? "#44FF44" : "#555"; ctx.lineWidth = isActive ? 1.5 : 1
+        ctx.strokeRect(px2, pyStart + 4, 30, 24)
+        ctx.font = "13px sans-serif"; ctx.textAlign = "center"
+        ctx.fillText(pw.icon, px2 + 15, pyStart + 18)
+        ctx.fillStyle = isActive ? "#44FF44" : "#666"; ctx.font = "8px 'Courier New',monospace"
+        ctx.fillText(pw.label, px2 + 15, pyStart + 26); ctx.textAlign = "left"
+        if (isActive) {
+          ctx.fillStyle = "#44FF4466"
+          ctx.beginPath(); ctx.roundRect(px2, pyStart + 4, 30, 24, 3); ctx.fill()
+          // pulsing border glow
+          const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006)
+          ctx.strokeStyle = `rgba(68,255,68,${0.3 + 0.3 * pulse})`; ctx.lineWidth = 2
+          ctx.strokeRect(px2 - 1, pyStart + 3, 32, 26)
+        }
+      })
+    }
   }
 
   // ── Contador de combo ─────────────────────────────────────────────────
@@ -4478,6 +4782,7 @@ export default function ProyectoLuly() {
           ; (g as any)._gfxMsg = true
         g.kennelMsg = 1.8
       }
+      if (k === "v") fireTBall(g)
       if (k === "r") G.current = mkG_lazy()
       if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
       if (g.devMode && k === "i") g.godMode = !g.godMode
@@ -4511,7 +4816,13 @@ export default function ProyectoLuly() {
         for (const cp of ALL_CPS) {
           const bdx = p.x + p.w / 2 - (cp.x + PW / 2), bdy = p.y + p.h / 2 - (cp.y + PH)
           if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
+            // Boss CP bloqueado: no activar si el jefe sigue vivo
+            if (cp.bossKind && !isBossCPUnlocked(g, cp)) break
             g.discoveredCPs.add(cp.id)
+            // Recompensa por primera activación de CP de boss
+            if (cp.bossKind && !g.bossRewardedCPs.has(cp.id)) {
+              g.bossRewardedCPs.add(cp.id); spawnBossCPReward(g, cp)
+            }
             const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
             if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g) }
             break
@@ -4859,7 +5170,11 @@ export default function ProyectoLuly() {
       for (const cp of ALL_CPS) {
         const bdx = p.x + p.w / 2 - (cp.x + PW / 2), bdy = p.y + p.h / 2 - (cp.y + PH)
         if (Math.sqrt(bdx * bdx + bdy * bdy) < CP_RADIUS) {
+          if (cp.bossKind && !isBossCPUnlocked(g, cp)) break
           g.discoveredCPs.add(cp.id)
+          if (cp.bossKind && !g.bossRewardedCPs.has(cp.id)) {
+            g.bossRewardedCPs.add(cp.id); spawnBossCPReward(g, cp)
+          }
           const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
           if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g) }
           break
@@ -4942,6 +5257,16 @@ export default function ProyectoLuly() {
           {...makeTouch(() => pressKey("shift"), () => releaseKey("shift"))}>
           ⚡
         </div>
+        {/* TENIS — solo visible cuando tball está desbloqueada */}
+        {g.abilities.has("tball") && (
+          <div style={{ ...vBtnStyle(56, { borderColor: "#44FF44AA", background: "rgba(50,200,50,0.10)" }), ...pct(75, 28) }}
+            {...makeTouch(() => { fireTBall(g) }, () => {})}>
+            <span style={{ fontSize: 10, lineHeight: 1, textAlign: "center" }}>
+              <span style={{ fontSize: 16, display: "block" }}>🎾</span>
+              <span style={{ fontSize: 8, color: "#44FF44" }}>TBALL</span>
+            </span>
+          </div>
+        )}
       </>
     )
   }
