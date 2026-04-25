@@ -108,6 +108,39 @@ const WORLD_NAMES = ["LAS PERRERAS", "FÁBRICA CANINA", "LOS TUBOS", "CTRL. CENT
 const WORLD_SUBS = ["Libertad o destino", "Engranajes de opresión", "Las venas del sistema", "El corazón del control"]
 
 // ══════════════════════════════════════════════════════════════
+//  ESTRUCTURA DE MUNDO 9×9 DIVIDIDA EN DOS PARTES
+//  Row 0-3: Parte 1 (verde/primera zona)
+//  Row 4  : Corredor de transición (TROW)
+//  Row 5-8: Parte 2 (roja/segunda zona)
+// ══════════════════════════════════════════════════════════════
+const TROW = 4  // fila de transición (siempre corredor horizontal)
+
+// Columnas que conectan verticalmente Parte1 (row3) ↕ TROW
+const TRANSIT_VERT_UP: number[] = [0, 3, 6]
+// Columnas que conectan TROW ↕ Parte2 (row5). Col0 excluida → parte2 queda tras el jefe1
+const TRANSIT_VERT_DOWN: number[] = [3, 6]
+
+// Columna del Ultra-Boss dentro de TROW (centro del mundo 9×9)
+const TRANSIT_BOSS_COL = 4
+
+// Posición [col, row] del Jefe 1 (parte 1) por mundo
+const WORLD_P1_BOSS: [number, number][] = [[8, 1], [8, 1], [8, 1], [8, 1]]
+// Posición [col, row] del Jefe 2 (parte 2) por mundo
+const WORLD_P2_BOSS: [number, number][] = [[8, 7], [8, 7], [8, 7], [8, 7]]
+
+// ── Temas de color para la Parte 2 de cada mundo (más oscuros/peligrosos) ───
+const THEMES_P2: Theme[] = [
+  // W0 Parte2 — subterráneo rojo/sangre
+  { bg0:"#0E0200",bg1:"#070100",wall:"#3A0808",wallHi:"#560E0E",platC:"#4A0808",platHi:"#660E0E",accent:"#FF2200",doorC:"#FF5500",fog:"#1A0402",rock:"#280404",rockHi:"#3C0606",rockShadow:"#040100" },
+  // W1 Parte2 — forja industrial naranja oscuro
+  { bg0:"#100500",bg1:"#080200",wall:"#2E1000",wallHi:"#3E1800",platC:"#381200",platHi:"#4C1800",accent:"#FF6600",doorC:"#FF2200",fog:"#180800",rock:"#240C00",rockHi:"#321200",rockShadow:"#050200" },
+  // W2 Parte2 — pantano carmesí tóxico
+  { bg0:"#0A0008",bg1:"#050004",wall:"#280014",wallHi:"#3C001E",platC:"#340018",platHi:"#4A0022",accent:"#FF0055",doorC:"#FF4400",fog:"#140010",rock:"#1E000E",rockHi:"#2C0016",rockShadow:"#030004" },
+  // W3 Parte2 — vacío corrupto violeta negro
+  { bg0:"#02000C",bg1:"#010006",wall:"#100020",wallHi:"#180030",platC:"#140028",platHi:"#1E0038",accent:"#8800FF",doorC:"#FF0088",fog:"#080012",rock:"#0C0020",rockHi:"#14002E",rockShadow:"#020008" },
+]
+
+// ══════════════════════════════════════════════════════════════
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
@@ -235,7 +268,7 @@ const V_CONN = _MAZES.map(m => m.V)
 // ══════════════════════════════════════════════════════════════
 //  CONFIG DE MUNDOS
 // ══════════════════════════════════════════════════════════════
-const WORLD_EXITS = [[8, 4], [8, 4], [8, 4], [8, 4]]
+const WORLD_EXITS = [[8, 7], [8, 7], [8, 7], [8, 7]]  // puerta de salida = jefe P2
 const WORLD_ENTRIES = [null, [0, 4], [0, 4], [0, 4]]
 const PLAYER_START = [0, 0, 4]
 const KENNEL_ROOMS = [{ w: 0, c: 0, r: 4 }, { w: 1, c: 0, r: 4 }, { w: 2, c: 0, r: 4 }, { w: 3, c: 0, r: 4 }]
@@ -268,21 +301,41 @@ function getEnemySpawns(w: number, c: number, r: number): ES[] {
   const kr = KENNEL_ROOMS[w]
   if (kr.c === c && kr.r === r) return []
 
-  // NO spawnear en salas sin túnel horizontal
+  const spdB = [1, 1.15, 1.35, 1.55][w]
+  const cdB  = [9000, 8000, 7000, 6200][w]
+
+  // ── FILA DE TRANSICIÓN ───────────────────────────────────────────────────
+  if (r === TROW) {
+    // Ultra-Boss en el centro del corredor (col 4)
+    if (c === TRANSIT_BOSS_COL) {
+      const bHp = [22, 36, 54, 78][w]
+      return [[0.5, 0, bHp, spdB * 0.75, cdB * 0.5, true]]
+    }
+    return []  // resto del corredor vacío
+  }
+
+  // ── JEFE 1 (Parte 1) ────────────────────────────────────────────────────
+  const [p1c, p1r] = WORLD_P1_BOSS[w]
+  if (c === p1c && r === p1r) {
+    const bHp = [12, 18, 28, 42][w]
+    return [[0.5, 0, bHp, spdB * 0.85, cdB * 0.65, true]]
+  }
+
+  // ── JEFE 2 (Parte 2) ────────────────────────────────────────────────────
+  const [p2c, p2r] = WORLD_P2_BOSS[w]
+  if (c === p2c && r === p2r) {
+    const bHp = [16, 26, 38, 56][w]
+    return [[0.5, 0, bHp, spdB * 0.8, cdB * 0.6, true]]
+  }
+
+  // ── ENEMIGOS NORMALES ────────────────────────────────────────────────────
   const doors = computeDoors(w, c, r)
   if (!doors.L && !doors.R) return []
 
   const { x: x0 } = ro(w, c, r)
   const iL = x0 + WT, iR = x0 + RW - WT
-  if (iR - iL < EW * 1.5) return []  // sala demasiado estrecha
+  if (iR - iL < EW * 1.5) return []
 
-  const ex = WORLD_EXITS[w]
-  const spdB = [1, 1.15, 1.35, 1.55][w]
-  const cdB = [9000, 8000, 7000, 6200][w]
-  if (ex[0] === c && ex[1] === r) {
-    const bHp = [14, 22, 34, 50][w]
-    return [[0.5, 0, bHp, spdB * 0.8, cdB * 0.6, true]]
-  }
   const hpMult = [1, 1.4, 1.85, 2.3][w]
   const dist = Math.abs(c - kr.c) + Math.abs(r - kr.r)
   const hash = (w * 97 + c * 31 + r * 17) % 100
@@ -309,6 +362,8 @@ function roomHash(w: number, c: number, r: number): number {
 //  POSICIÓN DE PUERTAS
 // ══════════════════════════════════════════════════════════════
 function lrDoorY_rel(w: number, leftC: number, r: number): number {
+  // Corredor de transición: puerta siempre centrada (corredor horizontal limpio)
+  if (r === TROW) return Math.floor((RH - DH) / 2)
   const h = roomHash(w, leftC, r)
   const slots = [
     WT + 20,
@@ -335,20 +390,55 @@ function udDoorX_rel(w: number, c: number, topR: number): number {
 //  CÁLCULO DE PUERTAS
 // ══════════════════════════════════════════════════════════════
 function computeDoors(w: number, c: number, r: number): { L: boolean; R: boolean; U: boolean; D: boolean; Rx?: boolean } {
-  const hc = H_CONN[w], vc = V_CONN[w]
   const d = { L: false, R: false, U: false, D: false, Rx: false }
+
+  // ── FILA DE TRANSICIÓN: siempre corredor horizontal completo ─────────────
+  if (r === TROW) {
+    d.L = c > 0
+    d.R = c < NC - 1
+    d.U = TRANSIT_VERT_UP.includes(c)    // conexiones hacia Parte 1
+    d.D = TRANSIT_VERT_DOWN.includes(c)  // conexiones hacia Parte 2
+    if (c === NC - 1) { d.R = true; d.Rx = true }  // salida al siguiente mundo
+    // Entrada desde el mundo anterior (mundos no-primeros)
+    const en = WORLD_ENTRIES[w]
+    if (en && en[0] === c && en[1] === r) d.L = true
+    return d
+  }
+
+  // ── LABERINTO NORMAL (filas 0-3 y 5-8) ─────────────────────────────────
+  const hc = H_CONN[w], vc = V_CONN[w]
   for (const [hc1, hr1] of hc) {
+    if (hr1 === TROW) continue  // ignorar conexiones del laberinto en TROW (se sobreescribe)
     if (hc1 === c && hr1 === r) d.R = true
     if (hc1 === c - 1 && hr1 === r) d.L = true
   }
   for (const [vc1, vr1] of vc) {
+    // Ignorar conexiones que cruzan la frontera con TROW (se reemplazan con puntos fijos)
+    if (vr1 === TROW - 1 || vr1 === TROW) continue
     if (vc1 === c && vr1 === r) d.D = true
     if (vc1 === c && vr1 === r - 1) d.U = true
   }
+  // Conexiones verticales FIJAS en las fronteras con TROW
+  if (r === TROW - 1 && TRANSIT_VERT_UP.includes(c))   d.D = true  // row3 → TROW
+  if (r === TROW + 1 && TRANSIT_VERT_DOWN.includes(c)) d.U = true  // row5 ← TROW
+
+  // Entrada desde mundo anterior (solo si está en TROW, ya manejado arriba)
   const en = WORLD_ENTRIES[w]
   if (en && en[0] === c && en[1] === r) d.L = true
-  const ex = WORLD_EXITS[w]
-  if (ex[0] === c && ex[1] === r) { d.R = true; d.Rx = true }
+
+  // ★ Garantizar acceso directo (col7↔col8) para todas las salas de col8 no-boss.
+  //   Así, aunque la sala del jefe quede sellada, los demás cuartos de col8 son alcanzables.
+  const [p1c_d, p1r_d] = WORLD_P1_BOSS[w]
+  const [p2c_d, p2r_d] = WORLD_P2_BOSS[w]
+  if (r < TROW) {
+    if (c === p1c_d && r !== p1r_d) d.L = true      // col8 Part1 no-boss → abrir izquierda
+    if (c === p1c_d - 1 && r !== p1r_d) d.R = true  // col7 Part1 no-boss → abrir derecha (coincide)
+  }
+  if (r > TROW) {
+    if (c === p2c_d && r !== p2r_d) d.L = true      // col8 Part2 no-boss → abrir izquierda
+    if (c === p2c_d - 1 && r !== p2r_d) d.R = true  // col7 Part2 no-boss → abrir derecha (coincide)
+  }
+
   return d
 }
 
@@ -410,18 +500,16 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
   const result: WPlat[] = []
   const solid = (x: number, y: number, pw: number, ph: number): WPlat => ({ x, y, w: pw, h: ph, mode: "s" })
 
+  // ── TECHO ───────────────────────────────────────────────────────────────
   if (!d.U) {
     result.push(solid(x0, y0, RW, WT))
   } else {
     const gx = x0 + udDoorX_rel(w, c, r - 1)
     if (gx - x0 > 0) result.push(solid(x0, y0, gx - x0, WT))
     if (x0 + RW - (gx + DW) > 0) result.push(solid(gx + DW, y0, x0 + RW - (gx + DW), WT))
-    // Bloquear puerta superior del boss room
-    const exU = WORLD_EXITS[w]
-    if (exU[0] === c && exU[1] === r) {
-      result.push({ x: gx, y: y0, w: DW, h: WT, mode: "d", sw: -(w + 1) })
-    }
+    // El techo de TROW siempre libre → Part1 ↔ TROW sin bloqueo
   }
+  // ── SUELO ────────────────────────────────────────────────────────────────
   const floorY = y0 + RH - WT
   if (!d.D) {
     result.push(solid(x0, floorY, RW, WT))
@@ -429,12 +517,12 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     const gx = x0 + udDoorX_rel(w, c, r)
     if (gx - x0 > 0) result.push(solid(x0, floorY, gx - x0, WT))
     if (x0 + RW - (gx + DW) > 0) result.push(solid(gx + DW, floorY, x0 + RW - (gx + DW), WT))
-    // Bloquear puerta inferior del boss room
-    const exD = WORLD_EXITS[w]
-    if (exD[0] === c && exD[1] === r) {
-      result.push({ x: gx, y: floorY, w: DW, h: WT, mode: "d", sw: -(w + 1) })
+    // ★ PUERTA CIAN: suelo de TROW en cols 3 y 6 → bloquea descenso a Part2 hasta matar Jefe 1
+    if (r === TROW && (c === 3 || c === 6)) {
+      result.push({ x: gx, y: floorY, w: DW, h: WT, mode: "d", sw: 100 + w })
     }
   }
+  // ── PARED IZQUIERDA ──────────────────────────────────────────────────────
   if (!d.L) {
     result.push(solid(x0, y0 + WT, WT, RH - 2 * WT))
   } else {
@@ -443,10 +531,9 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     const botH = RH - WT - dy - DH
     if (topH > 0) result.push(solid(x0, y0 + WT, WT, topH))
     if (botH > 0) result.push(solid(x0, y0 + dy + DH, WT, botH))
-    // Puerta de entrada al boss room — bloqueada hasta matar todos los enemigos normales
-    const ex = WORLD_EXITS[w]
-    if (ex[0] === c && ex[1] === r) {
-      result.push({ x: x0, y: y0 + dy, w: WT, h: DH, mode: "d", sw: -(w + 1) })
+    // ★ PUERTA ULTRA-BOSS: pared izquierda de [4,TROW] sellada hasta matar ambos jefes
+    if (r === TROW && c === TRANSIT_BOSS_COL) {
+      result.push({ x: x0, y: y0 + dy, w: WT, h: DH, mode: "d", sw: 200 + w })
     }
   }
   if (!d.R) {
@@ -468,6 +555,22 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
       if (exitBotH > 0) result.push(solid(x0 + RW - WT, exitDoorY + DH, WT, exitBotH))
       result.push({ x: x0 + RW - WT, y: exitDoorY, w: WT, h: DH, mode: "d", sw: w })
     }
+    // ★ PUERTA ULTRA-BOSS: pared derecha de [4,TROW] sellada hasta matar ambos jefes
+    if (r === TROW && c === TRANSIT_BOSS_COL) {
+      result.push({ x: x0 + RW - WT, y: y0 + dy, w: WT, h: DH, mode: "d", sw: 200 + w })
+    }
+  }
+
+  // ★ Sellar TODAS las entradas de las salas de los jefes seccionales
+  //   sw 300+w → jefe P1 (bloqueado hasta matar enemigos normales de Part1)
+  //   sw 400+w → jefe P2 (bloqueado hasta matar enemigos normales de Part2)
+  const bossType = isBossRoom(w, c, r)
+  if (bossType === "p1" || bossType === "p2") {
+    const sw = bossType === "p1" ? 300 + w : 400 + w
+    if (d.L) result.push({ x: x0, y: y0 + lrDoorY_rel(w, c - 1, r), w: WT, h: DH, mode: "d", sw })
+    if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw })
+    if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1), y: y0, w: DW, h: WT, mode: "d", sw })
+    if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r), y: y0 + RH - WT, w: DW, h: WT, mode: "d", sw })
   }
 
   return result
@@ -479,6 +582,23 @@ function makeInternalPlats(w: number, c: number, r: number): WPlat[] {
 
   const kr = KENNEL_ROOMS[w]
   if (kr.c === c && kr.r === r) return []
+
+  // Corredor de transición: pasillo limpio; solo añadir plataformas de escalada
+  // donde haya una conexión vertical hacia arriba (Part1) o hacia abajo (Part2)
+  if (r === TROW) {
+    if (!d.U && !d.D) return []
+    const { x: x0, y: y0 } = ro(w, c, r)
+    const climb: WPlat[] = []
+    const platW = DW + 40  // un poco más ancho que la apertura de puerta
+    // La apertura vertical (U y D usan la misma posición X centrada en el cuarto)
+    const gx = x0 + (d.U ? udDoorX_rel(w, c, r - 1) : udDoorX_rel(w, c, r))
+    const platX = gx - 20  // centrar la plataforma sobre la apertura
+    // Plataforma inferior: a ~55% de altura → escalón de partida
+    climb.push({ x: platX, y: y0 + Math.floor(RH * 0.55), w: platW, h: WT, mode: "s" })
+    // Plataforma superior: a ~25% de altura → escalón final antes del techo
+    climb.push({ x: platX + 10, y: y0 + Math.floor(RH * 0.24), w: platW - 20, h: WT, mode: "s" })
+    return climb
+  }
 
   const rng = makeRoomRng(w, c, r)
   const rndI = (lo: number, hi: number) => lo + Math.floor(rng() * (hi - lo + 1))
@@ -774,11 +894,11 @@ function getWorldCrateDefs(w: number) {
 
   for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
     const isKennel = KENNEL_ROOMS.some(k => k.w === w && k.c === c && k.r === r)
-    const isBoss = WORLD_EXITS[w][0] === c && WORLD_EXITS[w][1] === r
-    if (isKennel) continue
+    const bossType = isBossRoom(w, c, r)
+    if (isKennel || bossType !== null) continue  // sin cajas en salas de boss o kennel
     const hash = (w * 37 + c * 13 + r * 7) % 10
-    if (hash < 2 && !isBoss) continue
-    const count = isBoss ? 2 : (hash >= 7 ? 2 : 1)
+    if (hash < 2) continue
+    const count = hash >= 7 ? 2 : 1
     const { x: x0, y: y0 } = ro(w, c, r)
     const roomPlats = worldPlats.filter(p =>
       p.mode === "s" && p.x < x0 + RW && p.x + p.w > x0 && p.y < y0 + RH && p.y + p.h > y0
@@ -1066,8 +1186,28 @@ function activePlats(g: G): WPlat[] {
   _apCache2 = allPlats.filter(p => {
     if (p.mode !== "d") return true
     if (p.sw === undefined) return true
+    if (p.sw >= 400 && p.sw < 500) {
+      // puerta roja Jefe P2: sólida hasta que mueran todos los normales de Part2
+      const bossW = p.sw - 400
+      return !areRegularP2EnemiesDead(g, bossW)
+    }
+    if (p.sw >= 300 && p.sw < 400) {
+      // puerta verde Jefe P1: sólida hasta que mueran todos los normales de Part1
+      const bossW = p.sw - 300
+      return !areRegularP1EnemiesDead(g, bossW)
+    }
+    if (p.sw >= 200 && p.sw < 300) {
+      // puerta dorada ultra-boss: sólida hasta que mueran AMBOS jefes (P1 y P2)
+      const bossW = p.sw - 200
+      return !(isPart1BossDead(g, bossW) && isPart2BossDead(g, bossW))
+    }
+    if (p.sw >= 100 && p.sw < 200) {
+      // puerta cian: sólida hasta que muera el boss de la Part1
+      const bossW = p.sw - 100
+      return !isPart1BossDead(g, bossW)
+    }
     if (p.sw >= 0) return !g.cw.has(p.sw)  // puerta salida: sólida hasta mundo completado
-    // puerta entrada boss (sw = -(w+1)): sólida hasta matar todos los enemigos normales
+    // puerta entrada boss legacy (sw = -(w+1))
     const bossW = -(p.sw + 1)
     return !areRegularEnemiesDead(g, bossW)
   })
@@ -1198,27 +1338,73 @@ function isSpawnDead(dead: Set<string>, w: number, c: number, r: number, i: numb
 
 function checkWorldClear(g: G, w: number) {
   if (g.cw.has(w)) return
-  let allDead = true
-  outer: for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
-    const sp = getEnemySpawns(w, c, r)
-    for (let i = 0; i < sp.length; i++) {
-      if (!isSpawnDead(g.dead, w, c, r, i)) { allDead = false; break outer }
-    }
-  }
-  if (allDead) { g.cw.add(w); saveGame(g); if (g.cw.size >= NW) setTimeout(() => { g.won = true }, 1200) }
+  // Mundo completado cuando el Ultra-Jefe [TRANSIT_BOSS_COL, TROW] está muerto
+  const sp = getEnemySpawns(w, TRANSIT_BOSS_COL, TROW)
+  const ultraDead = sp.length > 0 && sp.every((_, i) => isSpawnDead(g.dead, w, TRANSIT_BOSS_COL, TROW, i))
+  if (ultraDead) { g.cw.add(w); saveGame(g); if (g.cw.size >= NW) setTimeout(() => { g.won = true }, 1200) }
 }
 
-// Helper: todos los enemigos normales (no boss) del mundo w están muertos
-function areRegularEnemiesDead(g: G, w: number): boolean {
-  const [bc, br] = WORLD_EXITS[w]
-  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
-    if (c === bc && r === br) continue  // ignorar sala del boss
+// Helper: todos los enemigos NORMALES de la Part1 (rows 0..TROW-1) están muertos
+function areRegularP1EnemiesDead(g: G, w: number): boolean {
+  const [p1c, p1r] = WORLD_P1_BOSS[w]
+  for (let c = 0; c < NC; c++) for (let r = 0; r < TROW; r++) {
+    if (c === p1c && r === p1r) continue  // ignorar sala boss P1
     const sp = getEnemySpawns(w, c, r)
     for (let i = 0; i < sp.length; i++) {
       if (!isSpawnDead(g.dead, w, c, r, i)) return false
     }
   }
   return true
+}
+
+// Helper: todos los enemigos NORMALES de la Part2 (rows TROW+1..NR-1) están muertos
+function areRegularP2EnemiesDead(g: G, w: number): boolean {
+  const [p2c, p2r] = WORLD_P2_BOSS[w]
+  for (let c = 0; c < NC; c++) for (let r = TROW + 1; r < NR; r++) {
+    if (c === p2c && r === p2r) continue  // ignorar sala boss P2
+    const sp = getEnemySpawns(w, c, r)
+    for (let i = 0; i < sp.length; i++) {
+      if (!isSpawnDead(g.dead, w, c, r, i)) return false
+    }
+  }
+  return true
+}
+
+// Helper: todos los enemigos normales (no boss) del mundo w están muertos (legacy)
+function areRegularEnemiesDead(g: G, w: number): boolean {
+  const [p1c, p1r] = WORLD_P1_BOSS[w]
+  const [p2c, p2r] = WORLD_P2_BOSS[w]
+  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+    if (r === TROW) continue
+    if (c === p1c && r === p1r) continue
+    if (c === p2c && r === p2r) continue
+    if (c === TRANSIT_BOSS_COL && r === TROW) continue
+    const sp = getEnemySpawns(w, c, r)
+    for (let i = 0; i < sp.length; i++) {
+      if (!isSpawnDead(g.dead, w, c, r, i)) return false
+    }
+  }
+  return true
+}
+
+function isPart1BossDead(g: G, w: number): boolean {
+  const [p1c, p1r] = WORLD_P1_BOSS[w]
+  const sp = getEnemySpawns(w, p1c, p1r)
+  return sp.every((_, i) => isSpawnDead(g.dead, w, p1c, p1r, i))
+}
+
+function isPart2BossDead(g: G, w: number): boolean {
+  const [p2c, p2r] = WORLD_P2_BOSS[w]
+  const sp = getEnemySpawns(w, p2c, p2r)
+  return sp.every((_, i) => isSpawnDead(g.dead, w, p2c, p2r, i))
+}
+
+function isBossRoom(w: number, c: number, r: number): "p1" | "ultra" | "p2" | null {
+  const [p1c, p1r] = WORLD_P1_BOSS[w], [p2c, p2r] = WORLD_P2_BOSS[w]
+  if (c === p1c && r === p1r) return "p1"
+  if (c === TRANSIT_BOSS_COL && r === TROW) return "ultra"
+  if (c === p2c && r === p2r) return "p2"
+  return null
 }
 
 function breakCrate(g: G, c: Crate) {
@@ -2532,7 +2718,7 @@ function drawBg(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 // ── Tile sólido: textura por mundo ──────────────────────────────────────────
-function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, hash: number, gfx: number, wx: number, wy: number) {
+function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, hash: number, gfx: number, wx: number, wy: number, zone: "p1" | "trow" | "p2" = "p1") {
   ctx.save()
   ctx.beginPath(); ctx.rect(sx, sy, w, h); ctx.clip()
 
@@ -2751,11 +2937,21 @@ function drawSolidTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w:
       ctx.fillStyle = "#CC00FF18"; ctx.fillRect(sx, sy + 1, w, 1)
     }
   }
+  // ── Tinte de zona (modifica el color percibido de la roca según la sección del mundo) ──
+  if (zone === "trow") {
+    // Fila de transición: roca más fría/azulada (corredor neutral)
+    ctx.fillStyle = "rgba(30,60,100,0.22)"; ctx.fillRect(sx, sy, w, h)
+  } else if (zone === "p2") {
+    // Parte 2: roca más oscura y rojiza (zona peligrosa)
+    ctx.fillStyle = "rgba(80,5,5,0.38)"; ctx.fillRect(sx, sy, w, h)
+    // Sutil vena roja en el tope
+    ctx.fillStyle = "rgba(160,20,0,0.18)"; ctx.fillRect(sx, sy, w, 2)
+  }
   ctx.restore()
 }
 
 // ── Plataforma atravesable: estilo por mundo ─────────────────────────────────
-function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, gfx: number) {
+function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: number, w: number, h: number, wi: number, gfx: number, zone: "p1" | "trow" | "p2" = "p1") {
   if (wi === 0) {
     // Perrera: barra de reja herrumbrada, tono óxido cálido
     ctx.fillStyle = "#3A2C18BB"; ctx.fillRect(sx, sy, w, 5)
@@ -2795,6 +2991,12 @@ function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: numb
       ctx.fillStyle = "#CC00FF44"; ctx.fillRect(sx, sy, w, 1)
     }
   }
+  // Tinte de zona sobre plataforma atravesable
+  if (zone === "trow") {
+    ctx.fillStyle = "rgba(30,60,100,0.22)"; ctx.fillRect(sx, sy, w, h)
+  } else if (zone === "p2") {
+    ctx.fillStyle = "rgba(80,5,5,0.38)"; ctx.fillRect(sx, sy, w, h)
+  }
 }
 
 function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
@@ -2811,7 +3013,46 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
     if (p.mode === "d") {
       const t = now * 0.003
       const isBossEntrance = p.sw !== undefined && p.sw < 0
-      if (isBossEntrance) {
+      const isCyanGate    = p.sw !== undefined && p.sw >= 100 && p.sw < 200
+      const isUltraGate   = p.sw !== undefined && p.sw >= 200 && p.sw < 300
+      const isP1BossGate  = p.sw !== undefined && p.sw >= 300 && p.sw < 400
+      const isP2BossGate  = p.sw !== undefined && p.sw >= 400 && p.sw < 500
+      if (isP2BossGate) {
+        // Puerta roja Jefe P2 — sellada hasta matar enemigos normales de Part2
+        ctx.fillStyle = "#280000CC"; ctx.fillRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(180,0,0,${0.45 + 0.35 * Math.sin(t * 1.6)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
+        ctx.strokeStyle = "#CC0000"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(255,60,0,${0.8 + 0.2 * Math.sin(t * 2.2)})`
+        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚠", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
+      } else if (isP1BossGate) {
+        // Puerta verde Jefe P1 — sellada hasta matar enemigos normales de Part1
+        ctx.fillStyle = "#002800CC"; ctx.fillRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(0,160,60,${0.4 + 0.3 * Math.sin(t * 1.5)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
+        ctx.strokeStyle = "#00AA44"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(0,220,90,${0.8 + 0.2 * Math.sin(t * 2)})`
+        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚔", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
+      } else if (isUltraGate) {
+        // Puerta ultra-boss — oscura/dorada, sellada hasta matar AMBOS jefes
+        ctx.fillStyle = "#1A1000CC"; ctx.fillRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(200,140,0,${0.4 + 0.3 * Math.sin(t * 1.2)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
+        ctx.strokeStyle = "#FFB300"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        const cx2 = sx + p.w / 2, cy2 = sy + p.h / 2
+        ctx.fillStyle = `rgba(255,200,0,${0.8 + 0.2 * Math.sin(t * 2.5)})`
+        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚡", cx2, cy2 + 4); ctx.textAlign = "left"
+      } else if (isCyanGate) {
+        // Puerta cian — bloqueada hasta matar el boss de la Part1
+        ctx.fillStyle = "#003A3ABB"; ctx.fillRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = `rgba(0,210,200,${0.35 + 0.3 * Math.sin(t * 1.4)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
+        ctx.strokeStyle = "#00FFEE"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        // Pequeño símbolo de candado en el centro
+        const cx2 = sx + p.w / 2, cy2 = sy + p.h / 2
+        ctx.fillStyle = `rgba(0,255,238,${0.7 + 0.3 * Math.sin(t * 2)})`
+        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("🔒", cx2, cy2 + 4); ctx.textAlign = "left"
+      } else if (isBossEntrance) {
         // Puerta roja intensa — bloqueada hasta matar enemigos normales
         ctx.fillStyle = "#3A0000BB"; ctx.fillRect(sx, sy, p.w, p.h)
         ctx.fillStyle = `rgba(200,0,0,${0.5 + 0.4 * Math.sin(t * 1.8)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
@@ -2829,16 +3070,19 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
     }
 
     const pWi = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
+    // Zona según la fila del tile (p.y es coordenada absoluta del mundo)
+    const tileRow = Math.floor(p.y / RH)
+    const zone: "p1" | "trow" | "p2" = tileRow < TROW ? "p1" : tileRow === TROW ? "trow" : "p2"
 
     // Plataforma atravesable
     if (p.mode === "t") {
-      drawTraversableTile(ctx, sx, sy, p.w, p.h, pWi, g.gfx)
+      drawTraversableTile(ctx, sx, sy, p.w, p.h, pWi, g.gfx, zone)
       continue
     }
 
     // Tile sólido con textura por mundo
     const hash = ((p.x * 7 + p.y * 13) >>> 0) % 16
-    drawSolidTile(ctx, sx, sy, p.w, p.h, pWi, hash, g.gfx, p.x, p.y)
+    drawSolidTile(ctx, sx, sy, p.w, p.h, pWi, hash, g.gfx, p.x, p.y, zone)
   }
 }
 
@@ -3190,8 +3434,8 @@ function drawDevPanel(ctx: CanvasRenderingContext2D, g: G) {
 
   const font9 = "10px 'Courier New',monospace"
   const font9b = "bold 10px 'Courier New',monospace"
-  const LH = 12   // line height
-  const TOP = panY + 14  // primera línea de datos (header en TOP-2)
+  const LH = 11   // line height
+  const TOP = panY + 24  // primera línea de datos (header separado arriba)
   const nCols = 5
   const colW = Math.floor(panW / nCols)
 
@@ -3390,12 +3634,27 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
     ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "left"
     ctx.fillText(`W${w + 1}  ${WORLD_NAMES[w]}`, bx + 5, by + 14)
     const gx = bx + wPadX, gy = by + wPadY + 14, kr = KENNEL_ROOMS[w]
+    // ── Etiquetas de zona (izquierda del grid) ──
+    const [p1c_m, p1r_m] = WORLD_P1_BOSS[w], [p2c_m, p2r_m] = WORLD_P2_BOSS[w]
+    ctx.font = "bold 7px 'Courier New',monospace"; ctx.textAlign = "right"
+    const lblX = gx - 4
+    for (let r = 0; r < NR; r++) {
+      const ry0 = gy + r * (rH + gap) + rH / 2 + 3
+      if (r < TROW) { ctx.fillStyle = "#00AA44"; ctx.fillText("P1", lblX, ry0) }
+      else if (r === TROW) { ctx.fillStyle = "#4499FF"; ctx.fillText("T", lblX, ry0) }
+      else { ctx.fillStyle = "#FF3333"; ctx.fillText("P2", lblX, ry0) }
+    }
+    ctx.textAlign = "left"
+
     for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
       const rx = gx + c * (rW + gap), ry = gy + r * (rH + gap)
       const roomKey = `${w}_${c}_${r}`, explored = g.explored.has(roomKey)
       const isCur = w === curW && c === curC && r === curR
+      // Fondo de zona (siempre visible, incluso sin explorar)
+      const zBg = r < TROW ? "rgba(0,30,10,1)" : r === TROW ? "rgba(0,10,30,1)" : "rgba(30,0,0,1)"
+      ctx.fillStyle = zBg; ctx.fillRect(rx, ry, rW, rH)
       if (!explored) {
-        ctx.fillStyle = "#050505"; ctx.fillRect(rx, ry, rW, rH)
+        ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(rx, ry, rW, rH)
         const nbL = c > 0 && g.explored.has(`${w}_${c - 1}_${r}`) && computeDoors(w, c - 1, r).R
         const nbR2 = c < NC - 1 && g.explored.has(`${w}_${c + 1}_${r}`) && computeDoors(w, c + 1, r).L
         const nbU = r > 0 && g.explored.has(`${w}_${c}_${r - 1}`) && computeDoors(w, c, r - 1).D
@@ -3405,8 +3664,10 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
         const state = getRoomState(w, c, r, g.dead)
         ctx.fillStyle = state === "clear" ? "rgba(0,160,55,0.4)" : state === "half" ? "rgba(185,145,0,0.4)" : "rgba(165,18,18,0.4)"
         ctx.fillRect(rx, ry, rW, rH)
-        const ex2 = WORLD_EXITS[w]
-        if (ex2[0] === c && ex2[1] === r) { ctx.fillStyle = wCleared ? "rgba(0,200,80,0.3)" : "rgba(255,60,0,0.3)"; ctx.fillRect(rx, ry, rW, rH) }
+        // Boss markers — 3 tipos
+        if (c === TRANSIT_BOSS_COL && r === TROW) { ctx.fillStyle = "rgba(255,180,0,0.4)"; ctx.fillRect(rx, ry, rW, rH) }
+        else if (c === p1c_m && r === p1r_m) { ctx.fillStyle = "rgba(0,200,80,0.3)"; ctx.fillRect(rx, ry, rW, rH) }
+        else if (c === p2c_m && r === p2r_m) { ctx.fillStyle = wCleared ? "rgba(0,200,80,0.3)" : "rgba(255,60,0,0.3)"; ctx.fillRect(rx, ry, rW, rH) }
         if (kr.c === c && kr.r === r) { ctx.fillStyle = g.checkpoint.w === w ? "#FFD700" : "#555"; ctx.font = "10px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText("★", rx + rW / 2, ry + rH / 2 + 4); ctx.textAlign = "left" }
         const nCr = getCratesInRoom(w, c, r, g)
         if (nCr > 0) { ctx.fillStyle = "#FFEE44EE"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`■${nCr}`, rx + rW - 2, ry + rH - 2); ctx.textAlign = "left" }
@@ -3517,6 +3778,17 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
   const gx = Math.floor((CW - gridW) / 2)  // fijo, centrado
   const gy = 72                          // fijo
 
+  const [devP1c, devP1r] = WORLD_P1_BOSS[w], [devP2c, devP2r] = WORLD_P2_BOSS[w]
+  // Etiquetas de zona (izquierda del grid)
+  ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "right"
+  for (let r = 0; r < NR; r++) {
+    const ry0 = gy + r * (rH + gap) + rH / 2 + 3
+    if (r < TROW) { ctx.fillStyle = "#00CC55"; ctx.fillText("P1", gx - 6, ry0) }
+    else if (r === TROW) { ctx.fillStyle = "#55AAFF"; ctx.fillText("TROW", gx - 6, ry0) }
+    else { ctx.fillStyle = "#FF4444"; ctx.fillText("P2", gx - 6, ry0) }
+  }
+  ctx.textAlign = "left"
+
   for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
     const rx = gx + c * (rW + gap), ry = gy + r * (rH + gap)
     if (rx + rW < 0 || rx > CW || ry + rH < 44 || ry > CH) continue
@@ -3524,17 +3796,25 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     const isHov = hover && hover.w === w && hover.c === c && hover.r === r
     const state = getRoomState(w, c, r, g.dead)
     const isKennel = KENNEL_ROOMS[w].c === c && KENNEL_ROOMS[w].r === r
-    const isBoss = WORLD_EXITS[w][0] === c && WORLD_EXITS[w][1] === r
+    const isBossP1 = c === devP1c && r === devP1r
+    const isBossP2 = c === devP2c && r === devP2r
+    const isUltraBoss = c === TRANSIT_BOSS_COL && r === TROW
     const nCr = getCratesInRoom(w, c, r, g)
-    let fill = "rgba(0,80,0,0.5)"
-    if (isBoss) fill = "rgba(180,0,0,0.55)"
-    else if (isKennel) fill = "rgba(60,50,0,0.7)"
-    else if (state === "clear") fill = "rgba(0,120,40,0.5)"
-    else if (state === "half") fill = "rgba(120,90,0,0.5)"
-    ctx.fillStyle = fill; ctx.fillRect(rx, ry, rW, rH)
+    // Fondo de zona
+    const zoneBg = r < TROW ? "rgba(0,40,15,1)" : r === TROW ? "rgba(0,15,40,1)" : "rgba(40,5,5,1)"
+    ctx.fillStyle = zoneBg; ctx.fillRect(rx, ry, rW, rH)
+    // Overlay de estado
+    let fill: string | null = null
+    if (isUltraBoss) fill = "rgba(255,160,0,0.55)"
+    else if (isBossP1) fill = "rgba(0,180,80,0.55)"
+    else if (isBossP2) fill = "rgba(180,0,0,0.55)"
+    else if (isKennel) fill = "rgba(80,65,0,0.7)"
+    else if (state === "clear") fill = "rgba(0,120,40,0.45)"
+    else if (state === "half") fill = "rgba(120,90,0,0.45)"
+    if (fill) { ctx.fillStyle = fill; ctx.fillRect(rx, ry, rW, rH) }
     if (isHov) { ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(rx, ry, rW, rH); ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rW, rH) }
     else if (isCur) { ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(rx, ry, rW, rH) }
-    else { ctx.strokeStyle = th.accent + "44"; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, rW, rH) }
+    else { ctx.strokeStyle = r < TROW ? "#00884455" : r === TROW ? "#4488FF55" : "#FF222255"; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, rW, rH) }
     ctx.fillStyle = isHov ? "#FFF" : isCur ? th.accent : "#AAFFAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(`[${c},${r}]`, rx + rW / 2, ry + 13)
     const stateLbl = state === "clear" ? "✓ LIMPIA" : state === "half" ? "◑ MEDIA" : "⚠ ACTIVA"
@@ -3544,7 +3824,9 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     const alive = sp.filter((_, i) => !isSpawnDead(g.dead, w, c, r, i)).length
     if (alive > 0) { ctx.fillStyle = "#FF8888"; ctx.fillText(`${alive} enemigo${alive > 1 ? "s" : ""}`, rx + rW / 2, ry + 35) }
     else if (isKennel) { ctx.fillStyle = "#FFD700"; ctx.fillText("★ PERRERA", rx + rW / 2, ry + 35) }
-    else if (isBoss) { ctx.fillStyle = "#FF6600"; ctx.fillText("BOSS", rx + rW / 2, ry + 35) }
+    else if (isUltraBoss) { ctx.fillStyle = "#FFB300"; ctx.fillText("⚡ ULTRA", rx + rW / 2, ry + 35) }
+    else if (isBossP1) { ctx.fillStyle = "#00FF88"; ctx.fillText("JEFE P1", rx + rW / 2, ry + 35) }
+    else if (isBossP2) { ctx.fillStyle = "#FF6600"; ctx.fillText("JEFE P2", rx + rW / 2, ry + 35) }
     if (nCr > 0) { ctx.fillStyle = "#FFEE44"; ctx.fillText(`■${nCr} cajas`, rx + rW / 2, ry + 43) }
     ctx.textAlign = "left"
     const doors = computeDoors(w, c, r), dSz = 8
@@ -3620,34 +3902,67 @@ function drawSparks(ctx: CanvasRenderingContext2D, g: G) {
 function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
   const p = g.pl
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
-  if (!areRegularEnemiesDead(g, curW)) {
-    const [bc, br] = WORLD_EXITS[curW]
+  const t = Date.now() * 0.002
+
+  // Niebla sobre sala Jefe P1 (solo si aún vive)
+  if (!isPart1BossDead(g, curW)) {
+    const [bc, br] = WORLD_P1_BOSS[curW]
     const { x: brX, y: brY } = ro(curW, bc, br)
     const sx = brX - g.cx, sy = brY - g.cy
-    // Solo dibujar si el boss room es visible en pantalla
     if (sx < CW && sx + RW > 0 && sy < CH && sy + RH > 0) {
-      // Overlay muy oscuro sobre la sala completa
       ctx.save()
-      ctx.fillStyle = "rgba(0,0,0,0.91)"
-      ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
-      // Neblina roja tenue en los bordes de la puerta bloqueada
-      const t = Date.now() * 0.002
-      ctx.fillStyle = `rgba(120,0,0,${0.15 + 0.08 * Math.sin(t)})`
-      ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
-      // Texto ominoso si la sala está centrada en pantalla
-      const roomCenterX = sx + RW / 2, roomCenterY = sy + RH / 2
-      if (roomCenterX > 100 && roomCenterX < CW - 100) {
-        ctx.fillStyle = `rgba(180,0,0,${0.5 + 0.3 * Math.sin(t * 1.4)})`
-        ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("⚠  SALA DEL JEFE  ⚠", roomCenterX, roomCenterY)
+      ctx.fillStyle = "rgba(0,0,0,0.88)"; ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      ctx.fillStyle = `rgba(0,80,40,${0.12 + 0.08 * Math.sin(t)})`; ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      const rcX = sx + RW / 2, rcY = sy + RH / 2
+      if (rcX > 80 && rcX < CW - 80) {
+        ctx.fillStyle = `rgba(0,200,100,${0.5 + 0.3 * Math.sin(t * 1.4)})`; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚠  JEFE GUARDIÁN  ⚠", rcX, rcY)
+        ctx.fillStyle = "rgba(0,160,70,0.7)"; ctx.font = "9px 'Courier New',monospace"
+        ctx.fillText("Jefe de la Parte 1", rcX, rcY + 18); ctx.textAlign = "left"
+      }
+      ctx.restore()
+    }
+  }
+  // Niebla sobre Ultra-Boss TROW (solo si ambos jefes anteriores aún viven — puerta cerrada)
+  const ultraLocked = !(isPart1BossDead(g, curW) && isPart2BossDead(g, curW))
+  if (ultraLocked) {
+    const { x: brX, y: brY } = ro(curW, TRANSIT_BOSS_COL, TROW)
+    const sx = brX - g.cx, sy = brY - g.cy
+    if (sx < CW && sx + RW > 0 && sy < CH && sy + RH > 0) {
+      ctx.save()
+      ctx.fillStyle = "rgba(0,0,0,0.92)"; ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      ctx.fillStyle = `rgba(140,90,0,${0.12 + 0.08 * Math.sin(t * 0.9)})`; ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      const rcX = sx + RW / 2, rcY = sy + RH / 2
+      if (rcX > 80 && rcX < CW - 80) {
+        ctx.fillStyle = `rgba(255,180,0,${0.5 + 0.3 * Math.sin(t * 1.2)})`; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚡  ULTRA JEFE  ⚡", rcX, rcY)
+        ctx.fillStyle = "rgba(200,140,0,0.7)"; ctx.font = "9px 'Courier New',monospace"
+        ctx.fillText("Derrota a los dos jefes para acceder", rcX, rcY + 18); ctx.textAlign = "left"
+      }
+      ctx.restore()
+    }
+  }
+  // Niebla sobre sala Jefe P2 (solo si aún vive)
+  if (!isPart2BossDead(g, curW)) {
+    const [bc, br] = WORLD_P2_BOSS[curW]
+    const { x: brX, y: brY } = ro(curW, bc, br)
+    const sx = brX - g.cx, sy = brY - g.cy
+    if (sx < CW && sx + RW > 0 && sy < CH && sy + RH > 0) {
+      ctx.save()
+      ctx.fillStyle = "rgba(0,0,0,0.91)"; ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      ctx.fillStyle = `rgba(120,0,0,${0.15 + 0.08 * Math.sin(t)})`; ctx.fillRect(Math.max(0, sx), Math.max(0, sy), Math.min(CW, sx + RW) - Math.max(0, sx), Math.min(CH, sy + RH) - Math.max(0, sy))
+      const rcX = sx + RW / 2, rcY = sy + RH / 2
+      if (rcX > 80 && rcX < CW - 80) {
+        ctx.fillStyle = `rgba(180,0,0,${0.5 + 0.3 * Math.sin(t * 1.4)})`; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("⚠  JEFE FINAL  ⚠", rcX, rcY)
         ctx.fillStyle = "rgba(120,0,0,0.7)"; ctx.font = "9px 'Courier New',monospace"
-        ctx.fillText("Derrota a todos los enemigos primero", roomCenterX, roomCenterY + 18)
-        ctx.textAlign = "left"
+        ctx.fillText("Jefe de la Parte 2", rcX, rcY + 18); ctx.textAlign = "left"
       }
       ctx.restore()
     }
   }
 }
+
 
 function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w: number; c: number; r: number } | null = null) {
   ctx.clearRect(0, 0, CW, CH)
@@ -3820,7 +4135,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.textAlign = "left"
   }
   // ── Barra de boss — solo visible cuando el jugador está EN la sala del boss ──
-  const inBossRoom = curC === WORLD_EXITS[curW][0] && curR === WORLD_EXITS[curW][1]
+  const inBossRoom = isBossRoom(curW, curC, curR) !== null
   const boss = inBossRoom ? g.enemies.find(e => e.active && !e.dying && e.boss && e.world === curW) : null
   if (boss) {
     const barW = 420, barH = 14, barX = (CW - barW) / 2, barY = CH - 34
