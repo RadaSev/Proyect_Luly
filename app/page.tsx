@@ -100,6 +100,8 @@ type G = {
   viejoDogState: "waiting" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised"
   tballKeyHeld: boolean          // el jugador lleva la llave dorada
   questKillBaseline: number      // muertes P1-W0 al momento de aceptar la quest (descontar muertes previas)
+  // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
+  gpadType: "xbox" | "ps" | "keyboard"
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1284,6 +1286,7 @@ function mkG_lazy(): G {
     viejoDogState: "waiting",
     tballKeyHeld: false,
     questKillBaseline: 0,
+    gpadType: "keyboard",
   } as G
 }
 
@@ -4083,14 +4086,17 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
     // ── Prompt de interacción ──
     if (near && discovered) {
       const canTP = g.discoveredCPs.size >= 2
+      const gt: GpadType = g.gpadType ?? "keyboard"
+      const saveKey  = GPAD_BTN.interact[gt]
+      const tpKey    = GPAD_BTN.teleport[gt]
       ctx.globalAlpha = pulse
       ctx.fillStyle = "rgba(0,0,0,0.82)"; ctx.beginPath()
-      ctx.roundRect(sx - 76, sy - 68, 152, canTP ? 42 : 26, 5); ctx.fill()
+      ctx.roundRect(sx - 80, sy - 68, 160, canTP ? 42 : 26, 5); ctx.fill()
       ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
-      ctx.fillText(!isSpawn ? "[E]  GUARDAR AQUÍ" : "★  PUNTO ACTIVO", sx, sy - 50)
+      ctx.fillText(!isSpawn ? `[${saveKey}]  GUARDAR AQUÍ` : "★  PUNTO ACTIVO", sx, sy - 50)
       if (canTP) {
         ctx.fillStyle = th.accent; ctx.font = "9px 'Courier New',monospace"
-        ctx.fillText("[T]  TELETRANSPORTAR", sx, sy - 36)
+        ctx.fillText(`[${tpKey}]  TELETRANSPORTAR`, sx, sy - 36)
       }
       ctx.textAlign = "left"; ctx.globalAlpha = 1
     }
@@ -4109,10 +4115,14 @@ function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
   ctx.fillStyle = "rgba(0,0,0,0.92)"; ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 10); ctx.fill()
   ctx.strokeStyle = th.accent + "AA"; ctx.lineWidth = 1.5; ctx.strokeRect(mX, mY, mW, mH)
   // Título
+  const gt: GpadType = g.gpadType ?? "keyboard"
   ctx.fillStyle = th.accent; ctx.font = "bold 12px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("⚡  TELETRANSPORTACIÓN", mX + mW / 2, mY + 20)
   ctx.fillStyle = "#3A5A3A"; ctx.font = "9px 'Courier New',monospace"
-  ctx.fillText("↑↓ navegar  ·  ENTER confirmar  ·  ESC cerrar", mX + mW / 2, mY + 34)
+  const navLbl = gt === "keyboard" ? "↑↓" : "LS/D↕"
+  const confirmLbl = GPAD_BTN.confirm[gt]
+  const cancelLbl  = GPAD_BTN.cancel[gt]
+  ctx.fillText(`[${navLbl}] navegar  ·  [${confirmLbl}] confirmar  ·  [${cancelLbl}] cerrar`, mX + mW / 2, mY + 34)
   ctx.textAlign = "left"
 
   const listY = mY + 50, itemH = 28
@@ -4523,7 +4533,8 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
   ctx.fillStyle = "#CCC"; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("// MAPA DEL COMPLEJO CANINO //", CW / 2, 22)
   ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"
-  ctx.fillText("[TAB] cerrar   ★ = perrera/checkpoint   negro = sin explorar", CW / 2, 36)
+  const mapCloseKey = GPAD_BTN.map[g.gpadType ?? "keyboard"]
+  ctx.fillText(`[${mapCloseKey}] cerrar   ★ = perrera/checkpoint   negro = sin explorar`, CW / 2, 36)
   ctx.textAlign = "left"
   const rW = 34, rH = 22, gap = 2
   const wGridW = NC * (rW + gap) - gap, wGridH = NR * (rH + gap) - gap
@@ -5249,6 +5260,43 @@ function drawWorldTransition(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  ICONOS DE CONTROLES (teclado / Xbox / PlayStation)
+// ══════════════════════════════════════════════════════════════
+type GpadType = "xbox" | "ps" | "keyboard"
+
+/** Detecta el tipo de mando a partir del string de id del Gamepad API */
+function detectGpadType(id: string): GpadType {
+  const s = id.toLowerCase()
+  if (s.includes("054c") || s.includes("playstation") || s.includes("dualshock") ||
+      s.includes("dualsense") || s.includes("sony") || s.includes("wireless controller"))
+    return "ps"
+  return "xbox"  // cualquier otro gamepad → iconos Xbox por defecto
+}
+
+/** Mapea acción → etiqueta de botón por tipo de mando */
+const GPAD_BTN: Record<string, Record<GpadType, string>> = {
+  jump:      { xbox: "A",     ps: "✕",     keyboard: "ESPACIO" },
+  confirm:   { xbox: "A",     ps: "✕",     keyboard: "ENTER" },
+  cancel:    { xbox: "B",     ps: "○",     keyboard: "ESC" },
+  shoot:     { xbox: "X",     ps: "□",     keyboard: "N" },
+  whip:      { xbox: "Y",     ps: "△",     keyboard: "M" },
+  interact:  { xbox: "B",     ps: "○",     keyboard: "E" },
+  teleport:  { xbox: "LB",    ps: "L1",    keyboard: "T" },
+  dash:      { xbox: "LT",    ps: "L2",    keyboard: "SHIFT" },
+  run:       { xbox: "RT",    ps: "R2",    keyboard: "CTRL" },
+  map:       { xbox: "SEL",   ps: "SHARE", keyboard: "TAB" },
+  pause:     { xbox: "START", ps: "OPT",   keyboard: "P" },
+  walljump:  { xbox: "←/→+A", ps: "←/→+✕", keyboard: "←/→+SPC" },
+  move:      { xbox: "LS",    ps: "LS",    keyboard: "WASD" },
+  nav:       { xbox: "LS/D↕", ps: "LS/D↕", keyboard: "↑↓" },
+}
+
+/** Colores de botones Xbox */
+const XB_COL: Record<string, string> = { A: "#1DB954", B: "#E03030", X: "#1565C0", Y: "#F9A825" }
+/** Colores de botones PlayStation */
+const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E53935", "□": "#E91E8C", "△": "#2EB872" }
+
+// ══════════════════════════════════════════════════════════════
 //  GAMEPAD
 //  FIX 1: devmap → cursor celda a celda + A=teleport + LB/RB=tab
 //  FIX 2: mapa normal → solo cierre, sin scroll
@@ -5311,6 +5359,33 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
     return  // no procesar movimiento de jugador
   }
 
+  // ── Menú de teletransporte abierto ───────────────────────────────
+  if (g.tpMenu?.open) {
+    _gpStickNavCd = Math.max(0, _gpStickNavCd - 16)
+    const THRESH = 0.55
+    const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
+    if (_gpStickNavCd <= 0) {
+      const ly = ax(1)
+      if (ly < -THRESH || btn(GP.UP)) {
+        g.tpMenu.idx = (g.tpMenu.idx - 1 + discovered.length) % discovered.length
+        _gpStickNavCd = 160
+      } else if (ly > THRESH || btn(GP.DOWN)) {
+        g.tpMenu.idx = (g.tpMenu.idx + 1) % discovered.length
+        _gpStickNavCd = 160
+      }
+    }
+    if (edgeDown(GP.A)) {
+      const dest = discovered[g.tpMenu.idx]
+      if (dest) {
+        g.tpMenu = null
+        g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
+        spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
+      }
+    }
+    if (edgeDown(GP.B) || edgeDown(GP.START)) g.tpMenu = null
+    return
+  }
+
   // ── Juego normal ──────────────────────────────────────────────────
   const GP_WALK = 0.22, DOWN_CONE = Math.PI * 20 / 180
   const dLeft = btn(GP.LEFT) || (ax(0) < -GP_WALK)
@@ -5324,7 +5399,7 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   const dDown = dDownStick || dDownPad
   g.keys["a"] = dLeft; g.keys["d"] = dRight; g.keys["w"] = dUp; g.keys["s"] = dDown
   g.keys["arrowleft"] = false; g.keys["arrowright"] = false; g.keys["arrowup"] = false; g.keys["arrowdown"] = false
-  g.keys[" "] = btn(GP.A); g.keys["n"] = btn(GP.X) || btn(GP.RB); g.keys["m"] = btn(GP.Y) || btn(GP.LB)
+  g.keys[" "] = btn(GP.A); g.keys["n"] = btn(GP.X) || btn(GP.RB); g.keys["m"] = btn(GP.Y)
   g.keys["shift"] = btn(GP.LT) || ax(2) > 0.4 || ax(4) > 0.4
   if (btn(GP.RT) || ax(5) > GP_DEAD) g.pl.runMode = true
   const gNow2 = performance.now(), TAP_W = 280
@@ -5335,6 +5410,10 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   g.keys["z"] = Math.abs(ax(2)) > GP_DEAD || Math.abs(ax(3)) > GP_DEAD
   if (edgeDown(GP.START)) g.paused = !g.paused
   if (edgeDown(GP.BACK)) { g.showMap = !g.showMap; g.paused = g.showMap; onMapToggle() }
+  // LB = teletransporte (menú de CPs)
+  if (edgeDown(GP.LB) && !g.tpAnim && g.discoveredCPs.size >= 2) {
+    g.tpMenu = { open: true, idx: 0 }
+  }
   const bNow = btn(GP.B)
   if (bNow && !_gpBPrev) { if (g.showMap) { g.showMap = false; g.paused = false } else { onCheckpoint() } }
   _gpBPrev = bNow
@@ -5357,6 +5436,13 @@ export default function ProyectoLuly() {
   // "start" = menú inicio  |  "playing" = partida activa
   const [screen, setScreen] = useState<"start" | "playing">("start")
   const gameActiveRef = useRef(false)
+  // ── UI adicional ────────────────────────────────────────────────
+  const [menuSel, setMenuSel] = useState(0)          // ítem seleccionado en menú inicio
+  const [pauseSel, setPauseSel] = useState(0)        // ítem seleccionado en menú pausa
+  const [showSettings, setShowSettings] = useState(false)  // overlay de configuración
+  const [gpadType, setGpadType] = useState<GpadType>("keyboard")  // tipo de mando detectado
+  const menuSelRef = useRef(0)
+  const pauseSelRef = useRef(0)
 
   useEffect(() => {
     const L = (k: string, s: string) => { const img = new Image(); img.src = asset(s); img.onload = () => { sprs.current[k] = img }; img.onerror = () => { sprs.current[k] = null } }
@@ -5684,13 +5770,122 @@ export default function ProyectoLuly() {
   }, [isTouchDevice, isPseudoFS])
 
   useEffect(() => {
-    const onConnect = (e: GamepadEvent) => { G.current.gpadIdx = e.gamepad.index; setGpadConnected(true) }
-    const onDisconnect = (e: GamepadEvent) => { if (G.current.gpadIdx === e.gamepad.index) { G.current.gpadIdx = -1; setGpadConnected(false) } }
+    const onConnect = (e: GamepadEvent) => {
+      G.current.gpadIdx = e.gamepad.index
+      const t = detectGpadType(e.gamepad.id)
+      G.current.gpadType = t
+      setGpadConnected(true); setGpadType(t)
+    }
+    const onDisconnect = (e: GamepadEvent) => {
+      if (G.current.gpadIdx === e.gamepad.index) {
+        G.current.gpadIdx = -1; G.current.gpadType = "keyboard"
+        setGpadConnected(false); setGpadType("keyboard")
+      }
+    }
     window.addEventListener("gamepadconnected", onConnect); window.addEventListener("gamepaddisconnected", onDisconnect)
     const existing = navigator.getGamepads?.()
-    if (existing) for (let i = 0; i < existing.length; i++) { if (existing[i]) { G.current.gpadIdx = i; setGpadConnected(true); break } }
+    if (existing) for (let i = 0; i < existing.length; i++) {
+      if (existing[i]) {
+        G.current.gpadIdx = i
+        const t = detectGpadType(existing[i]!.id)
+        G.current.gpadType = t
+        setGpadConnected(true); setGpadType(t); break
+      }
+    }
     return () => { window.removeEventListener("gamepadconnected", onConnect); window.removeEventListener("gamepaddisconnected", onDisconnect) }
   }, [])
+
+  // ── Navegación de menús con joystick ─────────────────────────────────────
+  useEffect(() => {
+    const _prev: Record<number, boolean> = {}
+    let navCd = 0, raf = 0
+    const edgeDown = (pad: Gamepad, i: number) => {
+      const now = pad.buttons[i]?.pressed ?? false
+      const prev = _prev[i] ?? false; _prev[i] = now; return now && !prev
+    }
+    const poll = () => {
+      raf = requestAnimationFrame(poll)
+      const pads = navigator.getGamepads?.()
+      let pad: Gamepad | null = null
+      if (pads) for (let i = 0; i < pads.length; i++) { if (pads[i]) { pad = pads[i]; break } }
+      if (!pad) { for (const k of Object.keys(_prev)) delete _prev[+k]; return }
+      const ax = (i: number) => pad!.axes[i] ?? 0
+      const btn = (i: number) => pad!.buttons[i]?.pressed ?? false
+      navCd = Math.max(0, navCd - 16)
+      const THRESH = 0.55, ly = ax(1)
+
+      // ── Menú de inicio ────────────────────────────────────────────
+      if (screen === "start" && !showSettings) {
+        // Calcular número de ítems del menú de inicio
+        const items: string[] = []
+        if (hasSave) items.push("continuar")
+        items.push("jugar")
+        items.push("configuracion")
+        if (typeof window !== "undefined" && !("ontouchstart" in window)) items.push("fullscreen")
+        items.push("salir")
+        const count = items.length
+        if (navCd <= 0) {
+          if (ly < -THRESH || btn(GP.UP)) {
+            menuSelRef.current = (menuSelRef.current - 1 + count) % count
+            setMenuSel(menuSelRef.current); navCd = 180
+          } else if (ly > THRESH || btn(GP.DOWN)) {
+            menuSelRef.current = (menuSelRef.current + 1) % count
+            setMenuSel(menuSelRef.current); navCd = 180
+          }
+        }
+        // A = confirmar (simula click en ítem seleccionado)
+        if (edgeDown(pad, GP.A)) {
+          const sel = items[menuSelRef.current]
+          if (sel === "continuar") {
+            const sv2 = loadSaveData()
+            if (sv2) { applyLoad(G.current, sv2) }
+            gameActiveRef.current = true; setScreen("playing")
+            try { document.documentElement.requestFullscreen?.() } catch (_) {}
+          } else if (sel === "jugar") {
+            gameActiveRef.current = true; setScreen("playing")
+            try { document.documentElement.requestFullscreen?.() } catch (_) {}
+          } else if (sel === "configuracion") {
+            setShowSettings(true)
+          } else if (sel === "fullscreen") {
+            try { document.documentElement.requestFullscreen?.() } catch (_) {}
+          } else if (sel === "salir") {
+            try { window.close() } catch (_) {}
+          }
+        }
+        return
+      }
+
+      // ── Overlay de configuración ──────────────────────────────────
+      if (showSettings) {
+        if (edgeDown(pad, GP.B) || edgeDown(pad, GP.START)) setShowSettings(false)
+        return
+      }
+
+      // ── Menú de pausa ─────────────────────────────────────────────
+      if (screen === "playing" && ui.paused && !ui.showDevMap && !ui.showMap) {
+        const COUNT = 3  // CONTINUAR | MENÚ PRINCIPAL | BORRAR GUARDADO
+        if (navCd <= 0) {
+          if (ly < -THRESH || btn(GP.UP)) {
+            pauseSelRef.current = (pauseSelRef.current - 1 + COUNT) % COUNT
+            setPauseSel(pauseSelRef.current); navCd = 180
+          } else if (ly > THRESH || btn(GP.DOWN)) {
+            pauseSelRef.current = (pauseSelRef.current + 1) % COUNT
+            setPauseSel(pauseSelRef.current); navCd = 180
+          }
+        }
+        if (edgeDown(pad, GP.A)) {
+          const sel = pauseSelRef.current
+          if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
+          else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false }); setScreen("start"); gameActiveRef.current = false }
+          else if (sel === 2) { try { localStorage.removeItem(SAVE_KEY) } catch (_) {}; setHasSave(false) }
+        }
+        if (edgeDown(pad, GP.B)) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
+      }
+    }
+    raf = requestAnimationFrame(poll)
+    return () => cancelAnimationFrame(raf)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, ui.paused, ui.showDevMap, ui.showMap, hasSave, showSettings])
 
   const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false }) }
 
@@ -5794,6 +5989,35 @@ export default function ProyectoLuly() {
     transition: "background 0.2s, box-shadow 0.2s",
     borderRadius: 3, outline: "none",
   })
+
+  // ── Componente de ícono de botón (teclado / Xbox / PlayStation) ──────────
+  const BtnIcon = ({ action, size = 18, style }: { action: string; size?: number; style?: CSSProperties }) => {
+    const label = GPAD_BTN[action]?.[gpadType] ?? action
+    const fs = Math.round(size * 0.52)
+    const base: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1, verticalAlign: "middle", flexShrink: 0, ...style }
+    if (gpadType === "keyboard") {
+      return <span style={{ ...base, minWidth: size + 4, height: size, padding: "0 4px", background: "#1A1A1A", border: "1px solid #666", borderBottom: "3px solid #333", borderRadius: 4, fontSize: fs, color: "#DDD", fontFamily: "'Courier New',monospace", fontWeight: "bold", whiteSpace: "nowrap" }}>{label}</span>
+    }
+    if (gpadType === "xbox") {
+      const isRound = ["A", "B", "X", "Y"].includes(label)
+      const col = XB_COL[label] ?? "#555"
+      if (isRound) return <span style={{ ...base, width: size, height: size, borderRadius: "50%", background: col, fontSize: fs, color: "#FFF", fontWeight: "900" }}>{label}</span>
+      return <span style={{ ...base, minWidth: size + 8, height: size - 2, padding: "0 4px", background: "#252530", border: "1px solid #666", borderRadius: 4, fontSize: fs - 1, color: "#CCC", fontFamily: "'Courier New',monospace", fontWeight: "bold", whiteSpace: "nowrap" }}>{label}</span>
+    }
+    // PlayStation
+    const isSymbol = ["✕", "○", "□", "△"].includes(label)
+    const col = PS_COL[label] ?? "#8888CC"
+    if (isSymbol) return <span style={{ ...base, width: size, height: size, borderRadius: "50%", background: "#12122A", border: `2px solid ${col}`, fontSize: fs, color: col, fontWeight: "900" }}>{label}</span>
+    return <span style={{ ...base, minWidth: size + 8, height: size - 2, padding: "0 4px", background: "#12122A", border: "1px solid #5555AA", borderRadius: 4, fontSize: fs - 1, color: "#AAB", fontFamily: "'Courier New',monospace", fontWeight: "bold", whiteSpace: "nowrap" }}>{label}</span>
+  }
+
+  /** Pequeña etiqueta de acción: [icono] texto */
+  const CtrlHint = ({ action, label, size = 14 }: { action: string; label: string; size?: number }) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6A8A6A", letterSpacing: "0.1em" }}>
+      <BtnIcon action={action} size={size} />
+      <span>{label}</span>
+    </span>
+  )
 
   // ── Gamepad virtual táctil ───────────────────────────────────────────
   const pressKey = (key: string) => { G.current.keys[key] = true }
@@ -6036,70 +6260,89 @@ export default function ProyectoLuly() {
               </p>
 
               {/* Botones */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, width: 260, alignItems: "stretch" }}>
-                {hasSave && (() => {
-                  const sv = loadSaveData()!
-                  const d = new Date(sv.savedAt)
-                  const timeStr = `${d.getDate()}/${d.getMonth()+1} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`
-                  return (
+              {(() => {
+                let idx = 0
+                const isSel = (n: number) => menuSel === n
+                const selStyle = (accent: string, n: number): CSSProperties => isSel(n)
+                  ? { background: `rgba(${accent === "#D4C400" ? "212,196,0" : "85,102,85"},0.22)`, boxShadow: `0 0 22px ${accent}55`, outline: `2px solid ${accent}88` }
+                  : {}
+                const sv = hasSave ? loadSaveData() : null
+                const timeStr = sv ? (() => { const d = new Date(sv.savedAt); return `${d.getDate()}/${d.getMonth()+1} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}` })() : ""
+                const contIdx = hasSave ? idx++ : -1
+                const jugarIdx = idx++
+                const cfgIdx = idx++
+                const fsIdx = (!isTouchDevice && !isFullscreenEffective) ? idx++ : -1
+                const salirIdx = idx++
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, width: 280, alignItems: "stretch" }}>
+                    {hasSave && (
+                      <button
+                        style={{ ...menuBtn("#D4C400"), marginBottom: 6, ...selStyle("#D4C400", contIdx), position: "relative" }}
+                        onMouseEnter={() => { menuSelRef.current = contIdx; setMenuSel(contIdx) }}
+                        onClick={() => { const sv2 = loadSaveData(); if (!sv2) { handlePlay(); return }; applyLoad(G.current, sv2); gameActiveRef.current = true; setScreen("playing"); if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement) }}
+                        onTouchEnd={e => { e.preventDefault(); const sv2 = loadSaveData(); if (!sv2) { handlePlay(); return }; applyLoad(G.current, sv2); gameActiveRef.current = true; setScreen("playing"); if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement) }}
+                      >
+                        {isSel(contIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#D4C400" }}>▶</span>}
+                        ★  CONTINUAR  <span style={{ fontSize: 9, opacity: 0.6 }}>· {timeStr}</span>
+                      </button>
+                    )}
                     <button
-                      style={{ ...menuBtn("#D4C400"), marginBottom: 6 }}
-                      onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(212,196,0,0.18)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #D4C40066" }}
-                      onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.boxShadow = "none" }}
-                      onClick={() => {
-                        const sv2 = loadSaveData()
-                        if (!sv2) { handlePlay(); return }
-                        const g = G.current
-                        gameActiveRef.current = true
-                        applyLoad(g, sv2)
-                        setScreen("playing")
-                        if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement)
-                      }}
-                      onTouchEnd={e => { e.preventDefault(); const sv2 = loadSaveData(); if (!sv2) { handlePlay(); return }; const g = G.current; gameActiveRef.current = true; applyLoad(g, sv2); setScreen("playing"); if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement) }}
+                      style={{ ...menuBtn("#D4C400"), position: "relative", ...selStyle("#D4C400", jugarIdx) }}
+                      onMouseEnter={() => { menuSelRef.current = jugarIdx; setMenuSel(jugarIdx) }}
+                      onClick={handlePlay}
+                      onTouchEnd={e => { e.preventDefault(); handlePlay() }}
                     >
-                      ★  CONTINUAR  <span style={{ fontSize: 9, opacity: 0.6 }}>· {timeStr}</span>
+                      {isSel(jugarIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#D4C400" }}>▶</span>}
+                      ▶  JUGAR
                     </button>
-                  )
-                })()}
-                <button
-                  style={menuBtn("#D4C400")}
-                  onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(124,252,0,0.15)"; (e.target as HTMLElement).style.boxShadow = "0 0 18px #D4C40066" }}
-                  onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.boxShadow = "none" }}
-                  onClick={handlePlay}
-                  onTouchEnd={e => { e.preventDefault(); handlePlay() }}
-                >
-                  ▶  JUGAR
-                </button>
-                {!isTouchDevice && !isFullscreenEffective && (
-                  <button
-                    style={menuBtn("#556655")}
-                    onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(85,102,85,0.18)"; (e.target as HTMLElement).style.color = "#88AA88" }}
-                    onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.color = "#556655" }}
-                    onClick={() => tryFullscreen(document.documentElement)}
-                  >
-                    ⛶  PANTALLA COMPLETA
-                  </button>
-                )}
-                <button
-                  style={menuBtn("#556655")}
-                  onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(85,102,85,0.18)"; (e.target as HTMLElement).style.color = "#88AA88" }}
-                  onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(0,0,0,0.55)"; (e.target as HTMLElement).style.color = "#556655" }}
-                  onClick={handleExit}
-                >
-                  ✕  SALIR
-                </button>
-              </div>
+                    <button
+                      style={{ ...menuBtn("#7A9A7A"), position: "relative", ...selStyle("#7A9A7A", cfgIdx) }}
+                      onMouseEnter={() => { menuSelRef.current = cfgIdx; setMenuSel(cfgIdx) }}
+                      onClick={() => setShowSettings(true)}
+                      onTouchEnd={e => { e.preventDefault(); setShowSettings(true) }}
+                    >
+                      {isSel(cfgIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#7A9A7A" }}>▶</span>}
+                      ⚙  CONFIGURACIÓN
+                    </button>
+                    {!isTouchDevice && !isFullscreenEffective && (
+                      <button
+                        style={{ ...menuBtn("#556655"), position: "relative", ...selStyle("#556655", fsIdx) }}
+                        onMouseEnter={() => { menuSelRef.current = fsIdx; setMenuSel(fsIdx) }}
+                        onClick={() => tryFullscreen(document.documentElement)}
+                      >
+                        {isSel(fsIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#88AA88" }}>▶</span>}
+                        ⛶  PANTALLA COMPLETA
+                      </button>
+                    )}
+                    <button
+                      style={{ ...menuBtn("#556655"), position: "relative", ...selStyle("#556655", salirIdx) }}
+                      onMouseEnter={() => { menuSelRef.current = salirIdx; setMenuSel(salirIdx) }}
+                      onClick={handleExit}
+                    >
+                      {isSel(salirIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#88AA88" }}>▶</span>}
+                      ✕  SALIR
+                    </button>
+                  </div>
+                )
+              })()}
 
-              {/* Controles resumidos */}
-              <div style={{ marginTop: 38, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px 28px", fontSize: 10, color: "#3A5A3A", textAlign: "center" }}>
-                <span><span style={{ color: "#D4C40088" }}>WASD</span> mover</span>
-                <span><span style={{ color: "#D4C40088" }}>ESPACIO</span> saltar</span>
-                <span><span style={{ color: "#D4C40088" }}>N</span> disparar</span>
-                <span><span style={{ color: "#D4C40088" }}>M</span> látigo</span>
-                <span><span style={{ color: "#D4C40088" }}>SHIFT</span> dash*</span>
-                <span><span style={{ color: "#D4C40088" }}>TAB</span> mapa</span>
+              {/* Controles resumidos — iconos dinámicos */}
+              <div style={{ marginTop: 32, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px 20px", textAlign: "center" }}>
+                <CtrlHint action="move"    label="mover" />
+                <CtrlHint action="jump"    label="saltar" />
+                <CtrlHint action="shoot"   label="disparar" />
+                <CtrlHint action="whip"    label="látigo" />
+                <CtrlHint action="dash"    label="dash*" />
+                <CtrlHint action="map"     label="mapa" />
               </div>
-              <p style={{ marginTop: 8, fontSize: 9, color: "#2A3A2A" }}>* se desbloquea derrotando al primer jefe</p>
+              {gpadConnected && (
+                <div style={{ marginTop: 6, display: "flex", gap: 14, flexWrap: "wrap", justifyContent: "center" }}>
+                  <CtrlHint action="nav"      label="navegar" size={13} />
+                  <CtrlHint action="confirm"  label="confirmar" size={13} />
+                  <CtrlHint action="cancel"   label="atrás" size={13} />
+                </div>
+              )}
+              <p style={{ marginTop: 6, fontSize: 9, color: "#2A3A2A" }}>* dash se desbloquea derrotando al primer jefe</p>
             </div>
 
             {/* Versión */}
@@ -6274,30 +6517,159 @@ export default function ProyectoLuly() {
                   <span>🗺 SALAS: {g.explored.size}</span>
                 </div>
 
-                {/* ── Botones ── */}
+                {/* ── Botones de pausa con selección por joystick ── */}
                 <div style={{ display: "flex", gap: 12, padding: "14px 18px", justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}>
-                  <button
-                    onClick={() => { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }}
-                    style={{ padding: "8px 20px", background: th.accent + "22", border: `1px solid ${th.accent}88`, color: th.accent, fontFamily: "'Courier New', monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}
-                  >▶ CONTINUAR</button>
-                  <button
-                    onClick={handleRestart}
-                    style={{ padding: "8px 20px", background: "transparent", border: "1px solid #444", color: "#888", fontFamily: "'Courier New', monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}
-                  >↩ MENÚ PRINCIPAL</button>
-                  <button
-                    onClick={() => { try { localStorage.removeItem(SAVE_KEY) } catch(_){} setHasSave(false) }}
-                    style={{ padding: "8px 16px", background: "transparent", border: "1px solid #330000", color: "#553333", fontFamily: "'Courier New', monospace", fontSize: 10, letterSpacing: "0.15em", cursor: "pointer", borderRadius: 6 }}
-                  >
-                    ✕ borrar guardado
-                  </button>
-                  {isTouchDevice && (
-                    <span style={{ fontSize: 9, color: "#444", letterSpacing: "0.15em" }}>[ P ] continuar</span>
-                  )}
+                  {[
+                    { label: "▶ CONTINUAR",     col: th.accent,   bg: th.accent + "22", border: `1px solid ${th.accent}88` },
+                    { label: "↩ MENÚ PRINCIPAL", col: "#888",     bg: "transparent",    border: "1px solid #444" },
+                    { label: "✕ borrar guardado",col: "#553333",  bg: "transparent",    border: "1px solid #330000", small: true },
+                  ].map((item, i) => (
+                    <button
+                      key={i}
+                      onMouseEnter={() => { pauseSelRef.current = i; setPauseSel(i) }}
+                      onClick={() => {
+                        if (i === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
+                        else if (i === 1) handleRestart()
+                        else { try { localStorage.removeItem(SAVE_KEY) } catch(_){} setHasSave(false) }
+                      }}
+                      style={{
+                        padding: item.small ? "8px 16px" : "8px 20px",
+                        background: pauseSel === i ? (item.bg === "transparent" ? "rgba(255,255,255,0.06)" : item.bg) : item.bg,
+                        border: pauseSel === i ? `1px solid ${item.col}` : item.border,
+                        color: item.col, fontFamily: "'Courier New', monospace",
+                        fontSize: item.small ? 10 : 12, letterSpacing: "0.2em",
+                        cursor: "pointer", borderRadius: 6,
+                        boxShadow: pauseSel === i ? `0 0 12px ${item.col}44` : "none",
+                        position: "relative",
+                      }}
+                    >
+                      {pauseSel === i && <span style={{ position: "absolute", left: 6, top: "50%", transform: "translateY(-50%)", fontSize: 10 }}>▶</span>}
+                      <span style={{ marginLeft: pauseSel === i ? 10 : 0 }}>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* ── Referencia de controles en pausa ── */}
+                <div style={{ display: "flex", gap: 16, padding: "8px 18px 12px", justifyContent: "center", flexWrap: "wrap" }}>
+                  <CtrlHint action="pause"     label="reanudar" size={13} />
+                  <CtrlHint action="map"       label="mapa" size={13} />
+                  <CtrlHint action="teleport"  label="teletransporte" size={13} />
+                  <CtrlHint action="confirm"   label="confirmar" size={13} />
+                  <CtrlHint action="cancel"    label="atrás" size={13} />
                 </div>
               </div>
             </div>
           )
         })()}
+
+        {/* ══════════════════════════════════════════════════
+            OVERLAY DE CONFIGURACIÓN
+        ══════════════════════════════════════════════════ */}
+        {showSettings && (
+          <div style={{
+            position: "fixed", inset: 0, zIndex: 9998,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.82)", backdropFilter: "blur(6px)",
+            fontFamily: "'Courier New', monospace",
+          }}>
+            <div style={{
+              width: "min(680px, 96vw)", maxHeight: "90vh", overflowY: "auto",
+              background: "#080C08", border: "1px solid #3A5A3A88",
+              borderRadius: 12, boxShadow: "0 0 60px #00441122",
+            }}>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid #2A3A2A" }}>
+                <span style={{ color: "#3A5A3A", fontSize: 10, letterSpacing: "0.3em" }}>// PROYECTO LULY</span>
+                <span style={{ color: "#D4C400", fontSize: 14, letterSpacing: "0.35em", fontWeight: "bold" }}>⚙  CONFIGURACIÓN</span>
+                <button onClick={() => setShowSettings(false)} style={{ background: "none", border: "none", color: "#3A5A3A", fontSize: 18, cursor: "pointer", lineHeight: 1 }}>✕</button>
+              </div>
+
+              {/* Sección: CONTROLES */}
+              <div style={{ padding: "18px 20px" }}>
+                <div style={{ fontSize: 9, color: "#4A7A4A", letterSpacing: "0.35em", marginBottom: 14 }}>
+                  CONTROLES
+                  {gpadConnected && <span style={{ marginLeft: 10, color: gpadType === "ps" ? "#5C8EF7" : "#1DB954", fontSize: 9 }}>
+                    {gpadType === "ps" ? "● PlayStation detectado" : "● Xbox detectado"}
+                  </span>}
+                </div>
+
+                {/* Tabla de controles */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 24px" }}>
+                  {[
+                    { action: "move",     label: "Mover" },
+                    { action: "jump",     label: "Saltar" },
+                    { action: "shoot",    label: "Disparar" },
+                    { action: "whip",     label: "Látigo" },
+                    { action: "dash",     label: "Dash  ★" },
+                    { action: "walljump", label: "Salto en pared  ★" },
+                    { action: "run",      label: "Correr" },
+                    { action: "interact", label: "Guardar checkpoint" },
+                    { action: "teleport", label: "Teletransporte" },
+                    { action: "map",      label: "Mapa" },
+                    { action: "pause",    label: "Pausa" },
+                  ].map(({ action, label }) => (
+                    <div key={action} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 8px", borderRadius: 5, background: "rgba(255,255,255,0.03)" }}>
+                      <BtnIcon action={action} size={20} />
+                      <span style={{ fontSize: 11, color: "#7A9A7A", letterSpacing: "0.1em" }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: 8, color: "#2A4A2A", marginTop: 10 }}>★ = se desbloquea al derrotar al jefe correspondiente</p>
+              </div>
+
+              {/* Separador */}
+              <div style={{ height: 1, background: "linear-gradient(90deg,transparent,#2A4A2A,transparent)", margin: "0 20px" }} />
+
+              {/* Sección: PANTALLA */}
+              <div style={{ padding: "18px 20px" }}>
+                <div style={{ fontSize: 9, color: "#4A7A4A", letterSpacing: "0.35em", marginBottom: 14 }}>PANTALLA</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {/* Calidad gráfica */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 11, color: "#7A9A7A", flex: 1 }}>Calidad gráfica</span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {(["BAJA", "MEDIA", "ALTA"] as const).map((lbl, i) => (
+                        <button
+                          key={lbl}
+                          onClick={() => { G.current.gfx = i as 0|1|2; (G.current as any)._gfxMsg = true; G.current.kennelMsg = 1.8 }}
+                          style={{
+                            padding: "4px 10px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                            background: G.current.gfx === i ? "#1A3A1A" : "transparent",
+                            border: `1px solid ${G.current.gfx === i ? "#D4C400" : "#2A4A2A"}`,
+                            color: G.current.gfx === i ? "#D4C400" : "#4A6A4A", cursor: "pointer", borderRadius: 4,
+                          }}
+                        >{lbl}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Pantalla completa */}
+                  {!isTouchDevice && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 11, color: "#7A9A7A", flex: 1 }}>Pantalla completa</span>
+                      <button
+                        onClick={() => { if (getFSElement() || isPseudoFS) exitFS(); else tryFullscreen(document.documentElement) }}
+                        style={{
+                          padding: "4px 14px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                          background: (getFSElement() || isPseudoFS) ? "#1A3A1A" : "transparent",
+                          border: `1px solid ${(getFSElement() || isPseudoFS) ? "#D4C400" : "#2A4A2A"}`,
+                          color: (getFSElement() || isPseudoFS) ? "#D4C400" : "#4A6A4A", cursor: "pointer", borderRadius: 4,
+                        }}
+                      >{(getFSElement() || isPseudoFS) ? "■ ACTIVA" : "□ INACTIVA"}</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center", gap: 12, borderTop: "1px solid #1A2A1A" }}>
+                <CtrlHint action="cancel" label="cerrar" size={14} />
+                <button onClick={() => setShowSettings(false)} style={{ padding: "8px 24px", background: "#1A3A1A", border: "1px solid #3A6A3A", color: "#D4C400", fontFamily: "'Courier New',monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}>
+                  ✓  LISTO
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Game Over ── aparece una vez que el fade llega a ~70% ── */}
         {screen === "playing" && ui.over && G.current.overFade > 0.6 && (
