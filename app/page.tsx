@@ -102,6 +102,8 @@ type G = {
   questKillBaseline: number      // muertes P1-W0 al momento de aceptar la quest (descontar muertes previas)
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
+  // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
+  isMobile: boolean
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1287,6 +1289,7 @@ function mkG_lazy(): G {
     tballKeyHeld: false,
     questKillBaseline: 0,
     gpadType: "keyboard",
+    isMobile: false,
   } as G
 }
 
@@ -4451,6 +4454,7 @@ function drawDevPanel(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
+  if (g.isMobile) return
   const p = g.pl
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
@@ -5769,6 +5773,9 @@ export default function ProyectoLuly() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isTouchDevice, isPseudoFS])
 
+  // Sincronizar isTouchDevice → G.current.isMobile para que las funciones de canvas lo lean
+  useEffect(() => { G.current.isMobile = isTouchDevice }, [isTouchDevice])
+
   useEffect(() => {
     const onConnect = (e: GamepadEvent) => {
       G.current.gpadIdx = e.gamepad.index
@@ -5963,15 +5970,21 @@ export default function ProyectoLuly() {
   // lógica del juego. El CSS lo escala al mayor tamaño que cabe en la ventana
   // SIN deformar la relación 1050:600 (1.75:1).
   //
-  // Técnica: width = min(100vw, 100vh × 1.75)  +  height = auto
-  //   · Si la pantalla es más ancha que 1.75:1 → se limita por altura  (pillar-box)
-  //   · Si la pantalla es más estrecha que 1.75:1 → se limita por anchura (letter-box)
-  //   · No usa objectFit (no soportado en <canvas> en Safari)
-  //   · No requiere JS ni winDims → inmune a SSR/hidratación
-  const canvasStyle: React.CSSProperties = {
+  // Técnica de escalado:
+  //   Desktop  → mantiene aspect ratio: min(100vw, 1.75 × 100vh) — letterbox si es necesario
+  //   Móvil    → llena TODO el viewport sin barras negras, estirando levemente si hace falta
+  //              Se usa position:absolute+inset:0 para que el canvas ocupe exactamente la pantalla.
+  const canvasStyle: React.CSSProperties = isTouchDevice ? {
     display: "block",
-    // "auto" = suavizado bilineal. Con canvas DPR×2 el downscale da texto nítido.
-    // "pixelated" era necesario cuando escalábamos hacia arriba (DPR=1); ya no aplica.
+    imageRendering: "auto",
+    position: "absolute",
+    top: 0, left: 0,
+    width: "100%",
+    height: "100%",
+    border: "none",
+    borderRadius: 0,
+  } : {
+    display: "block",
     imageRendering: "auto",
     width:  `min(100%, calc(${CW / CH} * 100vh))`,
     height: "auto",
@@ -6070,29 +6083,23 @@ export default function ProyectoLuly() {
     downFn: () => void,
     upFn: () => void,
   ) => ({
-    onPointerDown: (e: React.PointerEvent) => { e.preventDefault(); downFn() },
-    onPointerUp:   (e: React.PointerEvent) => { e.preventDefault(); upFn() },
-    onPointerLeave: () => upFn(),
-    onPointerCancel: () => upFn(),
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault()
+      // Pointer capture: garantiza que pointerUp/Cancel lleguen aunque el dedo se mueva fuera
+      try { e.currentTarget.setPointerCapture(e.pointerId) } catch (_) {}
+      downFn()
+    },
+    onPointerUp:     (e: React.PointerEvent) => { e.preventDefault(); upFn() },
+    onPointerCancel: (_e: React.PointerEvent) => { upFn() },
+    // onPointerLeave como último recurso en entornos sin capture
+    onPointerLeave:  () => { upFn() },
   })
 
   const VirtualGamepad = () => {
     if (!isTouchDevice || screen !== "playing" || isPortrait) return null
     const g = G.current
-    const accent = "#D4C400"
-    const pct = (x: number, y: number): CSSProperties => ({
-      left: `${x}%`, bottom: `${y}%`, transform: "translate(-50%, 50%)",
-    })
 
-    // Doble-tap en D-pad activa correr
-    const dpadPress = (dir: "left" | "right", key: string) => {
-      const now = Date.now()
-      if (now - dpadTapRef.current[dir] < 300) G.current.pl.runMode = true
-      dpadTapRef.current[dir] = now
-      pressKey(key)
-    }
-
-    // Activar checkpoint táctil — replica exactamente la lógica del keydown "e"
+    // ── Activar checkpoint táctil ────────────────────────────────────────
     const activateCheckpoint = () => {
       if (g.tpAnim) return
       ;(g as any)._gfxMsg = false
@@ -6112,91 +6119,406 @@ export default function ProyectoLuly() {
       }
     }
 
+    // ── Doble-tap D-pad → correr ─────────────────────────────────────────
+    const dpadDown = (dir: "left" | "right", key: string) => {
+      const now = Date.now()
+      if (now - dpadTapRef.current[dir] < 300) G.current.pl.runMode = true
+      dpadTapRef.current[dir] = now
+      pressKey(key)
+    }
+
+    // ── Estilos base ─────────────────────────────────────────────────────
+    const SYS_BTN: CSSProperties = {
+      position: "absolute", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "rgba(20,20,20,0.82)", border: "1.5px solid rgba(255,255,255,0.18)",
+      color: "rgba(255,255,255,0.60)", fontFamily: "'Courier New',monospace", fontWeight: "bold",
+      cursor: "pointer", userSelect: "none", touchAction: "none", borderRadius: 8, zIndex: 20,
+    }
+    // Botón circular estilo Xbox (con degradado radial + brillo superior)
+    const xbCircle = (
+      size: number, color: string, letter: string,
+      label: string | null,
+      onDown: () => void, onUp: () => void
+    ) => {
+      const fs = Math.round(size * 0.44)
+      return (
+        <div
+          style={{
+            width: size, height: size + (label ? 18 : 0),
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
+            cursor: "pointer", userSelect: "none", touchAction: "none",
+          }}
+          {...makeTouch(onDown, onUp)}
+        >
+          <div style={{
+            width: size, height: size, borderRadius: "50%", flexShrink: 0,
+            background: `radial-gradient(circle at 38% 32%, ${color}EE 0%, ${color}88 55%, ${color}44 100%)`,
+            border: `2px solid ${color}`,
+            boxShadow: `0 3px 10px ${color}55, inset 0 1px 0 rgba(255,255,255,0.30)`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#FFF", fontSize: fs, fontWeight: "900", fontFamily: "'Courier New',monospace",
+          }}>
+            {letter}
+          </div>
+          {label && <span style={{ fontSize: 8, color: "rgba(255,255,255,0.35)", letterSpacing: "0.12em", marginTop: 2, lineHeight: 1 }}>{label}</span>}
+        </div>
+      )
+    }
+
+    // Botón de hombro/bumper estilo Xbox
+    const xbBumper = (w: number, h: number, label: string, onDown: () => void, onUp: () => void, topRadius = true): JSX.Element => (
+      <div
+        style={{
+          width: w, height: h,
+          background: "linear-gradient(180deg, #3A3A3A 0%, #252525 100%)",
+          border: "1.5px solid #555",
+          borderRadius: topRadius ? "10px 10px 4px 4px" : "4px 4px 10px 10px",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.15)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "rgba(255,255,255,0.65)", fontSize: 11, fontFamily: "'Courier New',monospace", fontWeight: "bold",
+          cursor: "pointer", userSelect: "none", touchAction: "none",
+        }}
+        {...makeTouch(onDown, onUp)}
+      >
+        {label}
+      </div>
+    )
+
+    // Brazo del D-cross (zona táctil + flecha SVG)
+    const dArrow = (
+      dir: "up" | "down" | "left" | "right",
+      style: CSSProperties,
+      onD: () => void, onU: () => void
+    ) => {
+      const arrows: Record<string, JSX.Element> = {
+        up:    <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 2 L16 12 L2 12 Z" fill="rgba(255,255,255,0.65)"/></svg>,
+        down:  <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 12 L16 2 L2 2 Z" fill="rgba(255,255,255,0.65)"/></svg>,
+        left:  <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(255,255,255,0.65)"/></svg>,
+        right: <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(255,255,255,0.65)"/></svg>,
+      }
+      return (
+        <div
+          style={{ position: "absolute", display: "flex", alignItems: "center", justifyContent: "center",
+                   cursor: "pointer", userSelect: "none", touchAction: "none", ...style }}
+          {...makeTouch(onD, onU)}
+        >
+          {arrows[dir]}
+        </div>
+      )
+    }
+
+    // ── Tamaños adaptativos según la altura real del viewport ────────────
+    const vh = winDims.h                         // altura real de la ventana en px
+    // D-cross: ARM escala con la pantalla (mín 48, máx 68), HUB un poco más ancho que el brazo
+    const ARM   = Math.round(Math.max(48, Math.min(68, vh * 0.145)))
+    const HUB   = Math.round(Math.max(50, Math.min(72, vh * 0.155)))
+    const TOTAL = ARM + HUB + ARM                // ~146-208 px según pantalla
+    const SAFE_B = Math.round(vh * 0.03)         // margen inferior ~3%
+    // Shoulder buttons solo visibles cuando la habilidad está desbloqueada
+    const hasDash  = g.abilities.has("dash")
+    const hasTBall = g.abilities.has("tball")
+    // Altura del grupo de hombros (si existe)
+    const SHOULDER_H = (hasDash || hasTBall) ? Math.round(vh * 0.10) : 0
+    // Altura del bloque de botones de acción (diamante A/B/X/Y)
+    const ACT_H = Math.round(vh * 0.44)   // 44% de la ventana
+    // Posición inferior del diamante: por encima de los shoulders + margen
+    const ACT_B  = SAFE_B + SHOULDER_H
+    // Posición inferior del D-cross: igual que el diamante
+    const DPAD_B = SAFE_B + SHOULDER_H
+
+    // ── ¿Jugadora cerca de algún checkpoint descubierto? ─────────────────
+    const nearAnyCP = ALL_CPS.some(cp => {
+      if (!g.discoveredCPs.has(cp.id)) return false
+      const dx = g.pl.x + g.pl.w / 2 - (cp.x + PW / 2)
+      const dy = g.pl.y + g.pl.h / 2 - (cp.y + PH)
+      return Math.sqrt(dx * dx + dy * dy) < CP_RADIUS
+    })
+
+    // ── Confirmar selección en menú de teletransporte ────────────────────
+    const confirmTP = () => {
+      if (!g.tpMenu?.open) return
+      const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
+      const dest = discovered[g.tpMenu.idx]
+      if (dest) {
+        g.tpMenu = null
+        g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
+        spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
+      }
+    }
+    const navTP = (dir: 1 | -1) => {
+      if (!g.tpMenu?.open) return
+      const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
+      g.tpMenu.idx = (g.tpMenu.idx + dir + discovered.length) % discovered.length
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  MODO MAPA — solo muestra botón B para cerrar (difuminado)
+    // ══════════════════════════════════════════════════════════════════════
+    if (ui.showMap) {
+      const btnSz = Math.round(ACT_H * 0.34)
+      return (
+        <div style={{
+          position: "absolute", bottom: SAFE_B + 20, left: "50%",
+          transform: "translateX(-50%)", zIndex: 100,
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+          pointerEvents: "none",
+        }}>
+          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.30)", letterSpacing: "0.15em", fontFamily: "'Courier New',monospace" }}>CERRAR MAPA</span>
+          <div style={{ pointerEvents: "auto", opacity: 0.70 }}>
+            {xbCircle(btnSz, XB_COL.B, "B", null,
+              () => { g.showMap = false; g.paused = false }, () => {})}
+          </div>
+        </div>
+      )
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  MODO PAUSA — D-pad (↑↓ navegan) + A (confirmar) + B (salir), difuminados
+    // ══════════════════════════════════════════════════════════════════════
+    if (ui.paused && !ui.showDevMap) {
+      const PAUSE_COUNT = 3
+      const confirmPause = () => {
+        const sel = pauseSelRef.current
+        if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
+        else if (sel === 1) handleRestart()
+        else { try { localStorage.removeItem(SAVE_KEY) } catch (_) { } setHasSave(false) }
+      }
+      const navPause = (dir: 1 | -1) => {
+        const next = (pauseSelRef.current + dir + PAUSE_COUNT) % PAUSE_COUNT
+        pauseSelRef.current = next; setPauseSel(next)
+      }
+      const BIG = Math.round(ACT_H * 0.38)
+      const MED = Math.round(ACT_H * 0.30)
+      return (
+        <>
+          {/* D-pad — solo ↑↓ activos para navegar el menú de pausa */}
+          <div style={{
+            position: "absolute", bottom: DPAD_B, left: "15%",
+            transform: "translateX(-50%)",
+            width: TOTAL, height: TOTAL,
+            touchAction: "none", zIndex: 100, opacity: 0.70,
+          }}>
+            <div style={{
+              position: "absolute", inset: 0,
+              background: "linear-gradient(145deg,#333 0%,#1C1C1C 100%)",
+              clipPath: `polygon(${ARM}px 0,${ARM+HUB}px 0,${ARM+HUB}px ${ARM}px,${TOTAL}px ${ARM}px,${TOTAL}px ${ARM+HUB}px,${ARM+HUB}px ${ARM+HUB}px,${ARM+HUB}px ${TOTAL}px,${ARM}px ${TOTAL}px,${ARM}px ${ARM+HUB}px,0 ${ARM+HUB}px,0 ${ARM}px,${ARM}px ${ARM}px)`,
+              boxShadow: "0 6px 20px rgba(0,0,0,0.75)",
+            }}/>
+            <svg style={{ position:"absolute",inset:0,overflow:"visible",pointerEvents:"none" }} width={TOTAL} height={TOTAL}>
+              <path d={`M${ARM} 0 H${ARM+HUB} V${ARM} H${TOTAL} V${ARM+HUB} H${ARM+HUB} V${TOTAL} H${ARM} V${ARM+HUB} H0 V${ARM} H${ARM} Z`}
+                fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="1.5"/>
+            </svg>
+            <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
+              background:"#252525", border:"1px solid rgba(255,255,255,0.09)", pointerEvents:"none"}}/>
+            {dArrow("up",   {left:ARM, top:0,       width:HUB, height:ARM}, () => navPause(-1), () => {})}
+            {dArrow("down", {left:ARM, top:ARM+HUB, width:HUB, height:ARM}, () => navPause(1),  () => {})}
+            {/* ← → visuales pero sin acción */}
+            <div style={{ position:"absolute", left:0, top:ARM, width:ARM, height:HUB,
+              display:"flex", alignItems:"center", justifyContent:"center", opacity:0.18, pointerEvents:"none" }}>
+              <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
+            </div>
+            <div style={{ position:"absolute", left:ARM+HUB, top:ARM, width:ARM, height:HUB,
+              display:"flex", alignItems:"center", justifyContent:"center", opacity:0.18, pointerEvents:"none" }}>
+              <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
+            </div>
+          </div>
+
+          {/* A (ELEGIR) y B (ATRÁS/CERRAR) */}
+          <div style={{
+            position: "absolute", bottom: ACT_B, right: "3%",
+            width: ACT_H, height: Math.round(ACT_H * 0.65),
+            zIndex: 100, opacity: 0.80,
+          }}>
+            {/* B — cancelar / salir pausa */}
+            <div style={{ position:"absolute", left:0, top:"50%", transform:"translateY(-55%)" }}>
+              {xbCircle(MED, XB_COL.B, "B", "ATRÁS",
+                () => { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }, () => {})}
+            </div>
+            {/* A — confirmar opción seleccionada */}
+            <div style={{ position:"absolute", bottom:0, right:0 }}>
+              {xbCircle(BIG, XB_COL.A, "A", "ELEGIR", confirmPause, () => {})}
+            </div>
+          </div>
+        </>
+      )
+    }
+
     return (
       <>
-        {/* ── TOP: sistema ─────────────────────────────────────────── */}
-        <div style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8, zIndex: 20 }}>
-          <div style={vBtnRect(62, 32, { borderRadius: 8, fontSize: 11 })}
-            {...makeTouch(() => { g.showMap = !g.showMap; g.paused = g.showMap }, () => {})}>
-            🗺 MAPA
+        {/* ══════════════════════════════════════════════════
+            SISTEMA — MAP · TELE · PAUSA en fila centrada
+            en la parte inferior, entre el D-pad y el diamante
+        ══════════════════════════════════════════════════ */}
+        <div style={{
+          position: "absolute",
+          bottom: SAFE_B,
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          pointerEvents: "none",
+        }}>
+          {/* MAP */}
+          <div
+            style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 11, gap: 4, pointerEvents: "auto" }}
+            {...makeTouch(() => { g.showMap = !g.showMap; g.paused = g.showMap }, () => {})}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" style={{ opacity: 0.75 }}>
+              <rect x="1" y="3" width="4" height="8" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+              <rect x="5" y="1" width="4" height="10" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+              <rect x="9" y="4" width="4" height="7" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+            </svg>
+            MAPA
           </div>
-          <div style={vBtnRect(62, 32, { borderRadius: 8, fontSize: 11, borderColor: accent + "88" })}
-            {...makeTouch(() => {
-              if (g.tpMenu?.open) g.tpMenu = null
-              else if (g.discoveredCPs.size >= 2) g.tpMenu = { open: true, idx: 0 }
-            }, () => {})}>
-            ⟳ TELE
-          </div>
-          <div style={vBtnRect(52, 32, { borderRadius: 8, fontSize: 14 })}
-            {...makeTouch(() => { g.paused = !g.paused }, () => {})}>
-            ⏸
+
+          {/* TELE (solo cuando hay ≥2 CPs Y la jugadora está cerca de uno) */}
+          {g.discoveredCPs.size >= 2 && nearAnyCP && (
+            <div
+              style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 10, gap: 3, borderColor: "#D4C40066", pointerEvents: "auto" }}
+              {...makeTouch(() => {
+                if (g.tpMenu?.open) g.tpMenu = null
+                else g.tpMenu = { open: true, idx: 0 }
+              }, () => {})}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" style={{ opacity: 0.85 }}>
+                <circle cx="6" cy="6" r="4.5" fill="none" stroke="#D4C400" strokeWidth="1.2"/>
+                <path d="M6 2 L8 6 L6 5 L6 10 L4 6 L6 7 Z" fill="#D4C400" opacity="0.9"/>
+              </svg>
+              <span style={{ color: "#D4C400CC" }}>TELE</span>
+            </div>
+          )}
+
+          {/* PAUSA */}
+          <div
+            style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 11, gap: 4, pointerEvents: "auto" }}
+            {...makeTouch(() => { g.paused = !g.paused }, () => {})}
+          >
+            <svg width="13" height="14" viewBox="0 0 13 14" style={{ opacity: 0.75 }}>
+              <rect x="1" y="1" width="4" height="12" rx="1" fill="currentColor"/>
+              <rect x="8" y="1" width="4" height="12" rx="1" fill="currentColor"/>
+            </svg>
+            PAUSA
           </div>
         </div>
 
-        {/* ── CHECKPOINT: botón derecho, encima del DASH ──────────── */}
-        <div style={{ ...vBtnStyle(60, { borderColor: "#FFD700CC", background: "rgba(255,215,0,0.11)" }), ...pct(70, 28) }}
-          {...makeTouch(activateCheckpoint, () => {})}>
-          <span style={{ fontSize: 9, lineHeight: 1.2, textAlign: "center" }}>
-            <span style={{ fontSize: 18, display: "block" }}>★</span>CP
-          </span>
-        </div>
-
-        {/* ── IZQUIERDA: D-pad (doble-tap = correr) ────────────────── */}
-        {/* ← */}
-        <div style={{ ...vBtnStyle(74), ...pct(7, 13) }}
-          {...makeTouch(() => dpadPress("left", "arrowleft"), () => { releaseKey("arrowleft"); G.current.pl.runMode = false })}>
-          ◀
-        </div>
-        {/* → */}
-        <div style={{ ...vBtnStyle(74), ...pct(18.5, 13) }}
-          {...makeTouch(() => dpadPress("right", "arrowright"), () => { releaseKey("arrowright"); G.current.pl.runMode = false })}>
-          ▶
-        </div>
-        {/* ↓ agachar */}
-        <div style={{ ...vBtnStyle(58, { borderRadius: 12 }), ...pct(12.8, 3) }}
-          {...makeTouch(() => pressKey("arrowdown"), () => releaseKey("arrowdown"))}>
-          ▼
-        </div>
-        {/* Indicador doble-tap */}
-        <div style={{ ...pct(12.8, 26), position: "absolute", fontSize: 9, color: "rgba(124,252,0,0.35)", fontFamily: "'Courier New',monospace", whiteSpace: "nowrap", transform: "translate(-50%, 50%)" }}>
-          2× = RUN
-        </div>
-
-        {/* ── DERECHA: Acciones ────────────────────────────────────── */}
-        {/* SALTAR — grande, verde */}
-        <div style={{ ...vBtnStyle(84, { background: "rgba(124,252,0,0.13)", borderColor: accent + "AA", fontSize: 28 }), ...pct(87, 14) }}
-          {...makeTouch(() => pressKey(" "), () => releaseKey(" "))}>
-          ▲
-        </div>
-        {/* LÁTIGO — icono de latigazo "〰W" */}
-        <div style={{ ...vBtnStyle(66, { borderColor: "#FF8C00AA", background: "rgba(255,140,0,0.09)" }), ...pct(76, 7) }}
-          {...makeTouch(() => pressKey("m"), () => releaseKey("m"))}>
-          <span style={{ fontSize: 10, lineHeight: 1, textAlign: "center" }}>
-            <span style={{ fontSize: 16, display: "block" }}>〰</span>WHP
-          </span>
-        </div>
-        {/* DISPARAR HUESO — icono de hueso */}
-        <div style={{ ...vBtnStyle(66, { borderColor: "#00BFFFAA", background: "rgba(0,191,255,0.09)" }), ...pct(93, 7) }}
-          {...makeTouch(() => pressKey("n"), () => releaseKey("n"))}>
-          <span style={{ fontSize: 10, lineHeight: 1, textAlign: "center" }}>
-            <span style={{ fontSize: 16, display: "block" }}>🦴</span>TIRO
-          </span>
-        </div>
-        {/* DASH */}
-        <div style={{ ...vBtnStyle(56, { borderColor: "#FFD700AA", background: "rgba(255,215,0,0.08)", fontSize: 22 }), ...pct(84, 28) }}
-          {...makeTouch(() => pressKey("shift"), () => releaseKey("shift"))}>
-          ⚡
-        </div>
-        {/* TENIS — solo visible cuando tball está desbloqueada */}
-        {g.abilities.has("tball") && (
-          <div style={{ ...vBtnStyle(56, { borderColor: "#44FF44AA", background: "rgba(50,200,50,0.10)" }), ...pct(75, 28) }}
-            {...makeTouch(() => { fireTBall(g) }, () => {})}>
-            <span style={{ fontSize: 10, lineHeight: 1, textAlign: "center" }}>
-              <span style={{ fontSize: 16, display: "block" }}>🎾</span>
-              <span style={{ fontSize: 8, color: "#44FF44" }}>TBALL</span>
-            </span>
+        {/* ══════════════════════════════════════════════════
+            HOMBROS — solo cuando la habilidad existe.
+            Se colocan justo encima del diamante de acción.
+        ══════════════════════════════════════════════════ */}
+        {hasDash && (
+          <div style={{
+            position: "absolute",
+            bottom: SAFE_B,
+            right: "22%",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 2, zIndex: 20,
+          }}>
+            {xbBumper(66, 24, "LT", () => pressKey("shift"), () => releaseKey("shift"))}
+            <span style={{ fontSize: 7, color: "rgba(255,255,255,0.32)", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>DASH</span>
           </div>
         )}
+        {hasTBall && (
+          <div style={{
+            position: "absolute",
+            bottom: SAFE_B,
+            right: "8%",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 2, zIndex: 20,
+          }}>
+            {xbBumper(66, 24, "RB", () => { fireTBall(g) }, () => {})}
+            <span style={{ fontSize: 7, color: "rgba(255,255,255,0.32)", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>T-BALL</span>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════
+            IZQUIERDA — D-CROSS estilo Xbox
+            bottom exacto, sin offset vertical falso
+        ══════════════════════════════════════════════════ */}
+        <div style={{
+          position: "absolute",
+          bottom: DPAD_B,
+          left: "15%",
+          transform: "translateX(-50%)",   // ← solo centra en X, NO mueve en Y
+          width: TOTAL, height: TOTAL,
+          touchAction: "none", zIndex: 20,
+        }}>
+          {/* Fondo en forma de cruz */}
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "linear-gradient(145deg,#333 0%,#1C1C1C 100%)",
+            clipPath: `polygon(${ARM}px 0,${ARM+HUB}px 0,${ARM+HUB}px ${ARM}px,${TOTAL}px ${ARM}px,${TOTAL}px ${ARM+HUB}px,${ARM+HUB}px ${ARM+HUB}px,${ARM+HUB}px ${TOTAL}px,${ARM}px ${TOTAL}px,${ARM}px ${ARM+HUB}px,0 ${ARM+HUB}px,0 ${ARM}px,${ARM}px ${ARM}px)`,
+            boxShadow: "0 6px 20px rgba(0,0,0,0.75)",
+          }}/>
+          {/* Contorno SVG */}
+          <svg style={{ position:"absolute",inset:0,overflow:"visible",pointerEvents:"none" }} width={TOTAL} height={TOTAL}>
+            <path d={`M${ARM} 0 H${ARM+HUB} V${ARM} H${TOTAL} V${ARM+HUB} H${ARM+HUB} V${TOTAL} H${ARM} V${ARM+HUB} H0 V${ARM} H${ARM} Z`}
+              fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="1.5"/>
+          </svg>
+          {/* Hub central decorativo */}
+          <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
+            background:"#252525", border:"1px solid rgba(255,255,255,0.09)", pointerEvents:"none"}}/>
+          {/* Brazos */}
+          {dArrow("up",    {left:ARM, top:0,       width:HUB, height:ARM},
+            () => { if (g.tpMenu?.open) navTP(-1); else pressKey("arrowup") },
+            () => { if (!g.tpMenu?.open) releaseKey("arrowup") })}
+          {dArrow("down",  {left:ARM, top:ARM+HUB, width:HUB, height:ARM},
+            () => { if (g.tpMenu?.open) navTP(1);  else pressKey("arrowdown") },
+            () => { if (!g.tpMenu?.open) releaseKey("arrowdown") })}
+
+          {dArrow("left",  {left:0,   top:ARM,     width:ARM, height:HUB},
+            ()=>dpadDown("left","arrowleft"),  ()=>{releaseKey("arrowleft")})}
+          {dArrow("right", {left:ARM+HUB, top:ARM, width:ARM, height:HUB},
+            ()=>dpadDown("right","arrowright"), ()=>{releaseKey("arrowright")})}
+        </div>
+
+        {/* Hint doble-tap debajo del D-pad */}
+        <div style={{
+          position: "absolute",
+          bottom: Math.max(4, DPAD_B - 14),
+          left: "15%", transform: "translateX(-50%)",
+          fontSize: 7, color: "rgba(255,255,255,0.2)",
+          letterSpacing: "0.15em", fontFamily: "'Courier New',monospace",
+          pointerEvents: "none", zIndex: 20,
+        }}>2× ← / → = RUN</div>
+
+        {/* ══════════════════════════════════════════════════
+            DERECHA — DIAMANTE A / B / X / Y estilo Xbox
+            Posición exacta: bottom=ACT_B, right fijo,
+            SIN transform vertical
+        ══════════════════════════════════════════════════ */}
+        <div style={{
+          position: "absolute",
+          bottom: ACT_B,
+          right: "3%",
+          width: ACT_H,
+          height: ACT_H,
+          // ← NO hay transform vertical aquí
+          zIndex: 20,
+        }}>
+          {/* Y — arriba (látigo) */}
+          <div style={{ position:"absolute", top:0, left:"50%", transform:"translateX(-50%)" }}>
+            {xbCircle(Math.round(ACT_H*0.33), XB_COL.Y, "Y", "LÁTIGO",
+              ()=>pressKey("m"), ()=>releaseKey("m"))}
+          </div>
+          {/* X — izquierda (disparo) */}
+          <div style={{ position:"absolute", left:0, top:"50%", transform:"translateY(-55%)" }}>
+            {xbCircle(Math.round(ACT_H*0.33), XB_COL.X, "X", "DISPARO",
+              ()=>pressKey("n"), ()=>releaseKey("n"))}
+          </div>
+          {/* B — derecha (checkpoint / cerrar tpMenu) */}
+          <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-55%)" }}>
+            {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
+              g.tpMenu?.open ? "CERRAR" : "GUARDAR",
+              () => { if (g.tpMenu?.open) { g.tpMenu = null } else activateCheckpoint() }, () => {})}
+          </div>
+          {/* A — abajo (saltar / confirmar tpMenu) — más grande */}
+          <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)" }}>
+            {xbCircle(Math.round(ACT_H*0.40), XB_COL.A, "A",
+              g.tpMenu?.open ? "CONFIRMAR" : "SALTAR",
+              () => { if (g.tpMenu?.open) confirmTP(); else pressKey(" ") },
+              () => { if (!g.tpMenu?.open) releaseKey(" ") })}
+          </div>
+        </div>
       </>
     )
   }
