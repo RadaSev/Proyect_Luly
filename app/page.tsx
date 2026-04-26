@@ -52,7 +52,7 @@ type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
 type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" | "tba" }
 type TBall  = { x: number; y: number; vx: number; vy: number; active: boolean; bounces: number; life: number }
-type Pickup = { id: string; kind: "tball"; x: number; y: number; active: boolean; floatPhase: number }
+type Pickup = { id: string; kind: "tball" | "tball_key"; x: number; y: number; active: boolean; floatPhase: number; spawnTimer?: number }
 type Crate = { id: number; x: number; y: number; w: number; h: number; active: boolean }
 type WorldAnim = { name: string; sub: string; alpha: number; phase: "in" | "hold" | "out"; timer: number }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; r: number; col: string }
@@ -97,7 +97,9 @@ type G = {
   activePower: string | null          // poder seleccionado actualmente
   bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
   // Quest del perrito viejo (NPC en TROW [1,4] de W0)
-  viejoDogState: "waiting" | "quest_active" | "quest_done" | "surprised"
+  viejoDogState: "waiting" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised"
+  tballKeyHeld: boolean          // el jugador lleva la llave dorada
+  questKillBaseline: number      // muertes P1-W0 al momento de aceptar la quest (descontar muertes previas)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -164,6 +166,8 @@ interface LulySave {
   pickedUpItems: string[]             // IDs de pickups recogidos
   bossRewardedCPs: string[]           // IDs de boss-CPs que ya dieron recompensa
   viejoDogState?: string              // estado de quest del perrito viejo
+  tballKeyHeld?: boolean              // jugador lleva la llave dorada
+  questKillBaseline?: number          // muertes P1-W0 al iniciar la quest
 }
 
 function saveGame(g: G): void {
@@ -177,6 +181,8 @@ function saveGame(g: G): void {
       pickedUpItems: g.pickups.filter(p => !p.active).map(p => p.id),
       bossRewardedCPs: [...g.bossRewardedCPs],
       viejoDogState: g.viejoDogState,
+      tballKeyHeld: g.tballKeyHeld,
+      questKillBaseline: g.questKillBaseline,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -274,6 +280,7 @@ function generateWorldMaze(w: number): { H: [number, number][]; V: [number, numb
     const c = Math.floor(rnd() * NC), r = Math.floor(rnd() * (NR - 1))
     const k = `${c},${r}`; if (!vSet.has(k)) { V.push([c, r]); vSet.add(k) }
   }
+
   return { H, V }
 }
 
@@ -306,33 +313,37 @@ const CP_LOCS_P2: [number, number][] = [[2, 5], [6, 5], [1, 7], [5, 7]]
 const CP_LOCS_BOSS: [number, number, "p1" | "ultra" | "p2"][] = [
   [8, 1, "p1"], [4, 4, "ultra"], [8, 7, "p2"]
 ]
-// Muro secreto de la pelota de tenis
-// Sala: World 0, cubículo [0, 2] — columna izquierda, fila 2 (callejón sin salida a la izquierda)
-// El muro falso está PEGADO a la pared límite izquierda de la sala — parece un engrosamiento
-// arquitectónico natural de la pared. No tiene colisión: el jugador la traspasa al presionar
-// contra la pared izquierda y recibe el pickup desde adentro.
-const TBALL_SECRET_C = 0, TBALL_SECRET_R = 2
+// Jaula de la pelota de tenis
+// Sala: World 0, cubículo [6, TROW] — LEJOS de Rex, custodiada por perros guardianes.
+// Los perros robaron la pelota y la encerraron aquí. TROW tiene piso PLANO garantizado.
+// Col 6 de TROW conecta hacia arriba con P1 (TRANSIT_VERT_UP incluye col 6).
+const TBALL_SECRET_C = 6, TBALL_SECRET_R = TROW
 const { x: _TBALL_RX, y: _TBALL_RY } = ro(0, TBALL_SECRET_C, TBALL_SECRET_R)
+// Jaula: 80px ancha, 116px alta, sentada en el piso del corredor TROW
+const _CAGE_H = 116
 const TBALL_WALL = {
-  x: _TBALL_RX + WT,                        // comienza justo donde termina la pared límite real
-  y: _TBALL_RY + Math.floor(RH * 0.22),     // empieza al 22% de altura (no toca el techo)
-  w: WT * 2,                                 // 48 px de ancho — 2 tiles, parece engrosamiento
-  h: Math.floor(RH * 0.65),                 // 65% de alto — baja casi hasta el suelo
+  x: _TBALL_RX + Math.floor(RW * 0.50) - 40,   // al 50% del ancho — centro de la sala
+  y: _TBALL_RY + RH - WT - _CAGE_H,             // bottom = piso del corredor
+  w: 80,
+  h: _CAGE_H,
 }
-// Pickup cerca de la base izquierda del muro (se activa cuando el jugador presiona contra la pared)
+// Pelota en el tercio superior de la jaula (bien visible)
 const TBALL_PICKUP_POS = {
-  x: TBALL_WALL.x + 14,                    // 14 px dentro del muro desde el borde izquierdo
-  y: _TBALL_RY + Math.floor(RH * 0.78),   // altura similar al centro del jugador parado
+  x: TBALL_WALL.x + Math.floor(TBALL_WALL.w / 2),
+  y: TBALL_WALL.y + Math.floor(TBALL_WALL.h * 0.36),
 }
 // Posición y constantes del perrito viejo NPC (World 0, cubículo [1, TROW])
 const VIEJO_DOG_C = 1, VIEJO_DOG_R = TROW
 const { x: _VDX, y: _VDY } = ro(0, VIEJO_DOG_C, VIEJO_DOG_R)
 const VIEJO_DOG_POS = {
-  x: _VDX + Math.floor(RW * 0.28),        // lado izquierdo de la sala, cerca de la entrada
-  y: _VDY + RH - WT - 50,                 // parado sobre el suelo
+  x: _VDX + Math.floor(RW * 0.28),
+  y: _VDY + RH - WT - 10,                  // pies casi en el suelo (10 px de margen)
 }
-const VIEJO_DOG_TALK_R = 115              // radio para activar diálogo
-const TBALL_QUEST_KILLS = 10             // kills de P1 necesarios para que revele el secreto
+const VIEJO_DOG_TALK_R = 115              // radio para diálogo automático
+const VIEJO_DOG_CALLOUT_R = 230          // radio para el "¡Psst!"
+const TBALL_KEY_DROP_CHANCE = 0.20       // 20% de probabilidad por kill (tras 3 kills mínimo)
+const TBALL_KEY_MIN_KILLS = 3            // primeros 3 kills nunca tienen la llave (build-up)
+const TBALL_KEY_FORCE_KILL = 20          // kill 20: drop garantizado si aún no cayó
 type CPDef = { id: string; w: number; c: number; r: number; x: number; y: number; label: string; icon: string; bossKind?: "p1" | "ultra" | "p2" }
 // ALL_CPS se define más abajo, después de getWorldPlats, para poder validar contra plataformas
 const CP_RADIUS = 115  // radio de descubrimiento/uso
@@ -361,6 +372,11 @@ function getEnemySpawns(w: number, c: number, r: number): ES[] {
     if (c === TRANSIT_BOSS_COL) {
       const bHp = [22, 36, 54, 78][w]
       return [[0.5, 0, bHp, spdB * 0.75, cdB * 0.5, true]]
+    }
+    // Perros guardianes de la jaula (solo World 0, sala de la jaula)
+    if (w === 0 && c === TBALL_SECRET_C) {
+      const gHp = [3, 4, 5, 6][w]  // perros débiles pero son guardianes
+      return [[0.25, 0, gHp, spdB * 1.1, cdB * 0.9, false], [0.75, 0, gHp, spdB * 1.1, cdB * 0.9, false]]
     }
     return []  // resto del corredor vacío
   }
@@ -477,17 +493,34 @@ function computeDoors(w: number, c: number, r: number): { L: boolean; R: boolean
   const en = WORLD_ENTRIES[w]
   if (en && en[0] === c && en[1] === r) d.L = true
 
-  // ★ Garantizar acceso directo (col7↔col8) para todas las salas de col8 no-boss.
-  //   Así, aunque la sala del jefe quede sellada, los demás cuartos de col8 son alcanzables.
+  // ★ Garantizar acceso directo para salas cercanas al boss, evitando deadlocks de conectividad.
+  //   La fila TROW corta el laberinto en P1/P2; algunos clusters de col6-col8 quedan aislados
+  //   (solo accesibles desde la sala del jefe sellada). Se garantizan puertas explícitas:
+  //   col8↔col7↔col6 para toda fila no-boss en P1 y P2.
   const [p1c_d, p1r_d] = WORLD_P1_BOSS[w]
   const [p2c_d, p2r_d] = WORLD_P2_BOSS[w]
   if (r < TROW) {
-    if (c === p1c_d && r !== p1r_d) d.L = true      // col8 Part1 no-boss → abrir izquierda
-    if (c === p1c_d - 1 && r !== p1r_d) d.R = true  // col7 Part1 no-boss → abrir derecha (coincide)
+    if (c === p1c_d     && r !== p1r_d) d.L = true  // col8 P1 no-boss → izquierda
+    if (c === p1c_d - 1 && r !== p1r_d) d.R = true  // col7 P1 no-boss → derecha
+    if (c === p1c_d - 1 && r !== p1r_d) d.L = true  // col7 P1 no-boss → también izquierda (←col6)
+    if (c === p1c_d - 2 && r !== p1r_d) d.R = true  // col6 P1 no-boss → derecha (→col7)
   }
   if (r > TROW) {
-    if (c === p2c_d && r !== p2r_d) d.L = true      // col8 Part2 no-boss → abrir izquierda
-    if (c === p2c_d - 1 && r !== p2r_d) d.R = true  // col7 Part2 no-boss → abrir derecha (coincide)
+    if (c === p2c_d     && r !== p2r_d) d.L = true  // col8 P2 no-boss → izquierda
+    if (c === p2c_d - 1 && r !== p2r_d) d.R = true  // col7 P2 no-boss → derecha
+    if (c === p2c_d - 1 && r !== p2r_d) d.L = true  // col7 P2 no-boss → también izquierda (←col6)
+    if (c === p2c_d - 2 && r !== p2r_d) d.R = true  // col6 P2 no-boss → derecha (→col7)
+  }
+
+  // ★ Garantizar conectividad total: fila de entrada (TROW±1) y fila límite (0 / NR-1)
+  //   se conectan horizontalmente en su totalidad, eliminando cualquier cluster aislado.
+  if (r < TROW) {
+    if (r === TROW - 1) { if (c > 0) d.L = true; if (c < NC - 1) d.R = true }  // fila 3 — completa
+    if (r === 0)        { if (c > 0) d.L = true; if (c < NC - 1) d.R = true }  // fila 0 — completa
+  }
+  if (r > TROW) {
+    if (r === TROW + 1) { if (c > 0) d.L = true; if (c < NC - 1) d.R = true }  // fila 5 — completa
+    if (r === NR - 1)   { if (c > 0) d.L = true; if (c < NC - 1) d.R = true }  // fila 8 — completa
   }
 
   return d
@@ -1108,11 +1141,20 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
       const eW = boss ? BW : EW
       const eH = boss ? BH : EH
 
-      const safeRanges = getSafeSpawnRangesX(w, c, r, eW)
+      // Para jefes: ignorar exclusión de shafts (su sala siempre tiene espacio suficiente)
+      // y validar posición al nivel del PISO en vez del canal (chanBot puede estar
+      // cerca del techo en salas como [8,1], bloqueando todos los intentos).
+      const rawRanges = getSafeSpawnRangesX(w, c, r, eW)
+      const safeRanges = boss
+        ? [{ x0: x0 + WT + 4, x1: x0 + RW - WT - eW - 4 }]  // ancho completo para bosses
+        : rawRanges
       if (safeRanges.length === 0) return
 
       const totalW = safeRanges.reduce((acc, s) => acc + (s.x1 - s.x0), 0)
       if (totalW <= 0) return
+
+      // testY para validación: para jefes usar el piso real; para normales usar chanBot
+      const spawnTestY = boss ? (y0 + RH - WT - eH + EN_HBT - 4) : (chanBot - eH + EN_HBT)
 
       let ex = -1, tries = 0
       while (tries < 30) {
@@ -1126,26 +1168,32 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         const tooClose = usedX.some(ux => Math.abs(ux - candidate) < eW * 1.6)
         if (!tooClose) {
           const testX = candidate + EN_HBX
-          const testY = chanBot - eH + EN_HBT
           const testW = eW - 2 * EN_HBX
           const testH = eH - EN_HBT
           // Solo verifica colisión con plats del mundo actual
           const inside = worldPlats.some(p =>
             p.mode === "s" &&
             testX < p.x + p.w && testX + testW > p.x &&
-            testY < p.y + p.h && testY + testH > p.y
+            spawnTestY < p.y + p.h && spawnTestY + testH > p.y
           )
           if (!inside) { ex = candidate; break }
         }
         tries++
       }
       if (ex < 0) {
-        dead.add(`${rid(w, c, r)}_${i}`)  // spawn fantasma: nunca existió, nunca puede morir
-        return
+        if (boss) {
+          // Fallback seguro para jefes: centro de la sala
+          ex = x0 + Math.floor(RW / 2) - Math.floor(eW / 2)
+        } else {
+          dead.add(`${rid(w, c, r)}_${i}`)  // spawn fantasma: nunca existió, nunca puede morir
+          return
+        }
       }
 
       usedX.push(ex)
-      const safeFloor = chanBot - eH - 2
+      // Jefes: siempre en el piso real de la sala (chanBot puede estar muy arriba si
+      // la única puerta está en el techo, dejando al boss fuera del viewport).
+      const safeFloor = boss ? (y0 + RH - WT - eH - 4) : (chanBot - eH - 2)
       const tunLeft = x0 + WT + 6
       const tunRight = x0 + RW - WT - eW - 6
 
@@ -1234,6 +1282,8 @@ function mkG_lazy(): G {
     activePower: null,
     bossRewardedCPs: new Set<string>(),
     viejoDogState: "waiting",
+    tballKeyHeld: false,
+    questKillBaseline: 0,
   } as G
 }
 
@@ -1376,21 +1426,55 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
   if (e.boss) triggerShake(g, 14, 0.6)
   else triggerShake(g, 3, 0.12)
   // ── Desbloqueo de habilidades al matar boss ─────────────────────────
+  // Solo el ultra-jefe [TRANSIT_BOSS_COL, TROW] = [4,4] otorga la habilidad del mundo.
   if (e.boss) {
-    if (originalWorld === 0 && !g.abilities.has("dash")) {
-      g.abilities.add("dash")
-      g.abilityNotif = { text: "DASH  [SHIFT / LT]", timer: 4.0 }
-    } else if (originalWorld === 1 && !g.abilities.has("walljump")) {
-      g.abilities.add("walljump")
-      g.abilityNotif = { text: "SALTO EN PARED  [← / → + SALTO]", timer: 4.0 }
-    } else if (originalWorld === 2 && !g.abilities.has("hpup")) {
-      g.abilities.add("hpup")
-      g.pl.maxHp = Math.min(g.pl.maxHp + 1, 6)
-      g.pl.hp = Math.min(g.pl.hp + 1, g.pl.maxHp)
-      g.abilityNotif = { text: "VIDA MÁXIMA +1  ❤", timer: 4.0 }
+    const bParts = e.originalId.split("_")
+    const bC = parseInt(bParts[1]), bR = parseInt(bParts[2])
+    const isUltraBoss = bC === TRANSIT_BOSS_COL && bR === TROW
+    if (isUltraBoss) {
+      if (originalWorld === 0 && !g.abilities.has("dash")) {
+        g.abilities.add("dash")
+        g.abilityNotif = { text: "DASH  [SHIFT / LT]", timer: 4.0 }
+      } else if (originalWorld === 1 && !g.abilities.has("walljump")) {
+        g.abilities.add("walljump")
+        g.abilityNotif = { text: "SALTO EN PARED  [← / → + SALTO]", timer: 4.0 }
+      } else if (originalWorld === 2 && !g.abilities.has("hpup")) {
+        g.abilities.add("hpup")
+        g.pl.maxHp = Math.min(g.pl.maxHp + 1, 6)
+        g.pl.hp = Math.min(g.pl.hp + 1, g.pl.maxHp)
+        g.abilityNotif = { text: "VIDA MÁXIMA +1  ❤", timer: 4.0 }
+      }
     }
   }
   checkWorldClear(g, originalWorld)
+
+  // ── Quest media llave: drop de llave en P1-W0 ──────────────────────────────
+  // Caso A: quest activa → drop aleatorio con escalada de probabilidad
+  // Caso B: sin quest (waiting) → drop garantizado al morir el ÚLTIMO enemigo regular P1-W0
+  if (!e.boss && e.world === 0 && (g.viejoDogState === "quest_active" || g.viejoDogState === "waiting")) {
+    const eRow = Math.floor(e.y / RH)
+    if (eRow < TROW) {
+      const noQuestLastKill = g.viejoDogState === "waiting" && areRegularP1EnemiesDead(g, 0)
+      const killsSince = Math.max(0, countP1KillsW0(g.dead) - g.questKillBaseline)
+      const forceDropNow = noQuestLastKill || killsSince >= TBALL_KEY_FORCE_KILL
+      const canDrop = killsSince >= TBALL_KEY_MIN_KILLS
+      if (forceDropNow || (canDrop && Math.random() < TBALL_KEY_DROP_CHANCE)) {
+        g.viejoDogState = "key_dropped"
+        const keyDir = g.pl.x < e.x + e.w / 2 ? 1 : -1
+        g.pickups.push({
+          id: "tball_key", kind: "tball_key",
+          x: e.x + e.w / 2 + keyDir * 120,
+          y: e.y + e.h * 0.2,   // ligeramente por encima del suelo del enemigo
+          active: true, floatPhase: 0,
+          spawnTimer: 1.0        // 1s antes de que sea recogible
+        })
+        spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FFD700", "#FFA500", "#FFFFFF", "#FFE066"], 18, 5, true)
+        triggerShake(g, 8, 0.5)
+        g.abilityNotif = { text: "¡MEDIA LLAVE! ¡Llévala a Rex el Viejo!", timer: 5.5 }
+        saveGame(g)
+      }
+    }
+  }
 }
 
 // Helper global para saber si un spawn está muerto (tolerante a adopciones)
@@ -1413,6 +1497,7 @@ function checkWorldClear(g: G, w: number) {
 
 // Helper: todos los enemigos NORMALES de la Part1 (rows 0..TROW-1) están muertos
 function areRegularP1EnemiesDead(g: G, w: number): boolean {
+  if (g.noEnemies) return true   // modo dev sin enemigos → puertas de boss abiertas
   const [p1c, p1r] = WORLD_P1_BOSS[w]
   for (let c = 0; c < NC; c++) for (let r = 0; r < TROW; r++) {
     if (c === p1c && r === p1r) continue  // ignorar sala boss P1
@@ -1426,6 +1511,7 @@ function areRegularP1EnemiesDead(g: G, w: number): boolean {
 
 // Helper: todos los enemigos NORMALES de la Part2 (rows TROW+1..NR-1) están muertos
 function areRegularP2EnemiesDead(g: G, w: number): boolean {
+  if (g.noEnemies) return true   // modo dev sin enemigos → puertas de boss abiertas
   const [p2c, p2r] = WORLD_P2_BOSS[w]
   for (let c = 0; c < NC; c++) for (let r = TROW + 1; r < NR; r++) {
     if (c === p2c && r === p2r) continue  // ignorar sala boss P2
@@ -1637,12 +1723,10 @@ function tickPlayer(g: G) {
   }
   if (!k["m"]) p.wh = false
   if (p.inv > 0) p.inv -= STEP
-  if (g.infiniteAmmo) { p.ammo = 15; p.stamina = p.maxStamina; p.exhausted = false; p.staminaCooldown = 0 }
+  if (g.infiniteAmmo) { p.ammo = 15; p.stamina = p.maxStamina; p.exhausted = false; p.staminaCooldown = 0; if (g.abilities.has("tball")) g.tballAmmo = TB_AMMO_MAX }
 }
 
 function tickEnemies(g: G, now: number) {
-  if (g.noEnemies) return
-
   const p = g.pl
   const phx = p.x + PL_HBX + 4, phy = p.y + PL_HBT + 4, phw = p.w - 2 * PL_HBX - 8, phh = p.h - PL_HBT - 8
   const dt = STEP * 1000
@@ -1680,6 +1764,7 @@ function tickEnemies(g: G, now: number) {
 
   for (const e of g.enemies) {
     if (!e.active) continue
+    if (g.noEnemies && !e.boss) continue  // noEnemies: solo tickean bosses
 
     // ── Animación de muerte ──────────────────────────────────────────
     if (e.dying) {
@@ -2393,16 +2478,21 @@ function tickViejoDog(g: G) {
   if (g.viejoDogState === "waiting") {
     // Primera vez que el jugador se acerca
     if (g.abilities.has("tball")) {
-      g.viejoDogState = "surprised"   // ya encontró la pelota solo
+      g.viejoDogState = "surprised"   // ya encontró la pelota sola
     } else {
       g.viejoDogState = "quest_active"
+      // Registrar el baseline de muertes para contar SOLO las de esta quest
+      g.questKillBaseline = countP1KillsW0(g.dead)
     }
-  } else if (g.viejoDogState === "quest_active") {
-    // Chequear si ya mató suficientes perros de P1
-    if (countP1KillsW0(g.dead) >= TBALL_QUEST_KILLS) {
-      g.viejoDogState = "quest_done"
-      saveGame(g)
-    }
+  } else if (g.viejoDogState === "key_held" && g.tballKeyHeld) {
+    // El jugador lleva la media llave y se acerca a Rex
+    // Rex tiene la otra mitad → juntas abren la jaula
+    g.viejoDogState = "cage_opened"
+    g.tballKeyHeld = false
+    spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FFD700", "#FFA500", "#FFFFFF", "#FFEE88"], 28, 5, true)
+    triggerShake(g, 9, 0.55)
+    g.abilityNotif = { text: "¡Rex tiene la otra mitad! La jaula de su pelota está abierta", timer: 6.0 }
+    saveGame(g)
   }
 }
 
@@ -2412,20 +2502,33 @@ function tickPickups(g: G) {
   for (const pk of g.pickups) {
     if (!pk.active) continue
     pk.floatPhase += STEP * 2.4  // oscilación de flotación
+    // Countdown de inmunidad al spawn (evita recoger inmediatamente)
+    if (pk.spawnTimer !== undefined && pk.spawnTimer > 0) {
+      pk.spawnTimer = Math.max(0, pk.spawnTimer - STEP)
+      continue
+    }
     // Colisión con el jugador (hitbox generosa)
     const dx = p.x + p.w / 2 - pk.x, dy = p.y + p.h / 2 - pk.y
     if (Math.sqrt(dx * dx + dy * dy) < 70) {
       pk.active = false
       if (pk.kind === "tball" && !g.abilities.has("tball")) {
+        // La pelota solo se puede recoger cuando la jaula está abierta
+        if (g.viejoDogState !== "cage_opened") {
+          pk.active = true   // re-activar, la jaula sigue cerrada
+          continue
+        }
         g.abilities.add("tball")
         g.tballAmmo = TB_AMMO_INIT
         g.activePower = "tball"
         g.abilityNotif = { text: "🎾 PELOTA REBOTANTE — 5 balas  [V / botón 🎾]", timer: 5.5 }
         spawnExplosion(g, pk.x, pk.y, ["#CCFF00", "#88FF44", "#FFFFFF", "#FFFF00"], 18, 5)
-        // Si el jugador encontró la pelota antes de hablar con el perrito viejo
-        if (g.viejoDogState === "waiting" || g.viejoDogState === "quest_active") {
-          g.viejoDogState = "surprised"
-        }
+        saveGame(g)
+      } else if (pk.kind === "tball_key" && !g.tballKeyHeld) {
+        // El jugador recoge la media llave
+        g.tballKeyHeld = true
+        g.viejoDogState = "key_held"
+        g.abilityNotif = { text: "½ Llave recogida — ¡Llévala a Rex! Él tiene la otra mitad", timer: 5.0 }
+        spawnExplosion(g, pk.x, pk.y, ["#FFD700", "#FFA500", "#FFFFFF", "#FFE066"], 12, 4)
         saveGame(g)
       }
     }
@@ -2445,7 +2548,7 @@ const TB_AMMO_DROP = 3   // cuánta munición da un drop de caja
 
 function fireTBall(g: G) {
   if (!g.abilities.has("tball")) return
-  if (g.tballAmmo <= 0) return   // sin munición
+  if (!g.infiniteAmmo && g.tballAmmo <= 0) return   // sin munición (salvo ammo∞)
   if (g.tBalls.filter(b => b.active).length >= TB_MAX_SIMULTANEOUS) return
   const p = g.pl
   const dx = g.keys["arrowright"] || g.keys["d"] ? 1 : g.keys["arrowleft"] || g.keys["a"] ? -1 : p.facing
@@ -2454,7 +2557,7 @@ function fireTBall(g: G) {
   const px = p.x + (p.facing === 1 ? p.w + 4 : -TB_R * 2 - 4)
   const py = p.y + p.h * 0.4
   g.tBalls.push({ x: px, y: py, vx: (dx / len) * TB_SPD, vy: (dy / len) * TB_SPD, active: true, bounces: TB_MAX_BOUNCES, life: TB_MAX_LIFE })
-  g.tballAmmo--
+  if (!g.infiniteAmmo) g.tballAmmo--
   spawnExplosion(g, px, py, ["#CCFF00", "#88FF44"], 4, 1.5)
 }
 
@@ -2688,6 +2791,13 @@ function applyLoad(g: G, s: LulySave): void {
   if (s.pickedUpItems) for (const id of s.pickedUpItems) { const p = g.pickups.find(pk => pk.id === id); if (p) p.active = false }
   g.bossRewardedCPs = new Set(s.bossRewardedCPs || [])
   g.viejoDogState = (s.viejoDogState as G["viejoDogState"]) || "waiting"
+  g.tballKeyHeld = s.tballKeyHeld ?? false
+  g.questKillBaseline = s.questKillBaseline ?? 0
+  // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
+  if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
+    // Ubicar llave cerca de donde está la jaula (pickup secundario de emergencia)
+    g.pickups.push({ id: "tball_key", kind: "tball_key", x: TBALL_PICKUP_POS.x + 80, y: TBALL_PICKUP_POS.y, active: true, floatPhase: 0 })
+  }
   // Restaurar poder activo según habilidades guardadas
   if (g.abilities.has("tball")) g.activePower = "tball"
   // Reload worlds with the restored dead set
@@ -2724,6 +2834,18 @@ function tickCamera(g: G) {
   const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
   const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
   g.explored.add(`${curW}_${curC}_${curR}`)
+  // Revelar salas de jefes en el mapa en cuanto se abran sus puertas
+  if (areRegularP1EnemiesDead(g, curW)) {
+    const [p1c, p1r] = WORLD_P1_BOSS[curW]
+    g.explored.add(`${curW}_${p1c}_${p1r}`)
+  }
+  if (areRegularP2EnemiesDead(g, curW)) {
+    const [p2c, p2r] = WORLD_P2_BOSS[curW]
+    g.explored.add(`${curW}_${p2c}_${p2r}`)
+  }
+  if (isPart1BossDead(g, curW) && isPart2BossDead(g, curW)) {
+    g.explored.add(`${curW}_${TRANSIT_BOSS_COL}_${TROW}`)
+  }
   if (curW !== g.lastWorld) {
     activateWorld(g, curW)
     g.lastWorld = curW
@@ -2815,6 +2937,22 @@ function tick(g: G) {
 type SprBank = Record<string, HTMLImageElement | null>
 function getWorldAtX(cx: number) { return Math.max(0, Math.min(Math.floor((cx + CW / 2) / (NC * RW)), NW - 1)) }
 
+// Ilumina SOLO el área de la sala del jefe en pantalla — sin tinte de color,
+// sólo quita el negro aumentando el brillo del rectángulo de esa sala.
+function _drawBossAmbient(ctx: CanvasRenderingContext2D, g: G) {
+  const bCurW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
+  const bCurC = Math.max(0, Math.min(Math.floor((g.pl.x % (NC * RW)) / RW), NC - 1))
+  const bCurR = Math.max(0, Math.min(Math.floor(g.pl.y / RH), NR - 1))
+  if (!isBossRoom(bCurW, bCurC, bCurR)) return
+  // Rectángulo de la sala en coordenadas de pantalla
+  const { x: rx, y: ry } = ro(bCurW, bCurC, bCurR)
+  const srx = Math.floor(rx - g.cx), sry = Math.floor(ry - g.cy)
+  // Capa de aclarado neutral (blanco semitransparente) SOLO sobre esa sala
+  const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.0012)
+  ctx.fillStyle = `rgba(255,255,255,${(0.10 + 0.04 * pulse).toFixed(3)})`
+  ctx.fillRect(srx, sry, RW, RH)
+}
+
 function drawBg(ctx: CanvasRenderingContext2D, g: G) {
   const wi = getWorldAtX(g.cx), th = THEMES[wi]
   ctx.fillStyle = th.bg0
@@ -2832,6 +2970,7 @@ function drawBg(ctx: CanvasRenderingContext2D, g: G) {
     }
     ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, 0, CW, CH)
     ctx.fillStyle = th.fog + "55"; ctx.fillRect(0, 0, CW, CH)
+    _drawBossAmbient(ctx, g)
     return
   }
 
@@ -2961,6 +3100,7 @@ function drawBg(ctx: CanvasRenderingContext2D, g: G) {
   }
 
   ctx.fillStyle = th.fog + "88"; ctx.fillRect(0, 0, CW, CH)
+  _drawBossAmbient(ctx, g)
 
   if (g.gfx >= 2) {
     ctx.strokeStyle = "rgba(0,0,0,0.05)"; ctx.lineWidth = 1
@@ -3252,77 +3392,223 @@ function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: numb
   }
 }
 
-// ── Muro secreto + pickup de habilidad ───────────────────────────────────────
+// ── Pickup: MEDIA llave (dibujado antes de paredes) ─────────────────────────
+// Es solo la mitad derecha de una llave: varilla + dientes sin el arco/mango.
+// Rex tiene la otra mitad (el mango/arco) — juntas abren la jaula.
 function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
   const { cx, cy } = g, t = Date.now() * 0.001
-  const tbPickup = g.pickups.find(p => p.id === "tball_w0")
-
-  // ── Calcular desvanecimiento del muro según proximidad del jugador ────────
-  // El muro se desvanece progresivamente cuando el jugador se acerca a la pared izquierda
-  // (el jugador presiona ←, su borde derecho se acerca a TBALL_WALL.x)
-  let wallAlpha = 1.0
-  if (tbPickup?.active) {
-    // El jugador está en la misma sala vertical (mismo rango Y de la sala)
-    const inSameRow = g.pl.y >= _TBALL_RY && g.pl.y < _TBALL_RY + RH
-    if (inSameRow) {
-      // distancia entre el borde derecho del jugador y el borde izquierdo del muro falso
-      const plRight = g.pl.x + PW
-      const fadeStart = 90  // empieza a desvanecerse a 90px del muro
-      const dist = Math.max(0, TBALL_WALL.x - plRight)  // 0 cuando el jugador "toca" el muro
-      wallAlpha = dist >= fadeStart ? 1.0 : Math.max(0.06, dist / fadeStart)
-    }
-  }
-
-  // ── 1. Pelota flotante PRIMERO (bajo el muro, se hace visible al desvanecer) ─
   for (const pk of g.pickups) {
-    if (!pk.active) continue
-    const sx = pk.x - cx, sy = pk.y - cy + Math.sin(pk.floatPhase) * 5
-    if (sx < -60 || sx > CW + 60 || sy < -60 || sy > CH + 60) continue
+    if (!pk.active || pk.kind !== "tball_key") continue
+    const floatY = Math.sin(pk.floatPhase) * 6
+    const sx = pk.x - cx, sy = pk.y - cy + floatY
+    if (sx < -80 || sx > CW + 80 || sy < -80 || sy > CH + 80) continue
+    ctx.save()
 
-    if (pk.kind === "tball") {
-      // Visibilidad inversa al muro — más visible cuanto más desvanecido está el muro
-      const ballAlpha = Math.max(0.05, 1.0 - wallAlpha * 0.82)
-      ctx.save(); ctx.globalAlpha = ballAlpha
-      // Halo
-      const halo = ctx.createRadialGradient(sx, sy, 3, sx, sy, 30)
-      halo.addColorStop(0, "rgba(180,255,60,0.5)"); halo.addColorStop(1, "rgba(100,220,0,0)")
-      ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(sx, sy, 30, 0, Math.PI * 2); ctx.fill()
-      // Pelota
-      const ballGrad = ctx.createRadialGradient(sx - 3, sy - 3, 1, sx, sy, 12)
-      ballGrad.addColorStop(0, "#DDFF44"); ballGrad.addColorStop(0.5, "#88CC00"); ballGrad.addColorStop(1, "#446600")
-      ctx.fillStyle = ballGrad; ctx.beginPath(); ctx.arc(sx, sy, 12, 0, Math.PI * 2); ctx.fill()
-      // Líneas de tenis
-      ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.5
-      ctx.beginPath(); ctx.arc(sx, sy, 12, -0.8, 0.8); ctx.stroke()
-      ctx.beginPath(); ctx.arc(sx, sy, 12, Math.PI - 0.8, Math.PI + 0.8); ctx.stroke()
-      // Etiqueta (solo cuando el muro está muy desvanecido)
-      if (wallAlpha < 0.3) {
-        ctx.globalAlpha = (0.3 - wallAlpha) / 0.3
-        ctx.fillStyle = "#CCFF88"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("¡PODER!", sx, sy - 22); ctx.textAlign = "left"
+    // Halo dorado
+    const haloK = ctx.createRadialGradient(sx, sy, 2, sx, sy, 30)
+    haloK.addColorStop(0, "rgba(255,220,0,0.65)"); haloK.addColorStop(1, "rgba(255,140,0,0)")
+    ctx.fillStyle = haloK; ctx.beginPath(); ctx.arc(sx, sy, 30, 0, Math.PI * 2); ctx.fill()
+
+    // ── MEDIA LLAVE: solo la varilla + dientes (sin mango circular) ──
+    // La "fractura" se indica con un corte dentado en el extremo izquierdo.
+    ctx.strokeStyle = "#FFD700"; ctx.lineWidth = 3.5; ctx.lineCap = "round"; ctx.lineJoin = "round"
+    // Varilla horizontal (de izquierda a derecha)
+    ctx.beginPath(); ctx.moveTo(sx - 10, sy); ctx.lineTo(sx + 12, sy); ctx.stroke()
+    // Extremo izquierdo roto (línea dentada = fractura)
+    ctx.strokeStyle = "#FFC000"; ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(sx - 10, sy - 3); ctx.lineTo(sx - 7, sy + 2)
+    ctx.lineTo(sx - 9, sy - 1); ctx.lineTo(sx - 6, sy + 3)
+    ctx.stroke()
+    // Dientes (mordeduras hacia arriba, en el extremo derecho)
+    ctx.strokeStyle = "#FFD700"; ctx.lineWidth = 3.5; ctx.lineCap = "round"
+    ctx.beginPath(); ctx.moveTo(sx + 4, sy); ctx.lineTo(sx + 4, sy - 7); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(sx + 9, sy); ctx.lineTo(sx + 9, sy - 5); ctx.stroke()
+    // Punta final
+    ctx.beginPath(); ctx.moveTo(sx + 12, sy); ctx.lineTo(sx + 12, sy - 3); ctx.stroke()
+    // Reborde de la varilla (brillo)
+    ctx.strokeStyle = "#FFF0AA"; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(sx - 9, sy - 1.5); ctx.lineTo(sx + 12, sy - 1.5); ctx.stroke()
+
+    // Borde de fractura rojo (resalta que está rota)
+    ctx.strokeStyle = "#FF4400"; ctx.lineWidth = 1.2
+    ctx.beginPath(); ctx.moveTo(sx - 10, sy - 4); ctx.lineTo(sx - 10, sy + 4); ctx.stroke()
+
+    // Etiqueta pulsante
+    const pulseK = 0.65 + 0.35 * Math.sin(t * 4)
+    ctx.globalAlpha = pulseK
+    ctx.fillStyle = "#FFE066"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText("½ LLAVE", sx, sy - 20)
+    ctx.fillStyle = "#FFA050"; ctx.font = "7px 'Courier New',monospace"
+    ctx.fillText("lleva a Rex", sx, sy - 10)
+    ctx.textAlign = "left"
+    ctx.restore()
+  }
+}
+
+// ── Jaula + pelota — dibujada DESPUÉS de drawWalls para quedar encima de tiles ──
+function drawCage(ctx: CanvasRenderingContext2D, g: G) {
+  const tbPickup = g.pickups.find(p => p.id === "tball_w0")
+  if (!tbPickup?.active) return   // ya recogida, nada que dibujar
+
+  const { cx, cy } = g, t = Date.now() * 0.001
+  const cageOpen = g.viejoDogState === "cage_opened"
+
+  const sx = TBALL_WALL.x - cx
+  const sy = TBALL_WALL.y - cy
+  const cw2 = TBALL_WALL.w, ch2 = TBALL_WALL.h
+
+  if (sx + cw2 < -80 || sx > CW + 80 || sy + ch2 < -80 || sy > CH + 80) return
+
+  const cx2 = sx + cw2 / 2   // centro X de la jaula en pantalla
+  const ballY = sy + ch2 * 0.42 + Math.sin(tbPickup.floatPhase) * 5
+
+  ctx.save()
+
+  if (cageOpen) {
+    // ── Jaula ABIERTA: barras dobladas hacia los lados (NO hacia abajo) ────
+    // Las barras se abren como una puerta — la mitad izq. se dobla a la izq,
+    // la mitad der. a la derecha. Así nunca atraviesan el suelo del juego.
+    ctx.strokeStyle = "#788A9A"; ctx.lineWidth = 3; ctx.lineCap = "round"
+    const half = Math.floor(cw2 / 2)
+    for (let i = 0; i < 5; i++) {
+      // Lado izquierdo — barras dobladas hacia la izquierda
+      const lx = sx + 4 + i * (half / 5)
+      ctx.save(); ctx.globalAlpha = 0.5
+      ctx.translate(lx, sy + 4)
+      ctx.rotate(-(0.5 + i * 0.12))   // rotan hacia la izquierda
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, ch2 * 0.7); ctx.stroke()
+      ctx.restore()
+      // Lado derecho — barras dobladas hacia la derecha
+      const rx = sx + cw2 - 4 - i * (half / 5)
+      ctx.save(); ctx.globalAlpha = 0.5
+      ctx.translate(rx, sy + 4)
+      ctx.rotate(0.5 + i * 0.12)      // rotan hacia la derecha
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, ch2 * 0.7); ctx.stroke()
+      ctx.restore()
+    }
+    // Marco superior roto (partido al centro)
+    ctx.globalAlpha = 0.55; ctx.strokeStyle = "#8A9AAA"; ctx.lineWidth = 4
+    ctx.beginPath(); ctx.moveTo(sx + 2, sy); ctx.lineTo(sx + cw2 * 0.35, sy); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(sx + cw2 * 0.65, sy); ctx.lineTo(sx + cw2 - 2, sy); ctx.stroke()
+    // Postes laterales del marco aún en pie
+    ctx.strokeStyle = "#7A8A9A"; ctx.lineWidth = 4
+    ctx.beginPath(); ctx.moveTo(sx + 2, sy); ctx.lineTo(sx + 2, sy + ch2); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(sx + cw2 - 2, sy); ctx.lineTo(sx + cw2 - 2, sy + ch2); ctx.stroke()
+    ctx.globalAlpha = 1
+
+  } else {
+    // ── Jaula CERRADA ──────────────────────────────────────────────────────
+
+    // Sombra debajo de la jaula
+    ctx.fillStyle = "rgba(0,0,0,0.35)"
+    ctx.beginPath(); ctx.ellipse(cx2, sy + ch2 + 4, cw2 * 0.55, 6, 0, 0, Math.PI * 2); ctx.fill()
+
+    // Fondo interior oscuro
+    ctx.fillStyle = "rgba(0,0,0,0.55)"
+    ctx.fillRect(sx + 3, sy + 3, cw2 - 6, ch2 - 6)
+
+    // Marco exterior — hierro grueso oxidado
+    const frameGrad = ctx.createLinearGradient(sx, sy, sx + cw2, sy + ch2)
+    frameGrad.addColorStop(0, "#7A8E9E"); frameGrad.addColorStop(0.5, "#4A6070"); frameGrad.addColorStop(1, "#5A7080")
+    ctx.strokeStyle = frameGrad; ctx.lineWidth = 5; ctx.lineJoin = "miter"
+    ctx.strokeRect(sx + 1, sy + 1, cw2 - 2, ch2 - 2)
+
+    // Refuerzo horizontal doble
+    const midY = sy + ch2 * 0.48
+    ctx.strokeStyle = "#5A6E7E"; ctx.lineWidth = 3
+    ctx.beginPath(); ctx.moveTo(sx + 3, midY); ctx.lineTo(sx + cw2 - 3, midY); ctx.stroke()
+    ctx.strokeStyle = "#6A7E8E"; ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.moveTo(sx + 3, midY + 4); ctx.lineTo(sx + cw2 - 3, midY + 4); ctx.stroke()
+
+    // Barras verticales
+    const barSpacing = 9
+    const barCount = Math.floor((cw2 - 6) / barSpacing)
+    for (let i = 1; i <= barCount; i++) {
+      const bx2 = sx + 3 + i * barSpacing
+      ctx.strokeStyle = "#6A7E90"; ctx.lineWidth = 2.5; ctx.lineCap = "butt"
+      ctx.beginPath(); ctx.moveTo(bx2, sy + 3); ctx.lineTo(bx2, sy + ch2 - 3); ctx.stroke()
+      // Reflejos en las barras
+      ctx.strokeStyle = "rgba(200,230,255,0.12)"; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(bx2 - 0.5, sy + 5); ctx.lineTo(bx2 - 0.5, sy + ch2 - 5); ctx.stroke()
+      // Remaches alternos
+      if (i % 2 === 0) {
+        ctx.fillStyle = "#7A9AAA"
+        ctx.beginPath(); ctx.arc(bx2, sy + ch2 * 0.22, 2.5, 0, Math.PI * 2); ctx.fill()
+        ctx.beginPath(); ctx.arc(bx2, sy + ch2 * 0.74, 2.5, 0, Math.PI * 2); ctx.fill()
       }
-      ctx.restore()
     }
+
+    // ── Candado central ─────────────────────────────────────────────────
+    const lkX = cx2, lkY = midY + 1
+    // Sombra
+    ctx.fillStyle = "rgba(0,0,0,0.5)"
+    ctx.beginPath(); ctx.roundRect(lkX - 11, lkY - 7, 22, 16, 3); ctx.fill()
+    // Cuerpo
+    const lkG = ctx.createLinearGradient(lkX - 10, lkY - 6, lkX + 10, lkY + 8)
+    lkG.addColorStop(0, "#9A7E50"); lkG.addColorStop(1, "#5A3E20")
+    ctx.fillStyle = lkG
+    ctx.beginPath(); ctx.roundRect(lkX - 10, lkY - 6, 20, 14, 3); ctx.fill()
+    ctx.strokeStyle = "#7A5E30"; ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.roundRect(lkX - 10, lkY - 6, 20, 14, 3); ctx.stroke()
+    // Ojo
+    ctx.fillStyle = "#2A1800"
+    ctx.beginPath(); ctx.arc(lkX, lkY + 2, 3.5, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = "#4A3010"; ctx.beginPath(); ctx.arc(lkX, lkY + 2, 1.5, 0, Math.PI * 2); ctx.fill()
+    // Arco
+    ctx.strokeStyle = "#8A6E40"; ctx.lineWidth = 3.5; ctx.lineCap = "round"
+    ctx.beginPath(); ctx.arc(lkX, lkY - 6, 6.5, Math.PI, 0); ctx.stroke()
+
+    // Glow según estado
+    const questActive = g.viejoDogState === "quest_active" || g.viejoDogState === "key_dropped"
+    const keyHeld = g.viejoDogState === "key_held"
+    const waitState = g.viejoDogState === "waiting"
+    if (keyHeld) {
+      const glow = 0.18 + 0.1 * Math.sin(t * 5)
+      ctx.fillStyle = `rgba(255,210,0,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
+      ctx.strokeStyle = `rgba(255,230,0,${glow * 2.2})`; ctx.lineWidth = 2.5
+      ctx.strokeRect(sx + 2, sy + 2, cw2 - 4, ch2 - 4)
+    } else if (questActive) {
+      const glow = 0.06 + 0.03 * Math.sin(t * 2.2)
+      ctx.fillStyle = `rgba(255,100,0,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
+    } else if (!waitState) {
+      // "quest_done", "surprised" — verde sutil
+      const glow = 0.04 + 0.02 * Math.sin(t * 1.6)
+      ctx.fillStyle = `rgba(0,255,100,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
+    }
+    // waiting: sin glow (la jaula parece un objeto decorativo)
   }
 
-  // ── 2. Muro secreto encima — se desvanece al acercarse ───────────────────
-  if (tbPickup?.active) {
-    const sx = TBALL_WALL.x - cx, sy = TBALL_WALL.y - cy
-    if (sx + TBALL_WALL.w > -10 && sx < CW + 10 && sy + TBALL_WALL.h > -10 && sy < CH + 10) {
-      ctx.save()
-      ctx.globalAlpha = wallAlpha
-      const pWi = 0
-      const hash = ((TBALL_WALL.x * 7 + TBALL_WALL.y * 13) >>> 0) % 16
-      // Mismo aspecto que la pared real — integrado con la arquitectura
-      drawSolidTile(ctx, sx, sy, TBALL_WALL.w, TBALL_WALL.h, pWi, hash, g.gfx, TBALL_WALL.x, TBALL_WALL.y, "p1")
-      // Brillo verde MUY sutil — apenas perceptible, solo si te quedas mirando
-      const glow = 0.014 + 0.008 * Math.sin(t * 1.5)
-      ctx.fillStyle = `rgba(0,255,80,${glow})`; ctx.fillRect(sx, sy, TBALL_WALL.w, TBALL_WALL.h)
-      ctx.strokeStyle = `rgba(0,255,80,${glow * 2})`; ctx.lineWidth = 0.6
-      ctx.strokeRect(sx + 1, sy + 1, TBALL_WALL.w - 2, TBALL_WALL.h - 2)
-      ctx.restore()
-    }
+  // ── Pelota flotante (siempre visible, encima de las barras) ──────────────
+  // Halo
+  const haloR = cageOpen ? 32 : 20
+  const haloAlpha = cageOpen ? 0.5 : 0.35
+  const halo = ctx.createRadialGradient(cx2, ballY, 3, cx2, ballY, haloR)
+  halo.addColorStop(0, `rgba(180,255,60,${haloAlpha})`); halo.addColorStop(1, "rgba(100,220,0,0)")
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx2, ballY, haloR, 0, Math.PI * 2); ctx.fill()
+  // Pelota
+  const ballGrad = ctx.createRadialGradient(cx2 - 3, ballY - 3, 1, cx2, ballY, 13)
+  ballGrad.addColorStop(0, "#EEFF55"); ballGrad.addColorStop(0.5, "#88CC00"); ballGrad.addColorStop(1, "#446600")
+  ctx.fillStyle = ballGrad; ctx.beginPath(); ctx.arc(cx2, ballY, 13, 0, Math.PI * 2); ctx.fill()
+  // Líneas de tenis
+  ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.8; ctx.lineCap = "round"
+  ctx.beginPath(); ctx.arc(cx2, ballY, 13, -0.75, 0.75); ctx.stroke()
+  ctx.beginPath(); ctx.arc(cx2, ballY, 13, Math.PI - 0.75, Math.PI + 0.75); ctx.stroke()
+  // Etiqueta encima de la jaula (siempre visible)
+  const labelPulse = cageOpen ? (0.8 + 0.2 * Math.sin(t * 3.5)) : (0.45 + 0.15 * Math.sin(t * 1.8))
+  ctx.globalAlpha = labelPulse
+  ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+  if (cageOpen) {
+    ctx.fillStyle = "#CCFF88"
+    ctx.fillText("¡RECÓGELA!", cx2, sy - 14)
+    ctx.font = "7px 'Courier New',monospace"
+    ctx.fillStyle = "#88FF88"; ctx.fillText("¡jaula abierta!", cx2, sy - 4)
+  } else {
+    ctx.fillStyle = "#AACCAA"; ctx.fillText("🎾", cx2, sy - 8)
   }
+  ctx.textAlign = "left"; ctx.globalAlpha = 1
+
+  ctx.restore()
 }
 
 // ── Pelotas rebotantes en vuelo ───────────────────────────────────────────────
@@ -3355,136 +3641,240 @@ function drawTBalls(ctx: CanvasRenderingContext2D, g: G) {
   }
 }
 
-// ── Perrito Viejo NPC — placeholder gráfico + burbuja de diálogo ─────────────
+// ── Perrito Viejo NPC — placeholder gráfico + sistema de misiones/diálogo ──────
+// El NPC está diseñado para múltiples quests futuras.
+// Por ahora solo tiene la quest "tball". El sistema de slots permite añadir más.
 function drawViejoDog(ctx: CanvasRenderingContext2D, g: G) {
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
-  if (curW !== 0) return                           // solo en World 0
+  if (curW !== 0) return
 
   const { cx, cy } = g
-  const nx = VIEJO_DOG_POS.x - cx                  // posición en pantalla
+  const nx = VIEJO_DOG_POS.x - cx
   const ny = VIEJO_DOG_POS.y - cy
-  if (nx < -80 || nx > CW + 80 || ny < -120 || ny > CH + 40) return
+  if (nx < -100 || nx > CW + 100 || ny < -130 || ny > CH + 20) return
 
   const t = Date.now() * 0.001
-  // ── Cuerpo del perrito (placeholder con primitivas) ──
-  const bx = nx, by = ny                            // base (pies)
+  // bx/by = centro X / pies del NPC en pantalla
+  const bx = nx, by = ny
 
-  // Sombra
-  ctx.fillStyle = "rgba(0,0,0,0.22)"
-  ctx.beginPath(); ctx.ellipse(bx, by + 2, 16, 5, 0, 0, Math.PI * 2); ctx.fill()
+  // ── Sombra ────────────────────────────────────────────────────────────────
+  ctx.fillStyle = "rgba(0,0,0,0.18)"
+  ctx.beginPath(); ctx.ellipse(bx, by, 18, 5, 0, 0, Math.PI * 2); ctx.fill()
 
-  // Cola (curva pequeña, vieja → caída)
-  ctx.strokeStyle = "#6B4226"; ctx.lineWidth = 3
+  // ── Cola caída (viejo) ────────────────────────────────────────────────────
+  ctx.strokeStyle = "#6B4226"; ctx.lineWidth = 3; ctx.lineCap = "round"
   ctx.beginPath()
-  ctx.moveTo(bx + 11, by - 22)
-  ctx.quadraticCurveTo(bx + 22, by - 18, bx + 18, by - 30)
-  ctx.stroke()
+  ctx.moveTo(bx + 11, by - 24)
+  ctx.quadraticCurveTo(bx + 24, by - 14, bx + 20, by - 6)
+  ctx.stroke(); ctx.lineCap = "butt"
 
-  // Cuerpo
+  // ── Cuerpo ────────────────────────────────────────────────────────────────
   ctx.fillStyle = "#8B5E3C"
-  ctx.beginPath(); ctx.roundRect(bx - 12, by - 38, 24, 28, 7); ctx.fill()
-  ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.strokeRect(bx - 12, by - 38, 24, 28)
+  ctx.beginPath(); ctx.roundRect(bx - 13, by - 40, 26, 32, 8); ctx.fill()
+  ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.strokeRect(bx - 13, by - 40, 26, 32)
 
-  // Bastón (signo de vejez)
-  ctx.strokeStyle = "#7B4A2A"; ctx.lineWidth = 2
-  ctx.beginPath(); ctx.moveTo(bx + 11, by - 32); ctx.lineTo(bx + 20, by + 1); ctx.stroke()
-  ctx.beginPath(); ctx.arc(bx + 11, by - 32, 4, -Math.PI * 0.9, -Math.PI * 0.1); ctx.stroke()
+  // ── Bastón ────────────────────────────────────────────────────────────────
+  ctx.strokeStyle = "#7B4A2A"; ctx.lineWidth = 2.5; ctx.lineCap = "round"
+  ctx.beginPath(); ctx.moveTo(bx + 12, by - 30); ctx.lineTo(bx + 21, by); ctx.stroke()
+  ctx.beginPath(); ctx.arc(bx + 12, by - 30, 4.5, -Math.PI * 0.85, -Math.PI * 0.15); ctx.stroke()
+  ctx.lineCap = "butt"
 
-  // Cabeza
+  // ── Cabeza ────────────────────────────────────────────────────────────────
   ctx.fillStyle = "#9B6E4C"
-  ctx.beginPath(); ctx.arc(bx, by - 50, 14, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(bx, by - 54, 15, 0, Math.PI * 2); ctx.fill()
   ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.stroke()
 
-  // Orejas caídas (viejas)
+  // ── Orejas caídas ─────────────────────────────────────────────────────────
   ctx.fillStyle = "#7A4E2E"
-  ctx.beginPath(); ctx.ellipse(bx - 12, by - 50, 5, 11, -0.3, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.ellipse(bx + 12, by - 50, 5, 11, 0.3, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(bx - 13, by - 52, 5, 12, -0.25, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(bx + 13, by - 52, 5, 12, 0.25, 0, Math.PI * 2); ctx.fill()
 
-  // Ojos (cansados, medio cerrados)
+  // ── Ojos cansados ─────────────────────────────────────────────────────────
   ctx.fillStyle = "#2A1A0A"
-  ctx.beginPath(); ctx.ellipse(bx - 5, by - 52, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.ellipse(bx + 5, by - 52, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
-
-  // Arrugas de vejez sobre los ojos
+  ctx.beginPath(); ctx.ellipse(bx - 5, by - 56, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(bx + 5, by - 56, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
+  // Arrugas
   ctx.strokeStyle = "#5A3A18"; ctx.lineWidth = 1
-  ctx.beginPath(); ctx.arc(bx - 5, by - 57, 4, 0.4, Math.PI - 0.4); ctx.stroke()
-  ctx.beginPath(); ctx.arc(bx + 5, by - 57, 4, 0.4, Math.PI - 0.4); ctx.stroke()
+  ctx.beginPath(); ctx.arc(bx - 5, by - 60, 4, 0.3, Math.PI - 0.3); ctx.stroke()
+  ctx.beginPath(); ctx.arc(bx + 5, by - 60, 4, 0.3, Math.PI - 0.3); ctx.stroke()
 
-  // Hocico
+  // ── Hocico ────────────────────────────────────────────────────────────────
   ctx.fillStyle = "#B07848"
-  ctx.beginPath(); ctx.ellipse(bx, by - 45, 6, 4, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(bx, by - 48, 7, 5, 0, 0, Math.PI * 2); ctx.fill()
   ctx.fillStyle = "#3A2218"
-  ctx.beginPath(); ctx.arc(bx, by - 47, 2.5, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(bx, by - 51, 2.5, 0, Math.PI * 2); ctx.fill()
 
-  // Etiqueta [!] flotante cuando el jugador está cerca
+  // ── Etiqueta de nombre (siempre) ──────────────────────────────────────────
+  ctx.fillStyle = "#C8A060"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+  ctx.fillText("Rex el Viejo", bx, by - 74)
+  ctx.textAlign = "left"
+
+  // ── Distancia jugador → NPC ───────────────────────────────────────────────
   const p = g.pl
   const dx = p.x + PW / 2 - VIEJO_DOG_POS.x
   const dy2 = p.y + PH / 2 - VIEJO_DOG_POS.y
   const dist = Math.sqrt(dx * dx + dy2 * dy2)
-  const showDialog = dist < VIEJO_DOG_TALK_R
 
-  if (!showDialog) {
-    // Burbuja de atención cuando está lejos pero visible (~200px)
-    if (dist < 220) {
-      const bobY = Math.sin(t * 3) * 3
-      ctx.fillStyle = "rgba(255,220,0,0.9)"
-      ctx.beginPath(); ctx.arc(bx, by - 76 + bobY, 9, 0, Math.PI * 2); ctx.fill()
-      ctx.strokeStyle = "#AA8800"; ctx.lineWidth = 1.5; ctx.stroke()
-      ctx.fillStyle = "#3A2800"; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "center"
-      ctx.fillText("!", bx, by - 72 + bobY); ctx.textAlign = "left"
-    }
+  // ── Callout "¡Psst!" cuando el jugador está lejos pero en rango ──────────
+  if (dist > VIEJO_DOG_TALK_R && dist < VIEJO_DOG_CALLOUT_R) {
+    const bobY = Math.sin(t * 2.8) * 4
+    // Burbuja pequeña de llamado
+    const callText = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done")
+      ? "¡Ve por la pelota!"
+      : g.viejoDogState === "surprised"
+      ? "¡Qué sorpresa!"
+      : g.viejoDogState === "key_held"
+      ? "¡Tengo la otra mitad! 🗝"
+      : g.viejoDogState === "key_dropped"
+      ? "¡Recoge la media llave!"
+      : "¡Psst! ¡Acércate!"
+    const cw2 = ctx.measureText(callText).width + 14
+    const cbx = bx - cw2 / 2, cby = by - 88 + bobY
+    ctx.save()
+    ctx.fillStyle = "rgba(255,235,160,0.92)"
+    ctx.beginPath(); ctx.roundRect(cbx, cby, cw2, 16, 5); ctx.fill()
+    ctx.strokeStyle = "#AA8800"; ctx.lineWidth = 1; ctx.stroke()
+    // Cola mini
+    ctx.fillStyle = "rgba(255,235,160,0.92)"
+    ctx.beginPath(); ctx.moveTo(bx - 4, cby + 16); ctx.lineTo(bx + 4, cby + 16); ctx.lineTo(bx, cby + 22); ctx.closePath(); ctx.fill()
+    ctx.fillStyle = "#3A2800"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText(callText, bx, cby + 11)
+    ctx.textAlign = "left"; ctx.restore()
     return
   }
+  if (dist >= VIEJO_DOG_CALLOUT_R) return  // demasiado lejos, sin callout
 
-  // ── Burbuja de diálogo ────────────────────────────────────────────────────
-  const kills = countP1KillsW0(g.dead)
+  // ── Sistema de quests / diálogo completo ─────────────────────────────────
+  // Diseñado para múltiples quests: el NPC tiene "slots" de misión.
+  // Por ahora: slot 0 = tball quest. Los demás slots dicen "próximamente".
+  const TOTAL_QUEST_SLOTS = 3   // reservados para el futuro
+  const completedQuests = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised") ? 1 : 0
+  const activeQuests = (g.viejoDogState === "quest_active" || g.viejoDogState === "key_dropped" || g.viejoDogState === "key_held") ? 1 : 0
+  const kills = Math.max(0, countP1KillsW0(g.dead) - g.questKillBaseline)
+
   let dialogLines: string[]
   let dialogColor = "#E8D8C0"
+  let headerLine = ""
 
   if (g.viejoDogState === "surprised") {
-    dialogLines = ["¡Caray! ¡La encontraste", "tú solo! ¡Eres más", "lista de lo que pensaba,", "Luly! 🎾"]
+    headerLine = "◈ MISIÓN: COMPLETADA ◈"
     dialogColor = "#CCFF88"
-  } else if (g.viejoDogState === "quest_done") {
-    dialogLines = ["¡Lo lograste! Marqué el", "secreto en tu mapa.", "Busca algo que brille en", "verde en la sección P1."]
-    dialogColor = "#AAFFAA"
-  } else if (g.viejoDogState === "quest_active") {
     dialogLines = [
-      `¡Vas por ${kills}/${TBALL_QUEST_KILLS} perros!`,
-      kills < 5 ? "¡Sigue, jovencita!" : kills < 9 ? "¡Casi lo tienes!" : "¡Ya casi!",
-      "Derrota a los que faltan",
-      "y te revelo el secreto.",
+      "¡Caray! ¡La encontraste",
+      "tú sola! Eres más lista",
+      "de lo que pensaba, Luly.",
+      "Quizás pronto tenga",
+      "otro secreto para ti. 🎾",
+    ]
+  } else if (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done") {
+    headerLine = "◈ MISIÓN: COMPLETADA ◈"
+    dialogColor = "#AAFFAA"
+    dialogLines = [
+      "¡Sigue el pasillo al",
+      "este! Mi pelota está en",
+      "una jaula al fondo.",
+      "¡Ve por ella, es tuya,",
+      "te la ganaste! 🎾",
+    ]
+  } else if (g.viejoDogState === "key_held") {
+    // Rex ve la media llave y reacciona dramáticamente
+    headerLine = `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ¡LA TIENES! ◈`
+    dialogColor = "#FFE088"
+    dialogLines = [
+      "¡La otra mitad de la",
+      "llave de mi antiguo amo!",
+      "Aquí tengo la mía...",
+      "¡Tómala, Luly! Las dos",
+      "juntas abren la jaula.",
+    ]
+  } else if (g.viejoDogState === "key_dropped") {
+    headerLine = `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`
+    dialogColor = "#FFCC66"
+    dialogLines = [
+      "¡Uno de ellos tenía",
+      "mi media llave! ¡Brilla",
+      "en el suelo, cógela y",
+      "tráemela pronto, Luly!",
+      "¡Yo tengo la otra mitad!",
+    ]
+  } else if (g.viejoDogState === "quest_active") {
+    headerLine = `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`
+    // Barra de "búsqueda" — no sabemos cuántos hay que matar, solo mostramos kills
+    const barFill = Math.min(kills, 10)
+    const bar = "█".repeat(barFill) + "░".repeat(Math.max(0, 10 - barFill))
+    dialogLines = [
+      "Uno de esos perros lleva",
+      "mi media llave. ¡Búscala!",
+      `${bar}`,
+      kills === 0 ? "Eliminados: 0 — ¡Empieza!" :
+        `Eliminados: ${kills} — ${kills < 3 ? "¡Sigue buscando!" : kills < 8 ? "¡Puede estar cerca!" : "¡Alguno debe tenerla!"}`,
+      "Yo tengo la otra mitad.",
     ]
   } else {
-    // waiting → ya cambió a quest_active en tick, pero por si acaso
-    dialogLines = ["¡Oye, tú! Demuestra tu", "fuerza: derrota 10 perros", "de arriba y te revelo", "un gran secreto..."]
+    // "waiting" — primera vez que el jugador se acerca
+    headerLine = `◈ MISIONES: ${TOTAL_QUEST_SLOTS} en total ◈`
+    dialogLines = [
+      "¡Hola, Luly! Soy Rex,",
+      "el guardián de secretos.",
+      "Por ahora solo tengo",
+      "una misión para ti...",
+      "¡Cuando seas más fuerte",
+      "te daré las demás! 🐾",
+    ]
   }
 
-  // Posición y tamaño de la burbuja
-  const bub_x = nx - 100, bub_y = ny - 118
-  const bub_w = 200, bub_lh = 14, bub_pad = 8
-  const bub_h = bub_pad * 2 + dialogLines.length * bub_lh
+  // ── Renderizar burbuja de diálogo ─────────────────────────────────────────
+  const bub_lh = 13, bub_pad = 9, bub_w = 210
+  const totalLines = (headerLine ? 1 : 0) + dialogLines.length
+  const bub_h = bub_pad * 2 + totalLines * bub_lh + (headerLine ? 4 : 0)
+  // Posicionar encima del NPC, centrada en bx
+  const bub_x = Math.max(4, Math.min(CW - bub_w - 4, bx - bub_w / 2))
+  const bub_y = by - bub_h - 78  // 78px encima de los pies
 
   ctx.save()
-  ctx.fillStyle = "rgba(20,14,8,0.88)"
-  ctx.beginPath(); ctx.roundRect(bub_x, bub_y, bub_w, bub_h, 8); ctx.fill()
-  ctx.strokeStyle = "#A08060"; ctx.lineWidth = 1.2; ctx.stroke()
-  // Cola de la burbuja (triángulo apuntando al NPC)
-  ctx.fillStyle = "rgba(20,14,8,0.88)"
+  // Fondo
+  ctx.fillStyle = "rgba(14,10,6,0.92)"
+  ctx.beginPath(); ctx.roundRect(bub_x, bub_y, bub_w, bub_h, 9); ctx.fill()
+  // Borde con color según estado
+  const borderCol = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised")
+    ? "#44BB44"
+    : (g.viejoDogState === "key_held") ? "#FFD700"
+    : (g.viejoDogState === "key_dropped" || g.viejoDogState === "quest_active") ? "#DDAA44"
+    : "#A08060"
+  ctx.strokeStyle = borderCol; ctx.lineWidth = 1.4; ctx.stroke()
+
+  // Cola del globo
+  const tailX = Math.max(bub_x + 20, Math.min(bub_x + bub_w - 20, bx))
+  ctx.fillStyle = "rgba(14,10,6,0.92)"
   ctx.beginPath()
-  ctx.moveTo(bx - 8, bub_y + bub_h)
-  ctx.lineTo(bx + 8, bub_y + bub_h)
-  ctx.lineTo(bx, bub_y + bub_h + 12)
+  ctx.moveTo(tailX - 7, bub_y + bub_h)
+  ctx.lineTo(tailX + 7, bub_y + bub_h)
+  ctx.lineTo(tailX, bub_y + bub_h + 10)
   ctx.closePath(); ctx.fill()
-  ctx.strokeStyle = "#A08060"; ctx.lineWidth = 1.2
+  ctx.strokeStyle = borderCol; ctx.lineWidth = 1.2
   ctx.beginPath()
-  ctx.moveTo(bx - 8, bub_y + bub_h + 1)
-  ctx.lineTo(bx, bub_y + bub_h + 12)
-  ctx.lineTo(bx + 8, bub_y + bub_h + 1)
+  ctx.moveTo(tailX - 7, bub_y + bub_h + 0.5)
+  ctx.lineTo(tailX, bub_y + bub_h + 10)
+  ctx.lineTo(tailX + 7, bub_y + bub_h + 0.5)
   ctx.stroke()
 
-  // Texto
-  ctx.fillStyle = dialogColor; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-  dialogLines.forEach((line, i) => ctx.fillText(line, bub_x + bub_w / 2, bub_y + bub_pad + (i + 1) * bub_lh - 2))
+  let textY = bub_y + bub_pad
+  // Header
+  if (headerLine) {
+    ctx.fillStyle = borderCol; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText(headerLine, bub_x + bub_w / 2, textY + bub_lh - 2)
+    textY += bub_lh + 4
+    // Separador
+    ctx.strokeStyle = borderCol + "55"; ctx.lineWidth = 0.8
+    ctx.beginPath(); ctx.moveTo(bub_x + 8, textY); ctx.lineTo(bub_x + bub_w - 8, textY); ctx.stroke()
+    textY += 3
+  }
+  // Líneas de diálogo
+  ctx.fillStyle = dialogColor; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
+  dialogLines.forEach(line => {
+    ctx.fillText(line, bub_x + bub_w / 2, textY + bub_lh - 2)
+    textY += bub_lh
+  })
   ctx.textAlign = "left"
   ctx.restore()
 }
@@ -3785,9 +4175,8 @@ function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, f
 }
 
 function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
-  if (g.noEnemies) return
-
   for (const e of g.enemies) {
+    if (g.noEnemies && !e.boss) continue  // noEnemies: oculta enemigos normales pero muestra bosses
     if (!e.active) continue
     const sx = e.x - g.cx, sy = e.y - g.cy
     if (sx + e.w < -10 || sx > CW + 10 || sy + e.h < -10 || sy > CH + 10) continue
@@ -4213,19 +4602,24 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
       const tbPk = g.pickups.find(p => p.id === "tball_w0")
       const tbc = TBALL_SECRET_C, tbr = TBALL_SECRET_R
       const tbRx = gx + tbc * (rW + gap), tbRy = gy + tbr * (rH + gap)
-      const questRevealed = g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
+      const questRevealed = g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
+      const cageHinted = g.viejoDogState === "key_dropped" || g.viejoDogState === "key_held"
       if (!tbPk?.active) {
         // Recogida: siempre visible como "ya encontrado"
         ctx.fillStyle = "#556655"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("🎾✓", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
-      } else if (questRevealed) {
-        // Quest completada: destello verde pulsante
+      } else if (questRevealed || cageHinted) {
+        // Quest completada o llave en camino: destello pulsante con icono de jaula/pelota
         const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
-        ctx.fillStyle = `rgba(0,220,80,${pulse * 0.35})`; ctx.fillRect(tbRx, tbRy, rW, rH)
-        ctx.strokeStyle = `rgba(0,255,80,${pulse * 0.9})`; ctx.lineWidth = 1.2
+        const glowCol = cageHinted ? `rgba(255,200,0,${pulse * 0.35})` : `rgba(0,220,80,${pulse * 0.35})`
+        const strokeCol = cageHinted ? `rgba(255,220,0,${pulse * 0.9})` : `rgba(0,255,80,${pulse * 0.9})`
+        ctx.fillStyle = glowCol; ctx.fillRect(tbRx, tbRy, rW, rH)
+        ctx.strokeStyle = strokeCol; ctx.lineWidth = 1.2
         ctx.strokeRect(tbRx + 1, tbRy + 1, rW - 2, rH - 2)
-        ctx.fillStyle = "#AAFFAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("🎾?", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
+        const mapIcon = cageHinted ? "🗝?" : "🎾?"
+        ctx.fillStyle = cageHinted ? "#FFE066" : "#AAFFAA"
+        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText(mapIcon, tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
       }
       // Si quest no revelada: sin icono en el mapa (secreto intacto)
     }
@@ -4376,7 +4770,8 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
     // Ícono poder oculto tball — solo W0, sala [TBALL_SECRET_C, TBALL_SECRET_R]
     if (w === 0 && c === TBALL_SECRET_C && r === TBALL_SECRET_R) {
       const tbPk = g.pickups.find(pk => pk.id === "tball_w0")
-      const questRev = g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
+      const questRev = g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
+      const cageActive = g.viejoDogState === "key_dropped" || g.viejoDogState === "key_held"
       const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
       if (!tbPk?.active) {
         ctx.fillStyle = "#446644"; ctx.fillText("🎾 YA RECOGIDO", rx + rW / 2, ry + 43)
@@ -4384,11 +4779,15 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
         ctx.fillStyle = `rgba(0,200,80,${pulse * 0.45})`; ctx.fillRect(rx, ry, rW, rH)
         ctx.strokeStyle = `rgba(0,255,80,${pulse})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
         ctx.fillStyle = "#CCFF88"; ctx.fillText("🎾 PODER OCULTO", rx + rW / 2, ry + 43)
+      } else if (cageActive) {
+        ctx.fillStyle = `rgba(255,200,0,${pulse * 0.35})`; ctx.fillRect(rx, ry, rW, rH)
+        ctx.strokeStyle = `rgba(255,220,0,${pulse})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
+        ctx.fillStyle = "#FFE066"; ctx.fillText("🗝 JAULA+LLAVE", rx + rW / 2, ry + 43)
       }
       // Sin marker si quest no revelada (modo dev puede mostrarlo al desarrollador)
-      if (g.devMode && tbPk?.active && !questRev) {
+      if (g.devMode && tbPk?.active && !questRev && !cageActive) {
         ctx.fillStyle = "rgba(0,100,50,0.35)"; ctx.fillRect(rx, ry, rW, rH)
-        ctx.fillStyle = "#336633"; ctx.fillText("🎾 [SECRET]", rx + rW / 2, ry + 43)
+        ctx.fillStyle = "#336633"; ctx.fillText("🎾 [JAULA]", rx + rW / 2, ry + 43)
       }
     }
     ctx.textAlign = "left"
@@ -4467,8 +4866,8 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const t = Date.now() * 0.002
 
-  // Niebla sobre sala Jefe P1 (solo si aún vive)
-  if (!isPart1BossDead(g, curW)) {
+  // Niebla sobre sala Jefe P1 (hasta que se abra la puerta — regulares muertos)
+  if (!areRegularP1EnemiesDead(g, curW)) {
     const [bc, br] = WORLD_P1_BOSS[curW]
     const { x: brX, y: brY } = ro(curW, bc, br)
     const sx = brX - g.cx, sy = brY - g.cy
@@ -4505,8 +4904,8 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
       ctx.restore()
     }
   }
-  // Niebla sobre sala Jefe P2 (solo si aún vive)
-  if (!isPart2BossDead(g, curW)) {
+  // Niebla sobre sala Jefe P2 (hasta que se abra la puerta — regulares muertos)
+  if (!areRegularP2EnemiesDead(g, curW)) {
     const [bc, br] = WORLD_P2_BOSS[curW]
     const { x: brX, y: brY } = ro(curW, bc, br)
     const sx = brX - g.cx, sy = brY - g.cy
@@ -4537,7 +4936,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawCage(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
   drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
@@ -4803,15 +5202,29 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     const t = g.abilityNotif.timer
     const alpha = Math.min(1, t * 2) * Math.min(1, (4.0 - t) * 1.5)
     ctx.save(); ctx.globalAlpha = Math.max(0, alpha)
+    // Word-wrap del texto principal para que quepa en el cuadro
+    ctx.font = `bold 13px 'Courier New',monospace`
+    const maxLineW = 360
+    const notifLines: string[] = []
+    let notifCur = ''
+    for (const word of g.abilityNotif.text.split(' ')) {
+      const test = notifCur ? `${notifCur} ${word}` : word
+      if (ctx.measureText(test).width <= maxLineW) { notifCur = test }
+      else { if (notifCur) notifLines.push(notifCur); notifCur = word }
+    }
+    if (notifCur) notifLines.push(notifCur)
+    const lineH = 19
+    const boxW = 420, boxH = Math.max(90, 50 + notifLines.length * lineH + 22)
+    const bx = CW / 2 - boxW / 2, by = CH / 2 - boxH / 2
     ctx.fillStyle = "rgba(0,0,0,0.92)"
-    ctx.beginPath(); ctx.roundRect(CW / 2 - 175, CH / 2 - 48, 350, 88, 12); ctx.fill()
-    ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(CW / 2 - 175, CH / 2 - 48, 350, 88)
+    ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 12); ctx.fill()
+    ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(bx, by, boxW, boxH)
     ctx.fillStyle = th.accent; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
-    ctx.fillText("✦  NUEVA HABILIDAD DESBLOQUEADA  ✦", CW / 2, CH / 2 - 24)
-    ctx.fillStyle = "#FFFFFF"; ctx.font = `bold 16px 'Courier New',monospace`
-    ctx.fillText(g.abilityNotif.text, CW / 2, CH / 2 + 12)
+    ctx.fillText("✦  NUEVA HABILIDAD DESBLOQUEADA  ✦", CW / 2, by + 22)
+    ctx.fillStyle = "#FFFFFF"; ctx.font = `bold 13px 'Courier New',monospace`
+    notifLines.forEach((line, i) => ctx.fillText(line, CW / 2, by + 44 + i * lineH))
     ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"
-    ctx.fillText("Elimina al siguiente jefe para la próxima habilidad", CW / 2, CH / 2 + 32)
+    ctx.fillText("Elimina al siguiente jefe para la próxima habilidad", CW / 2, by + boxH - 10)
     ctx.textAlign = "left"; ctx.restore()
   }
 }
