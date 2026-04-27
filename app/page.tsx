@@ -104,6 +104,9 @@ type G = {
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
   isMobile: boolean
+  // Vista del mapa: "single" = mundo actual ampliado, "all" = los 4 mundos
+  mapView: "single" | "all"
+  mapViewWorld: number   // índice del mundo mostrado en modo "single"
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -345,6 +348,7 @@ const VIEJO_DOG_POS = {
 }
 const VIEJO_DOG_TALK_R = 115              // radio para diálogo automático
 const VIEJO_DOG_CALLOUT_R = 230          // radio para el "¡Psst!"
+let _rexNameAlpha = 1.0                  // fade suave del nombre: 1=visible, 0=oculto
 const TBALL_KEY_DROP_CHANCE = 0.20       // 20% de probabilidad por kill (tras 3 kills mínimo)
 const TBALL_KEY_MIN_KILLS = 3            // primeros 3 kills nunca tienen la llave (build-up)
 const TBALL_KEY_FORCE_KILL = 20          // kill 20: drop garantizado si aún no cayó
@@ -1290,6 +1294,8 @@ function mkG_lazy(): G {
     questKillBaseline: 0,
     gpadType: "keyboard",
     isMobile: false,
+    mapView: "single",
+    mapViewWorld: 0,
   } as G
 }
 
@@ -3650,79 +3656,117 @@ function drawTBalls(ctx: CanvasRenderingContext2D, g: G) {
 // ── Perrito Viejo NPC — placeholder gráfico + sistema de misiones/diálogo ──────
 // El NPC está diseñado para múltiples quests futuras.
 // Por ahora solo tiene la quest "tball". El sistema de slots permite añadir más.
-function drawViejoDog(ctx: CanvasRenderingContext2D, g: G) {
+function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
   if (curW !== 0) return
 
   const { cx, cy } = g
   const nx = VIEJO_DOG_POS.x - cx
   const ny = VIEJO_DOG_POS.y - cy
-  if (nx < -100 || nx > CW + 100 || ny < -130 || ny > CH + 20) return
+  if (nx < -120 || nx > CW + 120 || ny < -180 || ny > CH + 20) return
 
-  const t = Date.now() * 0.001
   // bx/by = centro X / pies del NPC en pantalla
   const bx = nx, by = ny
 
-  // ── Sombra ────────────────────────────────────────────────────────────────
-  ctx.fillStyle = "rgba(0,0,0,0.18)"
-  ctx.beginPath(); ctx.ellipse(bx, by, 18, 5, 0, 0, Math.PI * 2); ctx.fill()
-
-  // ── Cola caída (viejo) ────────────────────────────────────────────────────
-  ctx.strokeStyle = "#6B4226"; ctx.lineWidth = 3; ctx.lineCap = "round"
-  ctx.beginPath()
-  ctx.moveTo(bx + 11, by - 24)
-  ctx.quadraticCurveTo(bx + 24, by - 14, bx + 20, by - 6)
-  ctx.stroke(); ctx.lineCap = "butt"
-
-  // ── Cuerpo ────────────────────────────────────────────────────────────────
-  ctx.fillStyle = "#8B5E3C"
-  ctx.beginPath(); ctx.roundRect(bx - 13, by - 40, 26, 32, 8); ctx.fill()
-  ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.strokeRect(bx - 13, by - 40, 26, 32)
-
-  // ── Bastón ────────────────────────────────────────────────────────────────
-  ctx.strokeStyle = "#7B4A2A"; ctx.lineWidth = 2.5; ctx.lineCap = "round"
-  ctx.beginPath(); ctx.moveTo(bx + 12, by - 30); ctx.lineTo(bx + 21, by); ctx.stroke()
-  ctx.beginPath(); ctx.arc(bx + 12, by - 30, 4.5, -Math.PI * 0.85, -Math.PI * 0.15); ctx.stroke()
-  ctx.lineCap = "butt"
-
-  // ── Cabeza ────────────────────────────────────────────────────────────────
-  ctx.fillStyle = "#9B6E4C"
-  ctx.beginPath(); ctx.arc(bx, by - 54, 15, 0, Math.PI * 2); ctx.fill()
-  ctx.strokeStyle = "#5A3A1A"; ctx.lineWidth = 1; ctx.stroke()
-
-  // ── Orejas caídas ─────────────────────────────────────────────────────────
-  ctx.fillStyle = "#7A4E2E"
-  ctx.beginPath(); ctx.ellipse(bx - 13, by - 52, 5, 12, -0.25, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.ellipse(bx + 13, by - 52, 5, 12, 0.25, 0, Math.PI * 2); ctx.fill()
-
-  // ── Ojos cansados ─────────────────────────────────────────────────────────
-  ctx.fillStyle = "#2A1A0A"
-  ctx.beginPath(); ctx.ellipse(bx - 5, by - 56, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath(); ctx.ellipse(bx + 5, by - 56, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill()
-  // Arrugas
-  ctx.strokeStyle = "#5A3A18"; ctx.lineWidth = 1
-  ctx.beginPath(); ctx.arc(bx - 5, by - 60, 4, 0.3, Math.PI - 0.3); ctx.stroke()
-  ctx.beginPath(); ctx.arc(bx + 5, by - 60, 4, 0.3, Math.PI - 0.3); ctx.stroke()
-
-  // ── Hocico ────────────────────────────────────────────────────────────────
-  ctx.fillStyle = "#B07848"
-  ctx.beginPath(); ctx.ellipse(bx, by - 48, 7, 5, 0, 0, Math.PI * 2); ctx.fill()
-  ctx.fillStyle = "#3A2218"
-  ctx.beginPath(); ctx.arc(bx, by - 51, 2.5, 0, Math.PI * 2); ctx.fill()
-
-  // ── Etiqueta de nombre (siempre) ──────────────────────────────────────────
-  ctx.fillStyle = "#C8A060"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
-  ctx.fillText("Rex el Viejo", bx, by - 74)
-  ctx.textAlign = "left"
-
-  // ── Distancia jugador → NPC ───────────────────────────────────────────────
+  // ── Distancia y dirección jugador → NPC ──────────────────────────────────
   const p = g.pl
   const dx = p.x + PW / 2 - VIEJO_DOG_POS.x
   const dy2 = p.y + PH / 2 - VIEJO_DOG_POS.y
   const dist = Math.sqrt(dx * dx + dy2 * dy2)
+  // dx > 0 → jugadora a la derecha → Rex mira a la derecha
+  const dir = dx >= 0 ? "right" : "left"
+
+  // ── Selección de sprite según distancia y estado ──────────────────────────
+  // idle   : fuera del rango de callout
+  // saludo : en rango callout ("¡Psst! ¡Acércate!")
+  // mitad_llave : en rango diálogo Y estado key_held (muestra la media llave)
+  // talk   : en rango diálogo, cualquier otro estado
+  let sprKey: string
+  if (dist >= VIEJO_DOG_CALLOUT_R) {
+    sprKey = "rex_idle"
+  } else if (dist > VIEJO_DOG_TALK_R) {
+    sprKey = `rex_saludo_${dir}`
+  } else if (g.viejoDogState === "key_held") {
+    sprKey = `rex_mitad_llave_${dir}`
+  } else {
+    sprKey = `rex_talk_${dir}`
+  }
+
+  // ── Dimensiones de render calculadas por sprite ───────────────────────────
+  // Objetivo: personaje de 62 px de alto en pantalla (consistente entre estados).
+  // Cada sprite tiene distinto frame size y distinto padding → hay que normalizar.
+  // Datos medidos con PIL sobre frame 0 de cada sheet (frame = sheet/4 cols/4 rows).
+  //   rw, rh   = píxeles de render del frame completo (preserva aspect ratio)
+  //   ryOff    = ry = by - ryOff  → pies del personaje sobre el suelo real
+  //              (VIEJO_DOG_POS.y está 10 px sobre el suelo, ryOff lo compensa)
+  const REX_DIM: Record<string, { rw: number; rh: number; ryOff: number }> = {
+    rex_idle:              { rw: 43, rh: 65, ryOff: 53 },
+    rex_saludo_left:       { rw: 52, rh: 81, ryOff: 62 },
+    rex_saludo_right:      { rw: 50, rh: 78, ryOff: 60 },
+    rex_talk_left:         { rw: 54, rh: 65, ryOff: 54 },
+    rex_talk_right:        { rw: 53, rh: 65, ryOff: 53 },
+    rex_mitad_llave_left:  { rw: 43, rh: 65, ryOff: 54 },
+    rex_mitad_llave_right: { rw: 42, rh: 63, ryOff: 53 },
+  }
+  const dim = REX_DIM[sprKey] ?? { rw: 43, rh: 65, ryOff: 53 }
+  const rw = dim.rw
+  const rh = dim.rh
+  const rx = bx - rw / 2
+  const ry = by - dim.ryOff   // pies del personaje exactamente sobre el suelo
+
+  // ── Frame animation (4×4 spritesheet = 16 frames, igual que el jugador) ──
+  // Velocidad en ms/frame según estado (perro viejo = más lento que Luly)
+  const REX_SPD: Record<string, number> = {
+    rex_idle:              160,   // descanso pausado
+    rex_saludo_left:       110,   // saludo animado
+    rex_saludo_right:      110,
+    rex_talk_left:         120,   // hablando
+    rex_talk_right:        120,
+    rex_mitad_llave_left:  140,   // sostiene la llave, más solemne
+    rex_mitad_llave_right: 140,
+  }
+  const rexFrame = Math.floor(Date.now() / (REX_SPD[sprKey] ?? 140)) % 16
+  const rfCol = rexFrame % 4
+  const rfRow = Math.floor(rexFrame / 4)
+
+  // ── Fade del nombre: desaparece al entrar en diálogo, reaparece al alejarse ─
+  // Se desvanece al entrar en cualquier zona de interacción (callout o diálogo)
+  const nameTarget = dist < VIEJO_DOG_CALLOUT_R ? 0 : 1
+  _rexNameAlpha = nameTarget > _rexNameAlpha
+    ? Math.min(1, _rexNameAlpha + 0.045)
+    : Math.max(0, _rexNameAlpha - 0.045)
+
+  // ── Sombra ────────────────────────────────────────────────────────────────
+  ctx.fillStyle = "rgba(0,0,0,0.22)"
+  ctx.beginPath(); ctx.ellipse(bx, by, rw * 0.48, 4, 0, 0, Math.PI * 2); ctx.fill()
+
+  // ── Sprite animado ────────────────────────────────────────────────────────
+  const spr = sprs[sprKey]
+  if (spr) {
+    const fw = spr.width / 4          // ancho de un frame en la hoja
+    const fh = spr.height / 4         // alto de un frame en la hoja
+    ctx.drawImage(spr, rfCol * fw, rfRow * fh, fw, fh, rx, ry, rw, rh)
+  } else {
+    // Fallback procedural mínimo mientras el sprite carga
+    ctx.fillStyle = "#8B5E3C"
+    ctx.beginPath(); ctx.roundRect(bx - 13, by - 40, 26, 32, 8); ctx.fill()
+    ctx.fillStyle = "#9B6E4C"
+    ctx.beginPath(); ctx.arc(bx, by - 54, 15, 0, Math.PI * 2); ctx.fill()
+  }
+
+  // ── Etiqueta de nombre con fade suave ─────────────────────────────────────
+  if (_rexNameAlpha > 0.01) {
+    ctx.save()
+    ctx.globalAlpha = _rexNameAlpha
+    ctx.fillStyle = "#C8A060"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText("Rex el Viejo", bx, ry - 4)
+    ctx.textAlign = "left"
+    ctx.restore()
+  }
 
   // ── Callout "¡Psst!" cuando el jugador está lejos pero en rango ──────────
   if (dist > VIEJO_DOG_TALK_R && dist < VIEJO_DOG_CALLOUT_R) {
+    const t = Date.now() * 0.001
     const bobY = Math.sin(t * 2.8) * 4
     // Burbuja pequeña de llamado
     const callText = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done")
@@ -3972,7 +4016,7 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
   }
 }
 
-function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
+function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
   const p = g.pl, t = Date.now() * 0.001
   for (const cp of ALL_CPS) {
     const bedCX = cp.x + PW / 2, bedCY = cp.y + PH
@@ -4022,23 +4066,49 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G) {
     }
 
     if (isKennel) {
-      // ── Casa/kennel original para los puntos Oeste (home base) ──────
-      const kw = 78, kh = 58
-      ctx.fillStyle = isSpawn ? th.wall + "EE" : discovered ? "#1E2420" : "#181818"
-      ctx.fillRect(sx - kw / 2, sy - kh, kw, kh)
-      ctx.fillStyle = isSpawn ? th.accent : discovered ? th.rockHi : "#2A2A2A"
-      ctx.beginPath(); ctx.moveTo(sx - kw / 2 - 8, sy - kh); ctx.lineTo(sx, sy - kh - 30)
-      ctx.lineTo(sx + kw / 2 + 8, sy - kh); ctx.closePath(); ctx.fill()
-      if (isSpawn) {
-        ctx.strokeStyle = th.accent + "AA"; ctx.lineWidth = 1.5
+      // ── Sprite de kennel por mundo ─────────────────────────────────────
+      // W0→ambar  W1→red  W2→blue  W3→violet
+      const KENNEL_KEYS = ["kennel_ambar", "kennel_red", "kennel_blue", "kennel_violet"]
+      // rw, rh: tamaño de render. feet: píxeles desde arriba hasta el suelo del sprite.
+      // Calculados con PIL para que el contenido mida ~88 px y las bases toquen sy.
+      const KENNEL_DIM: { rw: number; rh: number; feet: number }[] = [
+        { rw: 100, rh: 100, feet: 90 },  // ambar (1254×1254)
+        { rw: 122, rh: 100, feet: 88 },  // red   (1386×1135)
+        { rw: 100, rh: 100, feet: 89 },  // blue  (1254×1254)
+        { rw: 122, rh: 100, feet: 86 },  // violet(1386×1135)
+      ]
+      const wi = Math.max(0, Math.min(cp.w, 3))
+      const kspr = sprs[KENNEL_KEYS[wi]]
+      const { rw: krw, rh: krh, feet } = KENNEL_DIM[wi]
+      const krx = sx - krw / 2
+      const kry = sy - feet
+
+      if (kspr && kspr.complete && kspr.naturalWidth > 0) {
+        // Tint de color cuando es el punto activo (resplandor leve)
+        if (isSpawn) {
+          ctx.save()
+          ctx.shadowColor = th.accent
+          ctx.shadowBlur = 18
+          ctx.drawImage(kspr, krx, kry, krw, krh)
+          ctx.restore()
+        } else {
+          // Sin descubrir: mostrar a menor opacidad
+          ctx.save()
+          ctx.globalAlpha = discovered ? 1 : 0.45
+          ctx.drawImage(kspr, krx, kry, krw, krh)
+          ctx.restore()
+        }
+      } else {
+        // Fallback procedural mientras carga el sprite
+        const kw = 78, kh = 58
+        ctx.fillStyle = isSpawn ? th.wall + "EE" : discovered ? "#1E2420" : "#181818"
+        ctx.fillRect(sx - kw / 2, sy - kh, kw, kh)
+        ctx.fillStyle = isSpawn ? th.accent : discovered ? th.rockHi : "#2A2A2A"
         ctx.beginPath(); ctx.moveTo(sx - kw / 2 - 8, sy - kh); ctx.lineTo(sx, sy - kh - 30)
-        ctx.lineTo(sx + kw / 2 + 8, sy - kh); ctx.closePath(); ctx.stroke()
+        ctx.lineTo(sx + kw / 2 + 8, sy - kh); ctx.closePath(); ctx.fill()
+        ctx.fillStyle = "#0A0A0A"
+        ctx.beginPath(); ctx.arc(sx, sy - 16, 16, Math.PI, 0); ctx.rect(sx - 16, sy - 16, 32, 16); ctx.fill()
       }
-      // Entrada
-      ctx.fillStyle = "#0A0A0A"
-      ctx.beginPath(); ctx.arc(sx, sy - 16, 16, Math.PI, 0); ctx.rect(sx - 16, sy - 16, 32, 16); ctx.fill()
-      ctx.strokeStyle = isSpawn ? th.accent + "CC" : discovered ? "#3A3A3A" : "#222"
-      ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(sx, sy - 16, 16, Math.PI, 0); ctx.stroke()
     } else {
       // ── Colchoncito de perro (nuevos checkpoints) ──────────────────
       const bw = 56, bh = 22
@@ -4151,9 +4221,39 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const sx = p.x - g.cx, sy = p.y - g.cy
   const spr = sprs["player_" + p.pa] || sprs["player_idle"]
   if (spr && spr.complete && spr.naturalWidth > 0) {
-    const fw = spr.width / 4, fh = spr.height / 4, col = p.pf % 4, row = Math.floor(p.pf / 4)
-    if (p.facing === -1) { ctx.save(); ctx.translate(sx + p.w, sy); ctx.scale(-1, 1); ctx.drawImage(spr, col * fw, row * fh, fw, fh, 0, 0, p.w, p.h); ctx.restore() }
-    else ctx.drawImage(spr, col * fw, row * fh, fw, fh, sx, sy, p.w, p.h); return
+    const fw = spr.width / 4, fh = spr.height / 4
+    const col = p.pf % 4, row = Math.floor(p.pf / 4)
+
+    // ── Dimensiones normalizadas por animación ────────────────────────────
+    // Objetivo: personaje de 68 px de alto consistente entre estados.
+    // Medidas con PIL sobre frame 0 de cada sheet (charH, padBot, padLeft).
+    //   rw, rh  = tamaño de render del frame completo (mantiene aspect ratio)
+    //   ryOff   = ry = sy + ryOff  → pies del personaje en sy+PH (suelo del hitbox)
+    //   rxOff   = rx = sx + rxOff  → sprite centrado sobre el centro del hitbox
+    // dash_* se mantienen en PW×PH (animación muy breve, frame inusual).
+    type LulyDim = { rw: number; rh: number; ryOff: number; rxOff: number }
+    const LULY_DIM: Record<string, LulyDim> = {
+      idle:       { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },
+      walk:       { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },
+      run:        { rw: 80, rh:  83, ryOff:  -9, rxOff: -16 },
+      jump:       { rw: 66, rh: 118, ryOff: -29, rxOff:  -9 },
+      attack:     { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },  // fallback=idle
+      dash_right: { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      dash_left:  { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
+    }
+    const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
+    const rw = dim.rw, rh = dim.rh
+    const rx = sx + dim.rxOff
+    const ry = sy + dim.ryOff
+
+    if (p.facing === -1) {
+      ctx.save(); ctx.translate(rx + rw, ry); ctx.scale(-1, 1)
+      ctx.drawImage(spr, col * fw, row * fh, fw, fh, 0, 0, rw, rh)
+      ctx.restore()
+    } else {
+      ctx.drawImage(spr, col * fw, row * fh, fw, fh, rx, ry, rw, rh)
+    }
+    return
   }
   ctx.save(); if (p.facing === -1) { ctx.translate(sx + p.w, sy); ctx.scale(-1, 1) } else ctx.translate(sx, sy)
   const hp = p.hp / p.maxHp; ctx.fillStyle = hp > 0.66 ? "#D2B48C" : hp > 0.33 ? "#C19A6B" : "#A0785A"
@@ -4279,15 +4379,31 @@ function drawBones(ctx: CanvasRenderingContext2D, g: G) {
   }
 }
 
-function drawCrates(ctx: CanvasRenderingContext2D, g: G) {
+function drawCrates(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
+  // Sprite: sheet 1536×1024, contenido 834×775 medido con PIL
+  // Escalado para que el contenido ≈ 44×41 px (igual que el hitbox 44×44)
+  const BOX_RW = 81, BOX_RH = 54   // tamaño del render rect
+  const BOX_RX_OFF = -18            // rx = sx + BOX_RX_OFF (centra contenido sobre hitbox)
+  const BOX_RY_OFF = -4             // ry = sy + BOX_RY_OFF (base del contenido en sy+44)
+  const boxSpr = sprs["box"]
+
   for (const c of g.crates) {
     if (!c.active) continue
     const sx = c.x - g.cx, sy = c.y - g.cy
-    if (sx + c.w < -20 || sx > CW + 20 || sy + c.h < -20 || sy > CH + 20) continue
-    const wi = Math.max(0, Math.min(Math.floor(c.x / (NC * RW)), NW - 1)), th = THEMES[wi]
-    ctx.fillStyle = th.accent; ctx.fillRect(sx, sy, c.w, c.h); ctx.fillStyle = th.wallHi; ctx.fillRect(sx + 2, sy + 2, c.w - 4, c.h - 4)
-    ctx.fillStyle = th.wall; ctx.fillRect(sx + c.w / 2 - 1, sy + 3, 3, c.h - 6); ctx.fillRect(sx + 3, sy + c.h / 2 - 1, c.w - 6, 3)
-    ctx.strokeStyle = th.accent + "66"; ctx.lineWidth = 1; ctx.strokeRect(sx, sy, c.w, c.h)
+    if (sx + c.w < -40 || sx > CW + 40 || sy + c.h < -40 || sy > CH + 40) continue
+
+    if (boxSpr && boxSpr.complete && boxSpr.naturalWidth > 0) {
+      ctx.drawImage(boxSpr, sx + BOX_RX_OFF, sy + BOX_RY_OFF, BOX_RW, BOX_RH)
+    } else {
+      // Fallback procedural mientras carga el sprite
+      const wi = Math.max(0, Math.min(Math.floor(c.x / (NC * RW)), NW - 1)), th = THEMES[wi]
+      ctx.fillStyle = th.accent; ctx.fillRect(sx, sy, c.w, c.h)
+      ctx.fillStyle = th.wallHi;  ctx.fillRect(sx + 2, sy + 2, c.w - 4, c.h - 4)
+      ctx.fillStyle = th.wall
+      ctx.fillRect(sx + c.w / 2 - 1, sy + 3,       3,      c.h - 6)
+      ctx.fillRect(sx + 3,            sy + c.h/2-1, c.w-6,  3)
+      ctx.strokeStyle = th.accent + "66"; ctx.lineWidth = 1; ctx.strokeRect(sx, sy, c.w, c.h)
+    }
   }
 }
 
@@ -4525,44 +4641,137 @@ function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  drawFullMap — sin scroll, posición fija
+//  drawFullMap — modo "single" (mundo actual ampliado) o "all" (4 mundos)
 // ══════════════════════════════════════════════════════════════
+// Helper: ¿tiene al menos un cuarto explorado en el mundo w?
+function _mapWorldExplored(w: number, g: G): boolean {
+  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+    if (g.explored.has(`${w}_${c}_${r}`)) return true
+  }
+  return false
+}
+
+// Dibuja el grid de una sala para drawFullMap
+function _drawMapWorldGrid(
+  ctx: CanvasRenderingContext2D, g: G,
+  w: number, curW: number, curC: number, curR: number,
+  gx: number, gy: number, rW: number, rH: number, gap: number
+) {
+  const th = THEMES[w], wCleared = g.cw.has(w)
+  const kr = KENNEL_ROOMS[w]
+  const [p1c_m, p1r_m] = WORLD_P1_BOSS[w], [p2c_m, p2r_m] = WORLD_P2_BOSS[w]
+  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+    const rx = gx + c * (rW + gap), ry = gy + r * (rH + gap)
+    const roomKey = `${w}_${c}_${r}`, explored = g.explored.has(roomKey)
+    const isCur = w === curW && c === curC && r === curR
+    const zBg = r < TROW ? "rgba(0,30,10,1)" : r === TROW ? "rgba(0,10,30,1)" : "rgba(30,0,0,1)"
+    ctx.fillStyle = zBg; ctx.fillRect(rx, ry, rW, rH)
+    if (!explored) {
+      ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(rx, ry, rW, rH)
+      const nbL2 = c > 0 && g.explored.has(`${w}_${c-1}_${r}`) && computeDoors(w,c-1,r).R
+      const nbR3 = c < NC-1 && g.explored.has(`${w}_${c+1}_${r}`) && computeDoors(w,c+1,r).L
+      const nbU3 = r > 0 && g.explored.has(`${w}_${c}_${r-1}`) && computeDoors(w,c,r-1).D
+      const nbD3 = r < NR-1 && g.explored.has(`${w}_${c}_${r+1}`) && computeDoors(w,c,r+1).U
+      if (nbL2||nbR3||nbU3||nbD3) { ctx.fillStyle="rgba(255,255,255,0.10)"; ctx.fillRect(rx,ry,rW,rH); ctx.strokeStyle="rgba(255,255,255,0.35)"; ctx.lineWidth=0.5; ctx.strokeRect(rx,ry,rW,rH) }
+    } else {
+      const state = getRoomState(w,c,r,g.dead)
+      ctx.fillStyle = state==="clear" ? "rgba(0,160,55,0.4)" : state==="half" ? "rgba(185,145,0,0.4)" : "rgba(165,18,18,0.4)"
+      ctx.fillRect(rx,ry,rW,rH)
+      if (c===TRANSIT_BOSS_COL && r===TROW) { ctx.fillStyle="rgba(255,180,0,0.4)"; ctx.fillRect(rx,ry,rW,rH) }
+      else if (c===p1c_m && r===p1r_m) { ctx.fillStyle="rgba(0,200,80,0.3)"; ctx.fillRect(rx,ry,rW,rH) }
+      else if (c===p2c_m && r===p2r_m) { ctx.fillStyle=wCleared?"rgba(0,200,80,0.3)":"rgba(255,60,0,0.3)"; ctx.fillRect(rx,ry,rW,rH) }
+      if (kr.c===c && kr.r===r) { ctx.fillStyle=g.checkpoint.w===w?"#FFD700":"#555"; ctx.font="10px 'Courier New',monospace"; ctx.textAlign="center"; ctx.fillText("★",rx+rW/2,ry+rH/2+4); ctx.textAlign="left" }
+      const nCr = getCratesInRoom(w,c,r,g)
+      if (nCr>0) { ctx.fillStyle="#FFEE44EE"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="right"; ctx.fillText(`■${nCr}`,rx+rW-2,ry+rH-2); ctx.textAlign="left" }
+      if (isCur) { ctx.strokeStyle=th.accent+"CC"; ctx.lineWidth=2; ctx.strokeRect(rx,ry,rW,rH) }
+      else { ctx.strokeStyle=wCleared?th.accent+"55":"rgba(255,255,255,0.08)"; ctx.lineWidth=0.5; ctx.strokeRect(rx,ry,rW,rH) }
+    }
+    const doors = computeDoors(w,c,r)
+    const nbR4=`${w}_${c+1}_${r}`, nbD4=`${w}_${c}_${r+1}`, nbL4=`${w}_${c-1}_${r}`, nbU4=`${w}_${c}_${r-1}`
+    if (explored) {
+      const dh=Math.round(rH*0.40), dw2=Math.round(rW*0.40), doorW=Math.max(3,Math.round(rW*0.06))
+      const knownCol=th.accent+"FF", unknownCol="rgba(255,255,255,0.85)"
+      if (doors.R && c<NC-1) { ctx.fillStyle=g.explored.has(nbR4)?knownCol:unknownCol; ctx.fillRect(rx+rW-doorW,ry+Math.round((rH-dh)/2),doorW,dh) }
+      if (doors.D && r<NR-1) { ctx.fillStyle=g.explored.has(nbD4)?knownCol:unknownCol; ctx.fillRect(rx+Math.round((rW-dw2)/2),ry+rH-doorW,dw2,doorW) }
+      if (doors.L && c>0)    { ctx.fillStyle=g.explored.has(nbL4)?knownCol:unknownCol; ctx.fillRect(rx,ry+Math.round((rH-dh)/2),doorW,dh) }
+      if (doors.U && r>0)    { ctx.fillStyle=g.explored.has(nbU4)?knownCol:unknownCol; ctx.fillRect(rx+Math.round((rW-dw2)/2),ry,dw2,doorW) }
+    }
+  }
+  // Ícono tball (W0)
+  if (w===0) {
+    const tbPk=g.pickups.find(pk=>pk.id==="tball_w0"), tbc=TBALL_SECRET_C, tbr2=TBALL_SECRET_R
+    const tbRx=gx+tbc*(rW+gap), tbRy=gy+tbr2*(rH+gap)
+    const questRevealed=g.viejoDogState==="cage_opened"||g.viejoDogState==="quest_done"||g.viejoDogState==="surprised"
+    const cageHinted=g.viejoDogState==="key_dropped"||g.viejoDogState==="key_held"
+    if (!tbPk?.active) {
+      ctx.fillStyle="#556655"; ctx.font="9px 'Courier New',monospace"; ctx.textAlign="center"; ctx.fillText("🎾✓",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
+    } else if (questRevealed||cageHinted) {
+      const pulse=0.55+0.45*Math.sin(Date.now()*0.005)
+      ctx.fillStyle=cageHinted?`rgba(255,200,0,${pulse*0.35})`:`rgba(0,220,80,${pulse*0.35})`; ctx.fillRect(tbRx,tbRy,rW,rH)
+      ctx.strokeStyle=cageHinted?`rgba(255,220,0,${pulse*0.9})`:`rgba(0,255,80,${pulse*0.9})`; ctx.lineWidth=1.2; ctx.strokeRect(tbRx+1,tbRy+1,rW-2,rH-2)
+      ctx.fillStyle=cageHinted?"#FFE066":"#AAFFAA"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="center"
+      ctx.fillText(cageHinted?"🗝?":"🎾?",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
+    }
+  }
+  // Checkpoints
+  for (const cp of ALL_CPS) {
+    if (cp.w!==w || !g.discoveredCPs.has(cp.id)) continue
+    const cpRx=gx+cp.c*(rW+gap)+Math.round(rW/2), cpRy=gy+cp.r*(rH+gap)+Math.round(rH/2)
+    const isActive=g.checkpoint.w===cp.w && Math.abs(g.checkpoint.x-cp.x)<40
+    ctx.fillStyle=isActive?THEMES[w].accent:"#FFD700"
+    ctx.beginPath(); ctx.arc(cpRx,cpRy,isActive?Math.max(5,rW*0.08):Math.max(3,rW*0.06),0,Math.PI*2); ctx.fill()
+    if (isActive) { ctx.strokeStyle="#FFF"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(cpRx,cpRy,Math.max(7,rW*0.12),0,Math.PI*2); ctx.stroke() }
+    if (rW>=26) { ctx.fillStyle=isActive?"#FFF":"#AA8800"; ctx.font=`bold ${Math.max(9,Math.round(rW*0.14))}px 'Courier New',monospace`; ctx.textAlign="center"; ctx.fillText(cp.icon,cpRx+rW*0.12,cpRy+rH*0.22); ctx.textAlign="left" }
+  }
+}
+
 function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
   const p = g.pl
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
   const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
+
+  // Fondo + borde
   ctx.fillStyle = "rgba(0,0,0,0.95)"; ctx.fillRect(0, 0, CW, CH)
   ctx.strokeStyle = "#2A2A2A"; ctx.lineWidth = 2; ctx.strokeRect(2, 2, CW - 4, CH - 4)
   ctx.fillStyle = "#CCC"; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("// MAPA DEL COMPLEJO CANINO //", CW / 2, 22)
-  ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"
   const mapCloseKey = GPAD_BTN.map[g.gpadType ?? "keyboard"]
-  ctx.fillText(`[${mapCloseKey}] cerrar   ★ = perrera/checkpoint   negro = sin explorar`, CW / 2, 36)
+  ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"
+  ctx.fillText(`[${mapCloseKey}] cerrar   ★ = checkpoint   negro = sin explorar`, CW / 2, 36)
   ctx.textAlign = "left"
-  const rW = 34, rH = 22, gap = 2
-  const wGridW = NC * (rW + gap) - gap, wGridH = NR * (rH + gap) - gap
-  const wPadX = 10, wPadY = 8
-  const panW = wGridW + wPadX * 2, panH = 18 + wGridH + 14 + wPadY * 2
-  const panGap = 14, totalW = 2 * panW + panGap
 
-  // FIX: posición fija — sin scroll
-  const mLeft = Math.floor((CW - totalW) / 2)
-  const mTop = 42
+  const LEGEND_ITEMS: [string, string][] = [
+    ["#050505","sin explorar"],["#b22","enemigos"],["#aa8800","a medias"],
+    ["#0a5","limpia"],["rgba(255,60,0,0.8)","boss"],["#FFD700","checkpoint"]
+  ]
+  const drawLegend = (startX: number) => {
+    const ly = CH - 14; let lx = startX; ctx.font = "9px 'Courier New',monospace"
+    for (const [col, lbl] of LEGEND_ITEMS) {
+      if (lbl === "checkpoint") { ctx.fillStyle=col; ctx.beginPath(); ctx.arc(lx+4,ly+4,4,0,Math.PI*2); ctx.fill() }
+      else { ctx.fillStyle=col; ctx.fillRect(lx,ly,9,9) }
+      ctx.fillStyle="#555"; ctx.fillText(" "+lbl,lx+11,ly+8); lx+=lbl.length*5+26
+    }
+  }
 
-  for (let w = 0; w < NW; w++) {
-    const mc = w % 2, mr = Math.floor(w / 2)
-    const bx = mLeft + mc * (panW + panGap), by = mTop + mr * (panH + panGap)
+  if (g.mapView === "single") {
+    // ── Vista de un solo mundo, ampliada ────────────────────────────────
+    const w = g.mapViewWorld
     const th = THEMES[w], wCleared = g.cw.has(w)
-    ctx.fillStyle = "#0A0A0A"; ctx.fillRect(bx, by, panW, panH)
-    ctx.strokeStyle = wCleared ? th.accent : w === curW ? th.wallHi : "#2A2A2A"
-    ctx.lineWidth = wCleared ? 2 : 1; ctx.strokeRect(bx, by, panW, panH)
-    ctx.fillStyle = w === curW ? th.accent : wCleared ? "#888" : "#444"
-    ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "left"
-    ctx.fillText(`W${w + 1}  ${WORLD_NAMES[w]}`, bx + 5, by + 14)
-    const gx = bx + wPadX, gy = by + wPadY + 14, kr = KENNEL_ROOMS[w]
-    // ── Etiquetas de zona (izquierda del grid) ──
-    const [p1c_m, p1r_m] = WORLD_P1_BOSS[w], [p2c_m, p2r_m] = WORLD_P2_BOSS[w]
+    const HEADER_H = 44, FOOTER_H = 22, LEFT_LBL = 22, MARG_L = 14, MARG_R = 12
+    const gridW = CW - MARG_L - LEFT_LBL - MARG_R
+    const gridH = CH - HEADER_H - FOOTER_H - 8
+    const gap = 2
+    const rW = Math.floor((gridW - (NC - 1) * gap) / NC)
+    const rH = Math.floor((gridH - (NR - 1) * gap) / NR)
+    const gx = MARG_L + LEFT_LBL, gy = HEADER_H + 6
+
+    // Título del mundo
+    ctx.fillStyle = w === curW ? th.accent : wCleared ? "#AAA" : "#555"
+    ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "left"
+    ctx.fillText(`W${w+1} — ${WORLD_NAMES[w]}  ·  ${WORLD_SUBS[w]}`, gx, HEADER_H - 4)
+
+    // Etiquetas de zona (izquierda)
     ctx.font = "bold 7px 'Courier New',monospace"; ctx.textAlign = "right"
     const lblX = gx - 4
     for (let r = 0; r < NR; r++) {
@@ -4573,105 +4782,89 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
     }
     ctx.textAlign = "left"
 
-    for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
-      const rx = gx + c * (rW + gap), ry = gy + r * (rH + gap)
-      const roomKey = `${w}_${c}_${r}`, explored = g.explored.has(roomKey)
-      const isCur = w === curW && c === curC && r === curR
-      // Fondo de zona (siempre visible, incluso sin explorar)
-      const zBg = r < TROW ? "rgba(0,30,10,1)" : r === TROW ? "rgba(0,10,30,1)" : "rgba(30,0,0,1)"
-      ctx.fillStyle = zBg; ctx.fillRect(rx, ry, rW, rH)
-      if (!explored) {
-        ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(rx, ry, rW, rH)
-        const nbL = c > 0 && g.explored.has(`${w}_${c - 1}_${r}`) && computeDoors(w, c - 1, r).R
-        const nbR2 = c < NC - 1 && g.explored.has(`${w}_${c + 1}_${r}`) && computeDoors(w, c + 1, r).L
-        const nbU = r > 0 && g.explored.has(`${w}_${c}_${r - 1}`) && computeDoors(w, c, r - 1).D
-        const nbD2 = r < NR - 1 && g.explored.has(`${w}_${c}_${r + 1}`) && computeDoors(w, c, r + 1).U
-        if (nbL || nbR2 || nbU || nbD2) { ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.fillRect(rx, ry, rW, rH); ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 0.5; ctx.strokeRect(rx, ry, rW, rH) }
-      } else {
-        const state = getRoomState(w, c, r, g.dead)
-        ctx.fillStyle = state === "clear" ? "rgba(0,160,55,0.4)" : state === "half" ? "rgba(185,145,0,0.4)" : "rgba(165,18,18,0.4)"
-        ctx.fillRect(rx, ry, rW, rH)
-        // Boss markers — 3 tipos
-        if (c === TRANSIT_BOSS_COL && r === TROW) { ctx.fillStyle = "rgba(255,180,0,0.4)"; ctx.fillRect(rx, ry, rW, rH) }
-        else if (c === p1c_m && r === p1r_m) { ctx.fillStyle = "rgba(0,200,80,0.3)"; ctx.fillRect(rx, ry, rW, rH) }
-        else if (c === p2c_m && r === p2r_m) { ctx.fillStyle = wCleared ? "rgba(0,200,80,0.3)" : "rgba(255,60,0,0.3)"; ctx.fillRect(rx, ry, rW, rH) }
-        if (kr.c === c && kr.r === r) { ctx.fillStyle = g.checkpoint.w === w ? "#FFD700" : "#555"; ctx.font = "10px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText("★", rx + rW / 2, ry + rH / 2 + 4); ctx.textAlign = "left" }
-        const nCr = getCratesInRoom(w, c, r, g)
-        if (nCr > 0) { ctx.fillStyle = "#FFEE44EE"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`■${nCr}`, rx + rW - 2, ry + rH - 2); ctx.textAlign = "left" }
-        if (isCur) { ctx.strokeStyle = th.accent + "CC"; ctx.lineWidth = 1.5; ctx.strokeRect(rx, ry, rW, rH) }
-        else { ctx.strokeStyle = wCleared ? th.accent + "55" : "rgba(255,255,255,0.08)"; ctx.lineWidth = 0.5; ctx.strokeRect(rx, ry, rW, rH) }
-      }
-      const doors = computeDoors(w, c, r)
-      const nbR = `${w}_${c + 1}_${r}`, nbD = `${w}_${c}_${r + 1}`, nbL = `${w}_${c - 1}_${r}`, nbU2 = `${w}_${c}_${r - 1}`
-      if (explored) {
-        const dh = Math.round(rH * 0.40), dw2 = Math.round(rW * 0.40), doorW = 3
-        const knownCol = th.accent + "FF", unknownCol = "rgba(255,255,255,0.85)"
-        if (doors.R && c < NC - 1) { ctx.fillStyle = g.explored.has(nbR) ? knownCol : unknownCol; ctx.fillRect(rx + rW - doorW, ry + Math.round((rH - dh) / 2), doorW, dh) }
-        if (doors.D && r < NR - 1) { ctx.fillStyle = g.explored.has(nbD) ? knownCol : unknownCol; ctx.fillRect(rx + Math.round((rW - dw2) / 2), ry + rH - doorW, dw2, doorW) }
-        if (doors.L && c > 0) { ctx.fillStyle = g.explored.has(nbL) ? knownCol : unknownCol; ctx.fillRect(rx, ry + Math.round((rH - dh) / 2), doorW, dh) }
-        if (doors.U && r > 0) { ctx.fillStyle = g.explored.has(nbU2) ? knownCol : unknownCol; ctx.fillRect(rx + Math.round((rW - dw2) / 2), ry, dw2, doorW) }
-      }
-    }
-    // ── Ícono de poder oculto (tball) — solo en W0, solo si quest revelada ──
-    if (w === 0) {
-      const tbPk = g.pickups.find(p => p.id === "tball_w0")
-      const tbc = TBALL_SECRET_C, tbr = TBALL_SECRET_R
-      const tbRx = gx + tbc * (rW + gap), tbRy = gy + tbr * (rH + gap)
-      const questRevealed = g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised"
-      const cageHinted = g.viejoDogState === "key_dropped" || g.viejoDogState === "key_held"
-      if (!tbPk?.active) {
-        // Recogida: siempre visible como "ya encontrado"
-        ctx.fillStyle = "#556655"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("🎾✓", tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
-      } else if (questRevealed || cageHinted) {
-        // Quest completada o llave en camino: destello pulsante con icono de jaula/pelota
-        const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
-        const glowCol = cageHinted ? `rgba(255,200,0,${pulse * 0.35})` : `rgba(0,220,80,${pulse * 0.35})`
-        const strokeCol = cageHinted ? `rgba(255,220,0,${pulse * 0.9})` : `rgba(0,255,80,${pulse * 0.9})`
-        ctx.fillStyle = glowCol; ctx.fillRect(tbRx, tbRy, rW, rH)
-        ctx.strokeStyle = strokeCol; ctx.lineWidth = 1.2
-        ctx.strokeRect(tbRx + 1, tbRy + 1, rW - 2, rH - 2)
-        const mapIcon = cageHinted ? "🗝?" : "🎾?"
-        ctx.fillStyle = cageHinted ? "#FFE066" : "#AAFFAA"
-        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText(mapIcon, tbRx + rW / 2, tbRy + rH / 2 + 4); ctx.textAlign = "left"
-      }
-      // Si quest no revelada: sin icono en el mapa (secreto intacto)
-    }
+    // Grid del mundo
+    _drawMapWorldGrid(ctx, g, w, curW, curC, curR, gx, gy, rW, rH, gap)
 
-    // ── Iconos de checkpoints en este panel de mundo ───────────────────
-    for (const cp of ALL_CPS) {
-      if (cp.w !== w) continue
-      if (!g.discoveredCPs.has(cp.id)) continue
-      const cpRx = gx + cp.c * (rW + gap) + Math.round(rW / 2)
-      const cpRy = gy + cp.r * (rH + gap) + Math.round(rH / 2)
-      const isActive = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
-      ctx.fillStyle = isActive ? THEMES[w].accent : "#FFD700"
-      ctx.beginPath(); ctx.arc(cpRx, cpRy, isActive ? 5 : 3.5, 0, Math.PI * 2); ctx.fill()
-      if (isActive) {
-        ctx.strokeStyle = "#FFF"; ctx.lineWidth = 1.5
-        ctx.beginPath(); ctx.arc(cpRx, cpRy, 7, 0, Math.PI * 2); ctx.stroke()
-      }
-      if (rW >= 26) {
-        ctx.fillStyle = isActive ? "#FFF" : "#AA8800"
-        ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText(cp.icon, cpRx + 7, cpRy + 3); ctx.textAlign = "left"
-      }
-    }
-    ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
+    // Estado del mundo (bottom-left del grid)
+    ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "left"
     ctx.fillStyle = wCleared ? "#00FF88" : w === curW ? "#AAAAFF" : w < curW ? "#666" : "#333"
-    ctx.fillText(wCleared ? "✓ LIBERADO" : w === curW ? "⟶ ACTIVO" : w < curW ? "⚔ VISITADO" : "[ BLOQUEADO ]", bx + panW / 2, by + panH - 4)
+    ctx.fillText(wCleared ? "✓ LIBERADO" : w === curW ? "⟶ ACTIVO" : w < curW ? "⚔ VISITADO" : "[ BLOQUEADO ]", gx, CH - FOOTER_H + 8)
+
+    // Botón "VER TODOS LOS MUNDOS ▶" (top-right)
+    const btnW = 142, btnH = 26, btnX = CW - btnW - 6, btnY = 6
+    ctx.fillStyle = "#111"; ctx.fillRect(btnX, btnY, btnW, btnH)
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 1; ctx.strokeRect(btnX, btnY, btnW, btnH)
+    ctx.fillStyle = "#AAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText("VER TODOS LOS MUNDOS ▶", btnX + btnW / 2, btnY + 17)
     ctx.textAlign = "left"
-  }
-  const ly = CH - 14, items: [string, string][] = [["#050505", "sin explorar"], ["#b22", "enemigos"], ["#aa8800", "a medias"], ["#0a5", "limpia"], ["rgba(255,60,0,0.8)", "boss"], ["#FFD700", "perrera"], ["#FFD700", "checkpoint"]]
-  let lx = mLeft; ctx.font = "9px 'Courier New',monospace"
-  for (const [col, lbl] of items) {
-    if (lbl === "checkpoint") {
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(lx + 4, ly + 4, 4, 0, Math.PI * 2); ctx.fill()
-    } else {
-      ctx.fillStyle = col; ctx.fillRect(lx, ly, 9, 9)
+
+    drawLegend(gx)
+
+  } else {
+    // ── Vista de los 4 mundos ────────────────────────────────────────────
+    const rW = 34, rH = 22, gap = 2
+    const wGridW = NC * (rW + gap) - gap, wGridH = NR * (rH + gap) - gap
+    const wPadX = 10, wPadY = 8
+    const panW = wGridW + wPadX * 2, panH = 18 + wGridH + 14 + wPadY * 2
+    const panGap = 14, totalW = 2 * panW + panGap
+    const mLeft = Math.floor((CW - totalW) / 2), mTop = 42
+
+    // Botón "◀ MAPA ACTUAL" (top-left)
+    const backW = 130, backH = 26, backX = mLeft, backY = 6
+    ctx.fillStyle = "#111"; ctx.fillRect(backX, backY, backW, backH)
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 1; ctx.strokeRect(backX, backY, backW, backH)
+    ctx.fillStyle = "#AAA"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText("◀ MAPA ACTUAL", backX + backW / 2, backY + 17)
+    ctx.textAlign = "left"
+
+    for (let w = 0; w < NW; w++) {
+      const mc = w % 2, mr = Math.floor(w / 2)
+      const bx = mLeft + mc * (panW + panGap), by = mTop + mr * (panH + panGap)
+      const th = THEMES[w], wCleared = g.cw.has(w)
+      const hasExp = _mapWorldExplored(w, g)
+
+      ctx.fillStyle = "#0A0A0A"; ctx.fillRect(bx, by, panW, panH)
+      ctx.strokeStyle = wCleared ? th.accent : w === curW ? th.wallHi : "#2A2A2A"
+      ctx.lineWidth = wCleared ? 2 : 1; ctx.strokeRect(bx, by, panW, panH)
+      ctx.fillStyle = w === curW ? th.accent : wCleared ? "#888" : "#444"
+      ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "left"
+      ctx.fillText(`W${w+1}  ${WORLD_NAMES[w]}`, bx + 5, by + 14)
+
+      if (!hasExp && w !== curW) {
+        // Mundo no explorado — overlay bloqueado
+        ctx.fillStyle = "rgba(0,0,0,0.76)"; ctx.fillRect(bx, by, panW, panH)
+        ctx.fillStyle = "#555"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+        ctx.fillText("NO DESCUBIERTO", bx + panW / 2, by + panH / 2 - 5)
+        ctx.fillStyle = "#333"; ctx.font = "8px 'Courier New',monospace"
+        ctx.fillText("explora para revelar", bx + panW / 2, by + panH / 2 + 8)
+        ctx.textAlign = "left"
+        continue
+      }
+
+      const gx = bx + wPadX, gy = by + wPadY + 14
+      // Etiquetas de zona
+      ctx.font = "bold 7px 'Courier New',monospace"; ctx.textAlign = "right"
+      const lblX = gx - 4
+      for (let r = 0; r < NR; r++) {
+        const ry0 = gy + r * (rH + gap) + rH / 2 + 3
+        if (r < TROW) { ctx.fillStyle = "#00AA44"; ctx.fillText("P1", lblX, ry0) }
+        else if (r === TROW) { ctx.fillStyle = "#4499FF"; ctx.fillText("T", lblX, ry0) }
+        else { ctx.fillStyle = "#FF3333"; ctx.fillText("P2", lblX, ry0) }
+      }
+      ctx.textAlign = "left"
+
+      // Grid
+      _drawMapWorldGrid(ctx, g, w, curW, curC, curR, gx, gy, rW, rH, gap)
+
+      // Estado + hint de clic
+      ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillStyle = wCleared ? "#00FF88" : w === curW ? "#AAAAFF" : w < curW ? "#666" : "#333"
+      ctx.fillText(wCleared ? "✓ LIBERADO" : w === curW ? "⟶ ACTIVO" : w < curW ? "⚔ VISITADO" : "[ BLOQUEADO ]", bx + panW / 2, by + panH - 12)
+      ctx.fillStyle = th.accent + "99"; ctx.font = "7px 'Courier New',monospace"
+      ctx.fillText("[ VER DETALLE ]", bx + panW / 2, by + panH - 3)
+      ctx.textAlign = "left"
     }
-    ctx.fillStyle = "#555"; ctx.fillText(" " + lbl, lx + 11, ly + 8); lx += lbl.length * 5 + 26
+    drawLegend(mLeft)
   }
 }
 
@@ -4951,8 +5144,8 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawCage(ctx, g); drawBones(ctx, g); drawCrates(ctx, g); drawCheckpoints(ctx, g)
-  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawCage(ctx, g); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
@@ -5413,7 +5606,7 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   _gpPrevL = stL; _gpPrevR = stR
   g.keys["z"] = Math.abs(ax(2)) > GP_DEAD || Math.abs(ax(3)) > GP_DEAD
   if (edgeDown(GP.START)) g.paused = !g.paused
-  if (edgeDown(GP.BACK)) { g.showMap = !g.showMap; g.paused = g.showMap; onMapToggle() }
+  if (edgeDown(GP.BACK)) { g.showMap = !g.showMap; g.paused = g.showMap; onMapToggle(); if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW)))); g.mapView = "single" } }
   // LB = teletransporte (menú de CPs)
   if (edgeDown(GP.LB) && !g.tpAnim && g.discoveredCPs.size >= 2) {
     g.tpMenu = { open: true, idx: 0 }
@@ -5480,6 +5673,21 @@ export default function ProyectoLuly() {
     L("boos_hurt_left", "/assets/boos/boos_hurt_left.png")
     L("boos_defeat_right", "/assets/boos/boos_defeat_right.png")
     L("boos_defeat_left", "/assets/boos/boos_defeat_left.png")
+    // Cajas de suministros
+    L("box", "/assets/Enviroment/Boxes/box.png")
+    // Kennels de entorno — uno por mundo
+    L("kennel_ambar",  "/assets/Enviroment/Kennel/Kennel_ambar.png")   // W0 Las Perreras
+    L("kennel_red",    "/assets/Enviroment/Kennel/Kennel_red.png")     // W1 Fábrica Canina
+    L("kennel_blue",   "/assets/Enviroment/Kennel/Kennel_blue.png")    // W2 Los Tubos
+    L("kennel_violet", "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
+    // Rex el Viejo — sprites por estado
+    L("rex_idle",               "/assets/NPCs/Rex_The_Old/idle.png")
+    L("rex_saludo_left",        "/assets/NPCs/Rex_The_Old/saludo_left.png")
+    L("rex_saludo_right",       "/assets/NPCs/Rex_The_Old/saludo_right.png")
+    L("rex_talk_left",          "/assets/NPCs/Rex_The_Old/talk_left.png")
+    L("rex_talk_right",         "/assets/NPCs/Rex_The_Old/talk_right.png")
+    L("rex_mitad_llave_left",   "/assets/NPCs/Rex_The_Old/mitad_llave_left.png")
+    L("rex_mitad_llave_right",  "/assets/NPCs/Rex_The_Old/mitad_llave_right.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -5599,7 +5807,10 @@ export default function ProyectoLuly() {
           g.devMapCursor = { c: curC, r: curR }
         }
       }
-      if (k === "tab") { g.showMap = !g.showMap; g.paused = g.showMap }
+      if (k === "tab") {
+        g.showMap = !g.showMap; g.paused = g.showMap
+        if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW)))); g.mapView = "single" }
+      }
       if (k === "f") handleToggleFS()
       if (k === "escape") {
         if (g.tpMenu?.open) { g.tpMenu = null; return }
@@ -5660,24 +5871,73 @@ export default function ProyectoLuly() {
       const scaleY = CH / rect.height
       return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY }
     }
+    const getTouchXY = (e: TouchEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      const scaleX = CW / rect.width
+      const scaleY = CH / rect.height
+      const t = e.changedTouches[0]
+      return { x: (t.clientX - rect.left) * scaleX, y: (t.clientY - rect.top) * scaleY }
+    }
+    // Lógica compartida de click en el mapa
+    const handleMapClick = (g: G, x: number, y: number) => {
+      const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
+      if (g.mapView === "single") {
+        // Botón "VER TODOS"
+        const btnW = 142, btnH = 26, btnX = CW - btnW - 6, btnY = 6
+        if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
+          g.mapView = "all"
+        }
+      } else {
+        // Botón "◀ MAPA ACTUAL"
+        const rW2 = 34, rH2 = 22, gap2 = 2
+        const wGridW2 = NC * (rW2 + gap2) - gap2, wGridH2 = NR * (rH2 + gap2) - gap2
+        const wPadX2 = 10, wPadY2 = 8
+        const panW2 = wGridW2 + wPadX2 * 2, panH2 = 18 + wGridH2 + 14 + wPadY2 * 2
+        const panGap2 = 14, totalW2 = 2 * panW2 + panGap2
+        const mLeft2 = Math.floor((CW - totalW2) / 2), mTop2 = 42
+        const backW2 = 130, backH2 = 26, backX2 = mLeft2, backY2 = 6
+        if (x >= backX2 && x <= backX2 + backW2 && y >= backY2 && y <= backY2 + backH2) {
+          g.mapView = "single"; return
+        }
+        // Click en panel de mundo → ver detalle
+        for (let w = 0; w < NW; w++) {
+          const mc = w % 2, mr = Math.floor(w / 2)
+          const bx = mLeft2 + mc * (panW2 + panGap2), by = mTop2 + mr * (panH2 + panGap2)
+          if (x >= bx && x <= bx + panW2 && y >= by && y <= by + panH2) {
+            if (_mapWorldExplored(w, g) || w === curW) { g.mapView = "single"; g.mapViewWorld = w }
+            break
+          }
+        }
+      }
+    }
     const onMove = (e: MouseEvent) => {
       const g = G.current
       if (!g.showDevMap) { devHoverRef.current = null; return }
       const { x, y } = getCanvasXY(e)
-      // FIX: sin parámetros de scroll
       devHoverRef.current = devMapHitTest(x, y, g.devMapWorld)
     }
     const onClick = (e: MouseEvent) => {
-      const g = G.current; if (!g.showDevMap) return
+      const g = G.current
+      if (g.showMap && !g.showDevMap) { const { x, y } = getCanvasXY(e); handleMapClick(g, x, y); return }
+      if (!g.showDevMap) return
       const { x, y } = getCanvasXY(e)
-      // FIX: sin parámetros de scroll
       const hit = devMapHitTest(x, y, g.devMapWorld)
       if (!hit) return
       if (hit.c === -1) { g.devMapWorld = hit.w; return }
       devTeleport(g, hit.w, hit.c, hit.r)
     }
-    canvas.addEventListener("mousemove", onMove); canvas.addEventListener("click", onClick)
-    return () => { canvas.removeEventListener("mousemove", onMove); canvas.removeEventListener("click", onClick) }
+    const onTouchEnd = (e: TouchEvent) => {
+      const g = G.current
+      if (g.showMap && !g.showDevMap) { const { x, y } = getTouchXY(e); handleMapClick(g, x, y) }
+    }
+    canvas.addEventListener("mousemove", onMove)
+    canvas.addEventListener("click", onClick)
+    canvas.addEventListener("touchend", onTouchEnd, { passive: true })
+    return () => {
+      canvas.removeEventListener("mousemove", onMove)
+      canvas.removeEventListener("click", onClick)
+      canvas.removeEventListener("touchend", onTouchEnd)
+    }
   }, [])
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -5691,6 +5951,7 @@ export default function ProyectoLuly() {
   const [winDims, setWinDims] = useState({ w: typeof window !== "undefined" ? window.innerWidth : CW, h: typeof window !== "undefined" ? window.innerHeight : CH })
   const dpadTapRef = useRef({ left: 0, right: 0 })      // para doble-tap → run
   const devHoverRef = useRef<{ w: number; c: number; r: number } | null>(null)
+  const pauseSwipeY = useRef(0)   // Y inicial del toque en el indicador de swipe (pausa)
 
   // ── Helpers cross-browser para fullscreen ──────────────────────────────
   const isIOS = typeof window !== "undefined" && (
@@ -6252,19 +6513,19 @@ export default function ProyectoLuly() {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  MODO MAPA — solo muestra botón B para cerrar (difuminado)
+    //  MODO MAPA — solo botón B en inferior derecho para cerrar
     // ══════════════════════════════════════════════════════════════════════
     if (ui.showMap) {
       const btnSz = Math.round(ACT_H * 0.34)
       return (
         <div style={{
-          position: "absolute", bottom: SAFE_B + 20, left: "50%",
-          transform: "translateX(-50%)", zIndex: 100,
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+          position: "absolute", bottom: SAFE_B + 14, right: "4%",
+          zIndex: 100,
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
           pointerEvents: "none",
         }}>
-          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.30)", letterSpacing: "0.15em", fontFamily: "'Courier New',monospace" }}>CERRAR MAPA</span>
-          <div style={{ pointerEvents: "auto", opacity: 0.70 }}>
+          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.30)", letterSpacing: "0.12em", fontFamily: "'Courier New',monospace" }}>CERRAR</span>
+          <div style={{ pointerEvents: "auto", opacity: 0.72 }}>
             {xbCircle(btnSz, XB_COL.B, "B", null,
               () => { g.showMap = false; g.paused = false }, () => {})}
           </div>
@@ -6273,71 +6534,69 @@ export default function ProyectoLuly() {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  MODO PAUSA — D-pad (↑↓ navegan) + A (confirmar) + B (salir), difuminados
+    //  MODO PAUSA — swipe ↑↓ para navegar + B para salir (sin D-pad ni A)
     // ══════════════════════════════════════════════════════════════════════
     if (ui.paused && !ui.showDevMap) {
       const PAUSE_COUNT = 3
-      const confirmPause = () => {
-        const sel = pauseSelRef.current
-        if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
-        else if (sel === 1) handleRestart()
-        else { try { localStorage.removeItem(SAVE_KEY) } catch (_) { } setHasSave(false) }
-      }
       const navPause = (dir: 1 | -1) => {
         const next = (pauseSelRef.current + dir + PAUSE_COUNT) % PAUSE_COUNT
         pauseSelRef.current = next; setPauseSel(next)
       }
-      const BIG = Math.round(ACT_H * 0.38)
-      const MED = Math.round(ACT_H * 0.30)
+      const swipeSz = Math.round(vh * 0.22)    // tamaño del indicador
+      const BTN_SZ  = Math.round(ACT_H * 0.38)
       return (
         <>
-          {/* D-pad — solo ↑↓ activos para navegar el menú de pausa */}
-          <div style={{
-            position: "absolute", bottom: DPAD_B, left: "15%",
-            transform: "translateX(-50%)",
-            width: TOTAL, height: TOTAL,
-            touchAction: "none", zIndex: 100, opacity: 0.70,
-          }}>
-            <div style={{
-              position: "absolute", inset: 0,
-              background: "linear-gradient(145deg,#333 0%,#1C1C1C 100%)",
-              clipPath: `polygon(${ARM}px 0,${ARM+HUB}px 0,${ARM+HUB}px ${ARM}px,${TOTAL}px ${ARM}px,${TOTAL}px ${ARM+HUB}px,${ARM+HUB}px ${ARM+HUB}px,${ARM+HUB}px ${TOTAL}px,${ARM}px ${TOTAL}px,${ARM}px ${ARM+HUB}px,0 ${ARM+HUB}px,0 ${ARM}px,${ARM}px ${ARM}px)`,
-              boxShadow: "0 6px 20px rgba(0,0,0,0.75)",
-            }}/>
-            <svg style={{ position:"absolute",inset:0,overflow:"visible",pointerEvents:"none" }} width={TOTAL} height={TOTAL}>
-              <path d={`M${ARM} 0 H${ARM+HUB} V${ARM} H${TOTAL} V${ARM+HUB} H${ARM+HUB} V${TOTAL} H${ARM} V${ARM+HUB} H0 V${ARM} H${ARM} Z`}
-                fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="1.5"/>
+          {/* Indicador táctil de deslizar (centrado verticalmente en el lado izquierdo) */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: SAFE_B + Math.round(vh * 0.18),
+              left: "12%",
+              transform: "translateX(-50%)",
+              width: swipeSz,
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+              zIndex: 100, opacity: 0.65,
+              touchAction: "none", userSelect: "none",
+            }}
+            onPointerDown={(e) => { e.preventDefault(); pauseSwipeY.current = e.clientY }}
+            onPointerUp={(e) => {
+              e.preventDefault()
+              const dy = pauseSwipeY.current - e.clientY
+              if (Math.abs(dy) > 18) navPause(dy > 0 ? -1 : 1)
+            }}
+            onPointerCancel={() => { pauseSwipeY.current = 0 }}
+          >
+            {/* Flecha arriba */}
+            <svg width="32" height="22" viewBox="0 0 32 22">
+              <path d="M16 2 L28 20 L4 20 Z" fill="rgba(255,255,255,0.75)" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
             </svg>
-            <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
-              background:"#252525", border:"1px solid rgba(255,255,255,0.09)", pointerEvents:"none"}}/>
-            {dArrow("up",   {left:ARM, top:0,       width:HUB, height:ARM}, () => navPause(-1), () => {})}
-            {dArrow("down", {left:ARM, top:ARM+HUB, width:HUB, height:ARM}, () => navPause(1),  () => {})}
-            {/* ← → visuales pero sin acción */}
-            <div style={{ position:"absolute", left:0, top:ARM, width:ARM, height:HUB,
-              display:"flex", alignItems:"center", justifyContent:"center", opacity:0.18, pointerEvents:"none" }}>
-              <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
+            {/* Icono de dedo / toque */}
+            <div style={{
+              width: 28, height: 28,
+              background: "rgba(255,255,255,0.10)",
+              border: "1.5px solid rgba(255,255,255,0.30)",
+              borderRadius: "50%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 16,
+            }}>
+              ☝
             </div>
-            <div style={{ position:"absolute", left:ARM+HUB, top:ARM, width:ARM, height:HUB,
-              display:"flex", alignItems:"center", justifyContent:"center", opacity:0.18, pointerEvents:"none" }}>
-              <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
-            </div>
+            {/* Flecha abajo */}
+            <svg width="32" height="22" viewBox="0 0 32 22">
+              <path d="M16 20 L28 2 L4 2 Z" fill="rgba(255,255,255,0.75)" stroke="rgba(255,255,255,0.3)" strokeWidth="1"/>
+            </svg>
+            <span style={{ fontSize: 8, color: "rgba(255,255,255,0.45)", letterSpacing: "0.10em", fontFamily: "'Courier New',monospace", textAlign: "center", lineHeight: 1.3 }}>
+              DESLIZA
+            </span>
           </div>
 
-          {/* A (ELEGIR) y B (ATRÁS/CERRAR) */}
+          {/* Botón B — salir de pausa (derecha) */}
           <div style={{
-            position: "absolute", bottom: ACT_B, right: "3%",
-            width: ACT_H, height: Math.round(ACT_H * 0.65),
-            zIndex: 100, opacity: 0.80,
+            position: "absolute", bottom: ACT_B + Math.round(ACT_H * 0.12),
+            right: "5%", zIndex: 100, opacity: 0.82,
           }}>
-            {/* B — cancelar / salir pausa */}
-            <div style={{ position:"absolute", left:0, top:"50%", transform:"translateY(-55%)" }}>
-              {xbCircle(MED, XB_COL.B, "B", "ATRÁS",
-                () => { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }, () => {})}
-            </div>
-            {/* A — confirmar opción seleccionada */}
-            <div style={{ position:"absolute", bottom:0, right:0 }}>
-              {xbCircle(BIG, XB_COL.A, "A", "ELEGIR", confirmPause, () => {})}
-            </div>
+            {xbCircle(BTN_SZ, XB_COL.B, "B", "SALIR",
+              () => { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }, () => {})}
           </div>
         </>
       )
@@ -6363,7 +6622,10 @@ export default function ProyectoLuly() {
           {/* MAP */}
           <div
             style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 11, gap: 4, pointerEvents: "auto" }}
-            {...makeTouch(() => { g.showMap = !g.showMap; g.paused = g.showMap }, () => {})}
+            {...makeTouch(() => {
+              g.showMap = !g.showMap; g.paused = g.showMap
+              if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW-1, Math.floor(g.pl.x/(NC*RW)))); g.mapView = "single" }
+            }, () => {})}
           >
             <svg width="14" height="14" viewBox="0 0 14 14" style={{ opacity: 0.75 }}>
               <rect x="1" y="3" width="4" height="8" fill="none" stroke="currentColor" strokeWidth="1.3"/>
