@@ -81,7 +81,7 @@ type G = {
   abilityNotif: { text: string; timer: number } | null
   // Sistema de checkpoints con teletransportación
   discoveredCPs: Set<string>
-  tpMenu: { open: boolean; idx: number } | null
+  tpMenu: { open: boolean; world: number; cpIdx: number } | null
   tpAnim: { timer: number; phase: 0 | 1; destX: number; destY: number } | null
   // Stamina display mode: "bar" = classic top-right bar, "circle" = circle near player
   staDisplay: "bar" | "circle"
@@ -3736,7 +3736,32 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ? Math.min(1, _rexNameAlpha + 0.045)
     : Math.max(0, _rexNameAlpha - 0.045)
 
-  // ── Sombra ────────────────────────────────────────────────────────────────
+  // ── Casa de Rex (fondo — se dibuja ANTES que Rex para quedar detrás) ─────────
+  // PIL: 1536×1024, content(12,44,1528,934) → W=1516 H=890, pad=12/8/44/90
+  // Scale 0.3596 → render 552×368, content 545×320
+  // HRX: Rex al 27% del ancho del contenido → bx - 151
+  // HRY: base del contenido a ras de suelo (by+10) → by - 326
+  {
+    const RH_house = sprs["rex_house"]
+    const HRW = 552, HRH = 368
+    const HRX = bx - 151
+    const HRY = by - 326   // contenido apoyado en el suelo (by + 10 = suelo en pantalla)
+    if (RH_house && RH_house.complete && RH_house.naturalWidth > 0) {
+      ctx.drawImage(RH_house, HRX, HRY, HRW, HRH)
+    } else {
+      // Fallback: silueta simple de casa mientras carga
+      ctx.fillStyle = "rgba(60,45,30,0.85)"
+      ctx.fillRect(bx + 10, by - 300, 340, 290)
+      ctx.fillStyle = "rgba(40,28,18,0.9)"
+      ctx.beginPath()
+      ctx.moveTo(bx + 0, by - 300)
+      ctx.lineTo(bx + 180, by - 370)
+      ctx.lineTo(bx + 360, by - 300)
+      ctx.closePath(); ctx.fill()
+    }
+  }
+
+  // ── Sombra de Rex ─────────────────────────────────────────────────────────
   ctx.fillStyle = "rgba(0,0,0,0.22)"
   ctx.beginPath(); ctx.ellipse(bx, by, rw * 0.48, 4, 0, 0, Math.PI * 2); ctx.fill()
 
@@ -4110,30 +4135,33 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
         ctx.beginPath(); ctx.arc(sx, sy - 16, 16, Math.PI, 0); ctx.rect(sx - 16, sy - 16, 32, 16); ctx.fill()
       }
     } else {
-      // ── Colchoncito de perro (nuevos checkpoints) ──────────────────
-      const bw = 56, bh = 22
-      // Sombra del colchón
-      ctx.fillStyle = "rgba(0,0,0,0.45)"
-      ctx.beginPath(); ctx.ellipse(sx, sy - 4, bw / 2 + 4, 7, 0, 0, Math.PI * 2); ctx.fill()
-      // Base del colchón (oval)
-      ctx.fillStyle = discovered ? (isSpawn ? th.wall : th.rock) : "#1A1A1A"
-      ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2, bh / 2, 0, 0, Math.PI * 2); ctx.fill()
-      // Borde del colchón
-      ctx.strokeStyle = discovered ? (isSpawn ? th.accent + "CC" : th.rockHi) : "#2A2A2A"
-      ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2, bh / 2, 0, 0, Math.PI * 2); ctx.stroke()
-      // Relleno interno (cojín)
-      ctx.fillStyle = discovered ? (isSpawn ? th.wallHi : th.wall) : "#141414"
-      ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2 - 5, bh / 2 - 4, 0, 0, Math.PI * 2); ctx.fill()
-      // Costuras decorativas del colchón
-      if (discovered) {
-        ctx.strokeStyle = th.rock + "AA"; ctx.lineWidth = 0.8
-        ctx.beginPath(); ctx.ellipse(sx - 8, sy - 10, 6, bh / 2 - 6, 0, 0, Math.PI * 2); ctx.stroke()
-        ctx.beginPath(); ctx.ellipse(sx + 8, sy - 10, 6, bh / 2 - 6, 0, 0, Math.PI * 2); ctx.stroke()
-      }
-      // Hueso decorativo encima (si descubierto y no activo)
-      if (discovered && !isSpawn) {
-        ctx.fillStyle = th.rockHi + "99"; ctx.font = "10px 'Courier New',monospace"; ctx.textAlign = "center"
-        ctx.fillText("🦴", sx, sy - 7); ctx.textAlign = "left"
+      // ── Cucha de teletransporte (sprite) ───────────────────────────
+      // Medidas PIL: sheet 1088×512, content 629×402, pad=231/228/55/55
+      // Scale a content-h≈50 px (0.1244): rW=135, rH=64
+      // padL_s=29 padTop_s=7 padBot_s=7 → contentBottom=57 → raise 6 → CT_RY=sy-63
+      // contentCenterX=68 → CT_RX=sx-68
+      const CT_RW = 135, CT_RH = 64
+      const CT_RX = sx - 68   // centra contenido sobre sx
+      const CT_RY = sy - 63   // contenido flota 6 px sobre el suelo
+      const ctSpr = sprs["cucha_teleport"]
+      if (ctSpr && ctSpr.complete && ctSpr.naturalWidth > 0) {
+        ctx.save()
+        if (isSpawn) {
+          ctx.shadowColor = th.accent; ctx.shadowBlur = 20
+        } else {
+          ctx.globalAlpha = discovered ? 1 : 0.40
+        }
+        ctx.drawImage(ctSpr, CT_RX, CT_RY, CT_RW, CT_RH)
+        ctx.restore()
+      } else {
+        // Fallback procedural mientras carga
+        const bw = 56, bh = 22
+        ctx.fillStyle = "rgba(0,0,0,0.45)"
+        ctx.beginPath(); ctx.ellipse(sx, sy - 4, bw / 2 + 4, 7, 0, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = discovered ? (isSpawn ? th.wall : th.rock) : "#1A1A1A"
+        ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2, bh / 2, 0, 0, Math.PI * 2); ctx.fill()
+        ctx.strokeStyle = discovered ? (isSpawn ? th.accent + "CC" : th.rockHi) : "#2A2A2A"
+        ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(sx, sy - 10, bw / 2, bh / 2, 0, 0, Math.PI * 2); ctx.stroke()
       }
     }
 
@@ -4141,9 +4169,9 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
     if (isSpawn) {
       const bounce = Math.sin(t * 2) * 3
       ctx.fillStyle = th.accent; ctx.font = "bold 16px 'Courier New',monospace"; ctx.textAlign = "center"
-      ctx.fillText("★", sx, sy - (isKennel ? 68 : 38) + bounce)
+      ctx.fillText("★", sx, sy - (isKennel ? 68 : 65) + bounce)
       ctx.font = "9px 'Courier New',monospace"; ctx.fillStyle = th.accent + "BB"
-      ctx.fillText(cp.icon + " RESPAWN", sx, sy - (isKennel ? 78 : 48) + bounce)
+      ctx.fillText(cp.icon + " RESPAWN", sx, sy - (isKennel ? 78 : 75) + bounce)
       ctx.textAlign = "left"
     }
 
@@ -4177,43 +4205,199 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
 }
 
 // ── Menú de teletransportación ───────────────────────────────────────────────
-function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
-  if (!g.tpMenu || !g.tpMenu.open) return
-  const th = THEMES[getWorldAtX(g.cx)]
-  const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
-  const mW = 320, mH = Math.min(discovered.length * 28 + 64, CH - 80)
-  const mX = (CW - mW) / 2, mY = (CH - mH) / 2
+// ── Helpers del menú de TP ──────────────────────────────────────────────────
+function tpAvailWorlds(g: G): number[] {
+  const ws = new Set<number>()
+  for (const cp of ALL_CPS) { if (g.discoveredCPs.has(cp.id)) ws.add(cp.w) }
+  return [...ws].sort((a, b) => a - b)
+}
+function tpCPsInWorld(g: G, w: number): CPDef[] {
+  return ALL_CPS.filter(cp => cp.w === w && g.discoveredCPs.has(cp.id))
+}
+function tpOpenMenu(g: G) {
+  // Solo puede abrirse si el jugador está junto a una perrera/checkpoint descubierto
+  const p = g.pl
+  const nearCP = ALL_CPS.some(cp => {
+    if (!g.discoveredCPs.has(cp.id)) return false
+    const dx = p.x + p.w / 2 - (cp.x + PW / 2)
+    const dy = p.y + p.h / 2 - (cp.y + PH)
+    return Math.sqrt(dx * dx + dy * dy) < CP_RADIUS
+  })
+  if (!nearCP) return
+  const worlds = tpAvailWorlds(g)
+  if (worlds.length === 0) return
+  const curW = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW))))
+  const world = worlds.includes(curW) ? curW : worlds[0]
+  g.tpMenu = { open: true, world, cpIdx: 0 }
+}
+function tpNavWorld(g: G, dir: 1 | -1) {
+  if (!g.tpMenu) return
+  const worlds = tpAvailWorlds(g)
+  if (worlds.length <= 1) return
+  const wi = worlds.indexOf(g.tpMenu.world)
+  g.tpMenu.world = worlds[(wi + dir + worlds.length) % worlds.length]
+  g.tpMenu.cpIdx = 0
+}
+function tpNavCP(g: G, dir: 1 | -1) {
+  if (!g.tpMenu) return
+  const cps = tpCPsInWorld(g, g.tpMenu.world)
+  if (cps.length === 0) return
+  g.tpMenu.cpIdx = (g.tpMenu.cpIdx + dir + cps.length) % cps.length
+}
+function tpDoConfirm(g: G) {
+  if (!g.tpMenu?.open) return
+  const cps = tpCPsInWorld(g, g.tpMenu.world)
+  const dest = cps[g.tpMenu.cpIdx]
+  if (!dest) return
+  g.tpMenu = null
+  g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
+  spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
+}
 
-  // Fondo del menú
-  ctx.fillStyle = "rgba(0,0,0,0.92)"; ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 10); ctx.fill()
-  ctx.strokeStyle = th.accent + "AA"; ctx.lineWidth = 1.5; ctx.strokeRect(mX, mY, mW, mH)
-  // Título
+function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
+  if (!g.tpMenu?.open) return
   const gt: GpadType = g.gpadType ?? "keyboard"
-  ctx.fillStyle = th.accent; ctx.font = "bold 12px 'Courier New',monospace"; ctx.textAlign = "center"
+  const worlds = tpAvailWorlds(g)
+  const curW  = g.tpMenu.world
+  const th     = THEMES[curW]
+  const cps    = tpCPsInWorld(g, curW)
+  const selCP  = cps[g.tpMenu.cpIdx] ?? null
+  const playerW = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW))))
+
+  // ── Panel dimensions ───────────────────────────────────────────────────────
+  const mW = 430, mH = 370
+  const mX = Math.round((CW - mW) / 2), mY = Math.round((CH - mH) / 2)
+  const ARROW_W = 44   // ancho de las flechas laterales
+  const HDR_H   = 48   // altura del header
+  const FTR_H   = 52   // altura del footer (CP info + world dots)
+  const mapX = mX + ARROW_W, mapW = mW - ARROW_W * 2
+  const mapY = mY + HDR_H, mapH = mH - HDR_H - FTR_H
+
+  // ── Fondo ──────────────────────────────────────────────────────────────────
+  ctx.fillStyle = "rgba(4,4,8,0.96)"
+  ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 12); ctx.fill()
+  ctx.strokeStyle = th.accent + "CC"; ctx.lineWidth = 1.5
+  ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 12); ctx.stroke()
+
+  // ── Título + controles ─────────────────────────────────────────────────────
+  ctx.fillStyle = th.accent; ctx.font = "bold 13px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("⚡  TELETRANSPORTACIÓN", mX + mW / 2, mY + 20)
-  ctx.fillStyle = "#3A5A3A"; ctx.font = "9px 'Courier New',monospace"
-  const navLbl = gt === "keyboard" ? "↑↓" : "LS/D↕"
-  const confirmLbl = GPAD_BTN.confirm[gt]
-  const cancelLbl  = GPAD_BTN.cancel[gt]
-  ctx.fillText(`[${navLbl}] navegar  ·  [${confirmLbl}] confirmar  ·  [${cancelLbl}] cerrar`, mX + mW / 2, mY + 34)
+  const navUD = gt === "keyboard" ? "↑↓" : (gt === "ps" ? "D↕" : "D↕")
+  const navLR = gt === "keyboard" ? "←→" : (gt === "ps" ? "D←→" : "D←→")
+  const cfm   = GPAD_BTN.confirm[gt], cnl = GPAD_BTN.cancel[gt]
+  ctx.fillStyle = "#445544"; ctx.font = "8px 'Courier New',monospace"
+  ctx.fillText(`[${navUD}] punto  [${navLR}] mundo  [${cfm}] ir  [${cnl}] cerrar`, mX + mW / 2, mY + 36)
   ctx.textAlign = "left"
 
-  const listY = mY + 50, itemH = 28
-  const maxVisible = Math.floor((mH - 60) / itemH)
-  const startIdx = Math.max(0, Math.min(g.tpMenu.idx - Math.floor(maxVisible / 2), discovered.length - maxVisible))
-  for (let i = 0; i < Math.min(maxVisible, discovered.length); i++) {
-    const cp = discovered[startIdx + i]
-    if (!cp) continue
-    const th = THEMES[cp.w]
-    const iy = listY + i * itemH
-    const isSelected = startIdx + i === g.tpMenu.idx
-    if (isSelected) {
-      ctx.fillStyle = th.accent + "22"; ctx.beginPath(); ctx.roundRect(mX + 6, iy, mW - 12, itemH - 2, 4); ctx.fill()
-      ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1; ctx.strokeRect(mX + 6, iy, mW - 12, itemH - 2)
-    }
-    ctx.fillStyle = isSelected ? th.accent : "#666666"; ctx.font = "bold 9px 'Courier New',monospace"
-    ctx.fillText(`${cp.icon}  ${cp.label}`, mX + 16, iy + 17)
+  // ── Nombre del mundo actual ────────────────────────────────────────────────
+  ctx.fillStyle = th.accent + "DD"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
+  ctx.fillText(`W${curW + 1} — ${WORLD_NAMES[curW]}`, mX + mW / 2, mapY - 6)
+  ctx.textAlign = "left"
+
+  // ── Mini-mapa del mundo actual ─────────────────────────────────────────────
+  const gap = 1
+  const rW  = Math.floor((mapW - (NC - 1) * gap) / NC)
+  const rH  = Math.floor((mapH - (NR - 1) * gap) / NR)
+  const gx  = mapX + Math.round((mapW - (rW * NC + gap * (NC - 1))) / 2)
+  const gy  = mapY + Math.round((mapH - (rH * NR + gap * (NR - 1))) / 2)
+
+  // Fondo del área de mapa
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(mapX, mapY, mapW, mapH)
+
+  // Celdas
+  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+    const rx = gx + c * (rW + gap), ry2 = gy + r * (rH + gap)
+    const explored = g.explored.has(`${curW}_${c}_${r}`)
+    const zBg = r < TROW ? "rgba(0,22,8,1)" : r === TROW ? "rgba(0,8,22,1)" : "rgba(22,0,0,1)"
+    ctx.fillStyle = explored ? zBg : "rgba(0,0,0,0.80)"; ctx.fillRect(rx, ry2, rW, rH)
+    if (explored) { ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 0.5; ctx.strokeRect(rx, ry2, rW, rH) }
   }
+
+  // Puertas (solo entre celdas exploradas, muy sutiles)
+  for (let c = 0; c < NC; c++) for (let r = 0; r < NR; r++) {
+    if (!g.explored.has(`${curW}_${c}_${r}`)) continue
+    const rx = gx + c * (rW + gap), ry2 = gy + r * (rH + gap)
+    const doors = computeDoors(curW, c, r)
+    const dh = Math.max(2, Math.round(rH * 0.35)), dw2 = Math.max(2, Math.round(rW * 0.35))
+    const dc = th.accent + "55"
+    if (doors.R && c < NC - 1 && g.explored.has(`${curW}_${c+1}_${r}`)) { ctx.fillStyle=dc; ctx.fillRect(rx+rW,ry2+Math.round((rH-dh)/2),gap+1,dh) }
+    if (doors.D && r < NR - 1 && g.explored.has(`${curW}_${c}_${r+1}`)) { ctx.fillStyle=dc; ctx.fillRect(rx+Math.round((rW-dw2)/2),ry2+rH,dw2,gap+1) }
+  }
+
+  // Posición del jugador (si está en este mundo)
+  if (curW === playerW) {
+    const plC = Math.max(0, Math.min(NC - 1, Math.floor((g.pl.x % (NC * RW)) / RW)))
+    const plR = Math.max(0, Math.min(NR - 1, Math.floor(g.pl.y / RH)))
+    const prx = gx + plC * (rW + gap) + rW / 2, pry = gy + plR * (rH + gap) + rH / 2
+    ctx.fillStyle = "#FFFFFF88"
+    ctx.beginPath(); ctx.arc(prx, pry, Math.max(2, rW * 0.14), 0, Math.PI * 2); ctx.fill()
+  }
+
+  // CP dots
+  const t = Date.now() * 0.003
+  for (let i = 0; i < cps.length; i++) {
+    const cp = cps[i]
+    const cx2 = gx + cp.c * (rW + gap) + rW / 2
+    const cy2 = gy + cp.r * (rH + gap) + rH / 2
+    const isSel = i === g.tpMenu.cpIdx
+    const isActive = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
+    const r2 = Math.max(3.5, rW * 0.22)
+
+    if (isSel) {
+      // Anillo pulsante exterior
+      const pulse = 0.55 + 0.45 * Math.sin(t * 2.5)
+      ctx.strokeStyle = th.accent + Math.round(pulse * 255).toString(16).padStart(2, "0")
+      ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(cx2, cy2, r2 + 4 + pulse * 3, 0, Math.PI * 2); ctx.stroke()
+      // Glow fill
+      ctx.fillStyle = th.accent + "44"; ctx.beginPath(); ctx.arc(cx2, cy2, r2 + 6, 0, Math.PI * 2); ctx.fill()
+    }
+    // Círculo del CP
+    ctx.fillStyle = isSel ? th.accent : (isActive ? "#FFD700" : "#888888")
+    ctx.beginPath(); ctx.arc(cx2, cy2, r2, 0, Math.PI * 2); ctx.fill()
+    // Ícono centrado
+    ctx.fillStyle = isSel ? "#000" : (isActive ? "#000" : "#CCC")
+    ctx.font = `bold ${Math.max(7, Math.round(r2 * 1.4))}px 'Courier New',monospace`
+    ctx.textAlign = "center"
+    ctx.fillText(String(i + 1), cx2, cy2 + Math.round(r2 * 0.42))
+    ctx.textAlign = "left"
+  }
+
+  // ── Flechas de mundo izquierda / derecha ──────────────────────────────────
+  const hasPrev = worlds.length > 1
+  const arrowAlpha = hasPrev ? 0.80 : 0.18
+  const arrowY = mY + mH / 2
+  // Izquierda
+  ctx.save(); ctx.globalAlpha = arrowAlpha
+  ctx.fillStyle = hasPrev ? th.accent : "#333"
+  ctx.beginPath(); ctx.moveTo(mX + ARROW_W - 8, arrowY); ctx.lineTo(mX + 10, arrowY - 14); ctx.lineTo(mX + 10, arrowY + 14); ctx.closePath(); ctx.fill()
+  // Derecha
+  ctx.beginPath(); ctx.moveTo(mX + mW - ARROW_W + 8, arrowY); ctx.lineTo(mX + mW - 10, arrowY - 14); ctx.lineTo(mX + mW - 10, arrowY + 14); ctx.closePath(); ctx.fill()
+  ctx.restore()
+
+  // ── Footer: info del CP seleccionado + puntos de mundo ────────────────────
+  const ftY = mY + mH - FTR_H
+  ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(mX + 1, ftY, mW - 2, FTR_H - 1)
+
+  if (selCP) {
+    const isActive = g.checkpoint.w === selCP.w && Math.abs(g.checkpoint.x - selCP.x) < 40
+    ctx.fillStyle = th.accent; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText(`${selCP.icon}  ${selCP.label}`, mX + mW / 2, ftY + 16)
+    ctx.fillStyle = "#556655"; ctx.font = "8px 'Courier New',monospace"
+    ctx.fillText(isActive ? "★ spawn activo" : `${WORLD_NAMES[selCP.w]} · W${selCP.w + 1}`, mX + mW / 2, ftY + 28)
+  }
+
+  // Indicadores de mundo (dots)
+  const dotSpacing = 16, dotsW = worlds.length * dotSpacing - 4
+  let dx = mX + Math.round((mW - dotsW) / 2)
+  for (const w of worlds) {
+    const isCur = w === curW
+    ctx.fillStyle = isCur ? THEMES[w].accent : "#444"
+    ctx.beginPath(); ctx.arc(dx + 4, ftY + 42, isCur ? 5 : 3, 0, Math.PI * 2); ctx.fill()
+    if (isCur) { ctx.strokeStyle = THEMES[w].accent + "66"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(dx + 4, ftY + 42, 8, 0, Math.PI * 2); ctx.stroke() }
+    dx += dotSpacing
+  }
+  ctx.textAlign = "left"
 }
 
 function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
@@ -5561,25 +5745,14 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   if (g.tpMenu?.open) {
     _gpStickNavCd = Math.max(0, _gpStickNavCd - 16)
     const THRESH = 0.55
-    const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
     if (_gpStickNavCd <= 0) {
-      const ly = ax(1)
-      if (ly < -THRESH || btn(GP.UP)) {
-        g.tpMenu.idx = (g.tpMenu.idx - 1 + discovered.length) % discovered.length
-        _gpStickNavCd = 160
-      } else if (ly > THRESH || btn(GP.DOWN)) {
-        g.tpMenu.idx = (g.tpMenu.idx + 1) % discovered.length
-        _gpStickNavCd = 160
-      }
+      const ly = ax(1), lx = ax(0)
+      if (ly < -THRESH || btn(GP.UP))    { tpNavCP(g, -1);    _gpStickNavCd = 160 }
+      else if (ly > THRESH || btn(GP.DOWN))  { tpNavCP(g, 1);     _gpStickNavCd = 160 }
+      else if (lx < -THRESH || btn(GP.LEFT)) { tpNavWorld(g, -1); _gpStickNavCd = 200 }
+      else if (lx > THRESH || btn(GP.RIGHT)) { tpNavWorld(g, 1);  _gpStickNavCd = 200 }
     }
-    if (edgeDown(GP.A)) {
-      const dest = discovered[g.tpMenu.idx]
-      if (dest) {
-        g.tpMenu = null
-        g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
-        spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
-      }
-    }
+    if (edgeDown(GP.A)) tpDoConfirm(g)
     if (edgeDown(GP.B) || edgeDown(GP.START)) g.tpMenu = null
     return
   }
@@ -5609,9 +5782,7 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   if (edgeDown(GP.START)) g.paused = !g.paused
   if (edgeDown(GP.BACK)) { g.showMap = !g.showMap; g.paused = g.showMap; onMapToggle(); if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW)))); g.mapView = "single" } }
   // LB = teletransporte (menú de CPs)
-  if (edgeDown(GP.LB) && !g.tpAnim && g.discoveredCPs.size >= 2) {
-    g.tpMenu = { open: true, idx: 0 }
-  }
+  if (edgeDown(GP.LB) && !g.tpAnim) tpOpenMenu(g)
   const bNow = btn(GP.B)
   if (bNow && !_gpBPrev) { if (g.showMap) { g.showMap = false; g.paused = false } else { onCheckpoint() } }
   _gpBPrev = bNow
@@ -5680,8 +5851,10 @@ export default function ProyectoLuly() {
     L("kennel_ambar",  "/assets/Enviroment/Kennel/Kennel_ambar.png")   // W0 Las Perreras
     L("kennel_red",    "/assets/Enviroment/Kennel/Kennel_red.png")     // W1 Fábrica Canina
     L("kennel_blue",   "/assets/Enviroment/Kennel/Kennel_blue.png")    // W2 Los Tubos
-    L("kennel_violet", "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
+    L("kennel_violet",    "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
+    L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
+    L("rex_house",              "/assets/Enviroment/Rex_House/Rex_House.png")
     L("rex_idle",               "/assets/NPCs/Rex_The_Old/idle.png")
     L("rex_saludo_left",        "/assets/NPCs/Rex_The_Old/saludo_left.png")
     L("rex_saludo_right",       "/assets/NPCs/Rex_The_Old/saludo_right.png")
@@ -5839,22 +6012,15 @@ export default function ProyectoLuly() {
       }
       if (k === "t" && !g.tpAnim) {
         if (g.tpMenu?.open) { g.tpMenu = null; return }
-        if (g.discoveredCPs.size >= 2) { g.tpMenu = { open: true, idx: 0 } }
+        tpOpenMenu(g)
       }
-      // Navegación menú de teleporte
+      // Navegación menú de teleporte — ↑↓ = CP, ←→ = mundo
       if (g.tpMenu?.open) {
-        const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
-        if (k === "arrowup" || k === "w") { g.tpMenu.idx = (g.tpMenu.idx - 1 + discovered.length) % discovered.length; return }
-        if (k === "arrowdown" || k === "s") { g.tpMenu.idx = (g.tpMenu.idx + 1) % discovered.length; return }
-        if (k === "enter" || k === " ") {
-          const dest = discovered[g.tpMenu.idx]
-          if (dest) {
-            g.tpMenu = null
-            g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
-            spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
-          }
-          return
-        }
+        if (k === "arrowup"    || k === "w") { tpNavCP(g, -1);    return }
+        if (k === "arrowdown"  || k === "s") { tpNavCP(g, 1);     return }
+        if (k === "arrowleft"  || k === "a") { tpNavWorld(g, -1); return }
+        if (k === "arrowright" || k === "d") { tpNavWorld(g, 1);  return }
+        if (k === "enter" || k === " ")      { tpDoConfirm(g);    return }
       }
     }
     const up = (e: KeyboardEvent) => { G.current.keys[e.key.toLowerCase()] = false }
@@ -6496,22 +6662,10 @@ export default function ProyectoLuly() {
       return Math.sqrt(dx * dx + dy * dy) < CP_RADIUS
     })
 
-    // ── Confirmar selección en menú de teletransporte ────────────────────
-    const confirmTP = () => {
-      if (!g.tpMenu?.open) return
-      const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
-      const dest = discovered[g.tpMenu.idx]
-      if (dest) {
-        g.tpMenu = null
-        g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
-        spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
-      }
-    }
-    const navTP = (dir: 1 | -1) => {
-      if (!g.tpMenu?.open) return
-      const discovered = ALL_CPS.filter(cp => g.discoveredCPs.has(cp.id))
-      g.tpMenu.idx = (g.tpMenu.idx + dir + discovered.length) % discovered.length
-    }
+    // ── Confirmar / navegar en menú de teletransporte (mobile) ──────────
+    const confirmTP    = () => tpDoConfirm(g)
+    const navTP        = (dir: 1 | -1) => tpNavCP(g, dir)
+    const navTPWorld   = (dir: 1 | -1) => tpNavWorld(g, dir)
 
     // ══════════════════════════════════════════════════════════════════════
     //  MODO MAPA — solo botón B en inferior derecho para cerrar
@@ -6641,7 +6795,7 @@ export default function ProyectoLuly() {
               style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 10, gap: 3, borderColor: "#D4C40066", pointerEvents: "auto" }}
               {...makeTouch(() => {
                 if (g.tpMenu?.open) g.tpMenu = null
-                else g.tpMenu = { open: true, idx: 0 }
+                else tpOpenMenu(g)
               }, () => {})}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" style={{ opacity: 0.85 }}>
@@ -6785,11 +6939,12 @@ export default function ProyectoLuly() {
           {dArrow("down",  {left:ARM, top:ARM+HUB, width:HUB, height:ARM},
             () => { if (g.tpMenu?.open) navTP(1);  else pressKey("arrowdown") },
             () => { if (!g.tpMenu?.open) releaseKey("arrowdown") })}
-
           {dArrow("left",  {left:0,   top:ARM,     width:ARM, height:HUB},
-            ()=>dpadDown("left","arrowleft"),  ()=>{releaseKey("arrowleft")})}
+            () => { if (g.tpMenu?.open) navTPWorld(-1); else dpadDown("left","arrowleft") },
+            () => { if (!g.tpMenu?.open) releaseKey("arrowleft") })}
           {dArrow("right", {left:ARM+HUB, top:ARM, width:ARM, height:HUB},
-            ()=>dpadDown("right","arrowright"), ()=>{releaseKey("arrowright")})}
+            () => { if (g.tpMenu?.open) navTPWorld(1); else dpadDown("right","arrowright") },
+            () => { if (!g.tpMenu?.open) releaseKey("arrowright") })}
         </div>
 
         {/* Hint doble-tap debajo del D-pad */}
