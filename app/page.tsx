@@ -3954,7 +3954,136 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.restore()
 }
 
-function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
+// ── Pared lateral sprite ──────────────────────────────────────────────────────
+// W-3.png: 153×744, sin padding. Scale a ancho=WT=24 → rW=24 rH=117, tile vertical.
+// Pared izquierda: normal. Pared derecha: flip horizontal (ctx.scale(-1,1)).
+function drawWallSprite(
+  ctx: CanvasRenderingContext2D, sx: number, sy: number,
+  w: number, h: number, wy: number, sprs: SprBank, rightWall: boolean
+) {
+  const spr = sprs["wall_sprite"]
+  if (!spr || !spr.complete || !spr.naturalWidth) return
+
+  const rw = 24, rh = 117   // 153×744 @ scale 24/153, sin padding
+
+  ctx.save()
+  ctx.beginPath(); ctx.rect(sx, sy, w, h); ctx.clip()
+
+  const slotStart = Math.floor(wy / rh)
+  const slotEnd   = Math.ceil((wy + h) / rh)
+
+  if (rightWall) {
+    // Flip horizontal: translate al borde derecho del tile + scale(-1,1)
+    // → drawImage en x=0 queda en pantalla sx, x=rw queda en sx+rw
+    ctx.translate(sx + rw, 0)
+    ctx.scale(-1, 1)
+    for (let si = slotStart; si <= slotEnd; si++) {
+      const sprY = sy + (si * rh - wy)
+      ctx.drawImage(spr, 0, sprY, rw, rh)
+    }
+  } else {
+    for (let si = slotStart; si <= slotEnd; si++) {
+      const sprY = sy + (si * rh - wy)
+      ctx.drawImage(spr, sx, sprY, rw, rh)
+    }
+  }
+  ctx.restore()
+}
+
+// ── Pared interna sprite (bloque sólido interior) ────────────────────────────
+// W-2.png: 1088×512, content(125,102,965,410) → cW=840 cH=308, pad=26/26/21/21
+// Scale a content-h=64 px → rW=226 rH=106, stepX=174 stepY=64
+// Tileado 2D alineado al mundo para que los bloques adyacentes empalmen sin costuras.
+function drawInternalWallSprite(
+  ctx: CanvasRenderingContext2D, sx: number, sy: number,
+  w: number, h: number, wx: number, wy: number, sprs: SprBank
+) {
+  const spr = sprs["internal_wall_sprite"]
+  if (!spr || !spr.complete || !spr.naturalWidth) return
+
+  const rw = 226, rh = 106, pL = 26, pT = 21, cW = 174, cH = 64
+
+  ctx.save()
+  ctx.beginPath(); ctx.rect(sx, sy, w, h); ctx.clip()
+
+  const sxStart = Math.floor(wx / cW)
+  const sxEnd   = Math.ceil((wx + w) / cW)
+  const syStart = Math.floor(wy / cH)
+  const syEnd   = Math.ceil((wy + h) / cH)
+
+  for (let sj = syStart; sj <= syEnd; sj++) {
+    for (let si = sxStart; si <= sxEnd; si++) {
+      const sprX = sx + (si * cW - wx) - pL
+      const sprY = sy + (sj * cH - wy) - pT
+      ctx.drawImage(spr, sprX, sprY, rw, rh)
+    }
+  }
+  ctx.restore()
+}
+
+// ── Plataforma interior sprite ────────────────────────────────────────────────
+// P-2.png: 796×228, sin padding. Scale a h=STAIR_H=24 px → rW=84 rH=24 step=84
+function drawPlatformSprite(
+  ctx: CanvasRenderingContext2D, sx: number, sy: number,
+  w: number, h: number, wx: number, sprs: SprBank
+) {
+  const spr = sprs["platform_sprite"]
+  if (!spr || !spr.complete || !spr.naturalWidth) {
+    // Fallback: estilo procedural mientras carga
+    ctx.fillStyle = "#1A2A40BB"; ctx.fillRect(sx, sy, w, h)
+    ctx.fillStyle = "#263A58";   ctx.fillRect(sx, sy, w, 2)
+    return
+  }
+  // Estirar el sprite para cubrir exactamente toda la plataforma (w×h)
+  ctx.drawImage(spr, sx, sy, w, h)
+}
+
+// ── Piso / Techo sprite ───────────────────────────────────────────────────────
+// F-1.png: PIL 1088×512, scale a content-h = WT = 24 px exactos:
+//   rW=76 rH=36  pL=8 pR=8 pT=6 pB=6  cW=60 cH=24
+// El contenido (60×24) encaja perfecto en el tile (h=WT=24) sin desbordamiento.
+// floor (flip=false): contenido top en sy   (superficie superior, donde pisa el jugador)
+// ceil  (flip=true) : flip vertical, contenido near-edge en sy+h (superficie inferior techo)
+function drawFloorSprite(
+  ctx: CanvasRenderingContext2D, sx: number, sy: number,
+  w: number, h: number, wx: number, sprs: SprBank, flip: boolean
+) {
+  const spr = sprs["floor_w1_base"]
+  if (!spr || !spr.complete || !spr.naturalWidth) return
+
+  // Dimensiones a content-h=24 (= WT)
+  const rw = 76, rh = 36, pL = 8, pT = 6, cW = 60
+
+  ctx.save()
+  ctx.beginPath(); ctx.rect(sx, sy, w, h); ctx.clip()
+
+  // Índice de slot alineado al mundo (determinista)
+  const slotStart = Math.floor(wx / cW)
+  const slotEnd   = Math.ceil((wx + w) / cW)
+
+  if (flip) {
+    // Techo: flip vertical alrededor de sy+h
+    // transform: translate(0, sy+h) + scale(1,-1)
+    // → drawImage en sprY_t=-pT coloca contenido-top en pantalla sy+h ✓
+    ctx.save()
+    ctx.translate(0, sy + h)
+    ctx.scale(1, -1)
+    for (let si = slotStart; si <= slotEnd; si++) {
+      const sprX = sx + (si * cW - wx) - pL
+      ctx.drawImage(spr, sprX, -pT, rw, rh)
+    }
+    ctx.restore()
+  } else {
+    // Piso: normal, contenido-top en sy
+    for (let si = slotStart; si <= slotEnd; si++) {
+      const sprX = sx + (si * cW - wx) - pL
+      ctx.drawImage(spr, sprX, sy - pT, rw, rh)
+    }
+  }
+  ctx.restore()
+}
+
+function drawWalls(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
   const { cx, cy } = g, ap = activePlats(g)
   const wi = getWorldAtX(g.cx)
   const th = THEMES[wi]
@@ -4035,9 +4164,38 @@ function drawWalls(ctx: CanvasRenderingContext2D, g: G) {
       continue
     }
 
-    // Tile sólido con textura por mundo
+    // ── Piso / Techo sprite ──────────────────────────────────────────────────
+    // floor: solid h=WT, p.y%RH ≈ RH-WT (656)
+    // ceil : solid h=WT, p.y%RH ≈ 0
+    const yInRoom = p.y % RH
+    const isFloorTile = p.h === WT && Math.abs(yInRoom - (RH - WT)) < 4
+    const isCeilTile  = p.h === WT && yInRoom < 4
+    if (isFloorTile || isCeilTile) {
+      drawFloorSprite(ctx, sx, sy, p.w, p.h, p.x, sprs, isCeilTile)
+      continue
+    }
+
+    // ── Plataforma interior (stair): h=STAIR_H, no es piso ni techo ──
+    // Condición: misma h que WT (=STAIR_H=24), yInRoom fuera de los bordes del cuarto
+    const isPlatTile = p.h === STAIR_H && yInRoom >= WT + 4 && yInRoom <= RH - WT - STAIR_H - 4 && p.w >= 36
+    if (isPlatTile) {
+      drawPlatformSprite(ctx, sx, sy, p.w, p.h, p.x, sprs)
+      continue
+    }
+
+    // ── Pared lateral sprite ─────────────────────────────────────────────────
+    // Pared = p.w === WT, altura > STAIR_H (las paredes son altas, no delgadas)
+    // Izquierda: p.x % RW === 0 | Derecha: (p.x + p.w) % RW === 0
+    if (p.w === WT && p.h > STAIR_H) {
+      const isRightWall = (p.x + p.w) % RW === 0
+      drawWallSprite(ctx, sx, sy, p.w, p.h, p.y, sprs, isRightWall)
+      continue
+    }
+
+    // ── Bloque sólido interior: sprite W-2 con fallback procedural ───────────
     const hash = ((p.x * 7 + p.y * 13) >>> 0) % 16
     drawSolidTile(ctx, sx, sy, p.w, p.h, pWi, hash, g.gfx, p.x, p.y, zone)
+    drawInternalWallSprite(ctx, sx, sy, p.w, p.h, p.x, p.y, sprs)
   }
 }
 
@@ -5329,7 +5487,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g); drawCage(ctx, g); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
   drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
@@ -5854,6 +6012,10 @@ export default function ProyectoLuly() {
     L("kennel_violet",    "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
     L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
+    L("floor_w1_base",          "/assets/Enviroment/Floor/F-1.png")
+    L("platform_sprite",        "/assets/Enviroment/Platforms/P-2.png")
+    L("wall_sprite",            "/assets/Enviroment/Walls/W-3.png")
+    L("internal_wall_sprite",   "/assets/Enviroment/Walls/W-2.png")
     L("rex_house",              "/assets/Enviroment/Rex_House/Rex_House.png")
     L("rex_idle",               "/assets/NPCs/Rex_The_Old/idle.png")
     L("rex_saludo_left",        "/assets/NPCs/Rex_The_Old/saludo_left.png")
