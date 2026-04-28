@@ -4382,9 +4382,10 @@ function drawBones(ctx: CanvasRenderingContext2D, g: G) {
 function drawCrates(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
   // Sprite: sheet 1536×1024, contenido 834×775 medido con PIL
   // Escalado para que el contenido ≈ 44×41 px (igual que el hitbox 44×44)
-  const BOX_RW = 81, BOX_RH = 54   // tamaño del render rect
-  const BOX_RX_OFF = -18            // rx = sx + BOX_RX_OFF (centra contenido sobre hitbox)
-  const BOX_RY_OFF = -4             // ry = sy + BOX_RY_OFF (base del contenido en sy+44)
+  // Escala 1.3× respecto a la medición PIL original (contenido ≈ 57×54 px)
+  const BOX_RW = 105, BOX_RH = 70
+  const BOX_RX_OFF = -32            // centra el contenido (57 px) sobre el hitbox (44 px)
+  const BOX_RY_OFF = -19            // ancla la base del contenido al pie del hitbox
   const boxSpr = sprs["box"]
 
   for (const c of g.crates) {
@@ -6478,8 +6479,8 @@ export default function ProyectoLuly() {
     // Shoulder buttons solo visibles cuando la habilidad está desbloqueada
     const hasDash  = g.abilities.has("dash")
     const hasTBall = g.abilities.has("tball")
-    // Altura del grupo de hombros (si existe)
-    const SHOULDER_H = (hasDash || hasTBall) ? Math.round(vh * 0.10) : 0
+    // Altura del grupo de hombros — solo dash ocupa shoulder bar; tball va arriba del diamante
+    const SHOULDER_H = hasDash ? Math.round(vh * 0.10) : 0
     // Altura del bloque de botones de acción (diamante A/B/X/Y)
     const ACT_H = Math.round(vh * 0.44)   // 44% de la ventana
     // Posición inferior del diamante: por encima de los shoulders + margen
@@ -6546,13 +6547,12 @@ export default function ProyectoLuly() {
       const BTN_SZ  = Math.round(ACT_H * 0.38)
       return (
         <>
-          {/* Indicador táctil de deslizar (centrado verticalmente en el lado izquierdo) */}
+          {/* Indicador táctil de deslizar — lado derecho, a la izquierda del botón B */}
           <div
             style={{
               position: "absolute",
               bottom: SAFE_B + Math.round(vh * 0.18),
-              left: "12%",
-              transform: "translateX(-50%)",
+              right: `calc(5% + ${BTN_SZ + 18}px)`,
               width: swipeSz,
               display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
               zIndex: 100, opacity: 0.65,
@@ -6680,17 +6680,76 @@ export default function ProyectoLuly() {
             <span style={{ fontSize: 7, color: "rgba(255,255,255,0.32)", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>DASH</span>
           </div>
         )}
-        {hasTBall && (
-          <div style={{
-            position: "absolute",
-            bottom: SAFE_B,
-            right: "8%",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 2, zIndex: 20,
-          }}>
-            {xbBumper(66, 24, "RB", () => { fireTBall(g) }, () => {})}
-            <span style={{ fontSize: 7, color: "rgba(255,255,255,0.32)", letterSpacing: "0.1em", fontFamily: "'Courier New',monospace" }}>T-BALL</span>
-          </div>
-        )}
+        {/* ── T-BALL: botón cóncavo siempre visible arriba-derecha del diamante ── */}
+        {(() => {
+          const tballSz  = Math.round(ACT_H * 0.29)
+          const unlocked = hasTBall
+          const hasAmmo  = g.tballAmmo > 0 || g.infiniteAmmo
+          const active   = unlocked && hasAmmo
+          return (
+            <div
+              style={{
+                position: "absolute",
+                // Anclado encima del diamante, alineado a su borde derecho
+                bottom: ACT_B + ACT_H + 10,
+                right: `calc(3% + ${Math.round(ACT_H * 0.08)}px)`,
+                zIndex: 22,
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                pointerEvents: active ? "auto" : "none",
+              }}
+              {...(active ? makeTouch(() => fireTBall(g), () => {}) : {})}
+            >
+              {/* Botón cóncavo */}
+              <div style={{
+                width: tballSz, height: tballSz,
+                borderRadius: "50%",
+                background: unlocked
+                  ? `radial-gradient(ellipse at 45% 40%, #2a1a0a 0%, #120800 55%, #080400 100%)`
+                  : "radial-gradient(ellipse at 45% 40%, #1a1a1a 0%, #0a0a0a 60%, #050505 100%)",
+                border: `1.5px solid ${unlocked ? "rgba(255,160,30,0.28)" : "rgba(255,255,255,0.10)"}`,
+                boxShadow: [
+                  "inset 0 3px 8px rgba(0,0,0,0.92)",
+                  "inset 0 0 10px rgba(0,0,0,0.70)",
+                  unlocked && hasAmmo
+                    ? "inset 0 -1px 0 rgba(255,140,20,0.18), 0 1px 0 rgba(255,255,255,0.06)"
+                    : "0 1px 0 rgba(255,255,255,0.04)"
+                ].filter(Boolean).join(", "),
+                display: "flex", alignItems: "center", justifyContent: "center",
+                opacity: active ? 1 : (unlocked ? 0.40 : 0.22),
+                transition: "opacity 0.3s",
+                flexShrink: 0,
+              }}>
+                {/* Ícono de pelota */}
+                <svg width={Math.round(tballSz * 0.52)} height={Math.round(tballSz * 0.52)}
+                  viewBox="0 0 20 20">
+                  <circle cx="10" cy="10" r="8"
+                    fill={unlocked ? (hasAmmo ? "#c86010" : "#4a2a08") : "#2a2a2a"}
+                    stroke={unlocked ? (hasAmmo ? "#ff9030" : "#3a1a04") : "#333"}
+                    strokeWidth="1.2"/>
+                  <path d="M3.5 7 Q10 4 16.5 7" fill="none"
+                    stroke={unlocked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"} strokeWidth="1"/>
+                  <path d="M3.5 13 Q10 16 16.5 13" fill="none"
+                    stroke={unlocked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"} strokeWidth="1"/>
+                  {!unlocked && (
+                    <text x="10" y="14" textAnchor="middle" fontSize="9"
+                      fill="rgba(255,255,255,0.25)">🔒</text>
+                  )}
+                </svg>
+              </div>
+              {/* Etiqueta con munición o estado */}
+              <span style={{
+                fontSize: 7, letterSpacing: "0.08em",
+                fontFamily: "'Courier New',monospace",
+                color: unlocked
+                  ? (hasAmmo ? "rgba(255,160,40,0.80)" : "rgba(255,80,40,0.55)")
+                  : "rgba(255,255,255,0.22)",
+                lineHeight: 1,
+              }}>
+                {unlocked ? (g.infiniteAmmo ? "∞" : `×${g.tballAmmo}`) : "T-BALL"}
+              </span>
+            </div>
+          )
+        })()}
 
         {/* ══════════════════════════════════════════════════
             IZQUIERDA — D-CROSS estilo Xbox
