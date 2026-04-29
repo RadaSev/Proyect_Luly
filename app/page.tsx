@@ -52,7 +52,7 @@ type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
 type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" | "tba" }
 type TBall  = { x: number; y: number; vx: number; vy: number; active: boolean; bounces: number; life: number }
-type Pickup = { id: string; kind: "tball" | "tball_key"; x: number; y: number; active: boolean; floatPhase: number; spawnTimer?: number }
+type Pickup = { id: string; kind: "tball" | "tball_key" | "baton"; x: number; y: number; active: boolean; floatPhase: number; spawnTimer?: number }
 type Crate = { id: number; x: number; y: number; w: number; h: number; active: boolean }
 type WorldAnim = { name: string; sub: string; alpha: number; phase: "in" | "hold" | "out"; timer: number }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; r: number; col: string }
@@ -97,9 +97,12 @@ type G = {
   activePower: string | null          // poder seleccionado actualmente
   bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
   // Quest del perrito viejo (NPC en TROW [1,4] de W0)
-  viejoDogState: "waiting" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised"
-  tballKeyHeld: boolean          // el jugador lleva la llave dorada
-  questKillBaseline: number      // muertes P1-W0 al momento de aceptar la quest (descontar muertes previas)
+  viejoDogState: "waiting" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised" | "ball_held" | "ball_guide" | "reward_lives" | "reward_full" | "baton_delivered"
+  tballKeyHeld: boolean
+  questKillBaseline: number
+  rexBallFirstSeen: boolean
+  rexBatonHeld: boolean          // jugadora lleva el bastón del Herrero
+  tballUpgraded: boolean         // bastón entregado → rebote y munición mejorados
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
@@ -172,9 +175,12 @@ interface LulySave {
   cw: number[]; abilities: string[]
   pickedUpItems: string[]             // IDs de pickups recogidos
   bossRewardedCPs: string[]           // IDs de boss-CPs que ya dieron recompensa
-  viejoDogState?: string              // estado de quest del perrito viejo
-  tballKeyHeld?: boolean              // jugador lleva la llave dorada
-  questKillBaseline?: number          // muertes P1-W0 al iniciar la quest
+  viejoDogState?: string
+  tballKeyHeld?: boolean
+  questKillBaseline?: number
+  rexBallFirstSeen?: boolean
+  rexBatonHeld?: boolean
+  tballUpgraded?: boolean
 }
 
 function saveGame(g: G): void {
@@ -190,6 +196,9 @@ function saveGame(g: G): void {
       viejoDogState: g.viejoDogState,
       tballKeyHeld: g.tballKeyHeld,
       questKillBaseline: g.questKillBaseline,
+      rexBallFirstSeen: g.rexBallFirstSeen,
+      rexBatonHeld: g.rexBatonHeld,
+      tballUpgraded: g.tballUpgraded,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -349,6 +358,11 @@ const VIEJO_DOG_POS = {
 const VIEJO_DOG_TALK_R = 115              // radio para diálogo automático
 const VIEJO_DOG_CALLOUT_R = 230          // radio para el "¡Psst!"
 let _rexNameAlpha = 1.0                  // fade suave del nombre: 1=visible, 0=oculto
+let _rexDlgKey    = ""                   // clave de estado — cambio = reinicio de tipografía
+let _rexDlgMs     = 0                    // timestamp en que empezó la página actual
+let _rexDlgPage   = 0                    // página actual (0 o 1 para diálogos de 2 páginas)
+const REX_TYPING_MS   = 36              // ms por carácter
+const REX_PAGE_GAP_MS = 1300            // ms de pausa entre páginas
 const TBALL_KEY_DROP_CHANCE = 0.20       // 20% de probabilidad por kill (tras 3 kills mínimo)
 const TBALL_KEY_MIN_KILLS = 3            // primeros 3 kills nunca tienen la llave (build-up)
 const TBALL_KEY_FORCE_KILL = 20          // kill 20: drop garantizado si aún no cayó
@@ -1292,6 +1306,9 @@ function mkG_lazy(): G {
     viejoDogState: "waiting",
     tballKeyHeld: false,
     questKillBaseline: 0,
+    rexBallFirstSeen: false,
+    rexBatonHeld: false,
+    tballUpgraded: false,
     gpadType: "keyboard",
     isMobile: false,
     mapView: "single",
@@ -1460,9 +1477,24 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
   }
   checkWorldClear(g, originalWorld)
 
+  // ── Drop del bastón de Rex: El Herrero (P2-W0) lo lleva ──────────────────────
+  if (e.boss && e.world === 0 && !g.rexBatonHeld && !g.tballUpgraded) {
+    const bParts2 = e.originalId.split("_")
+    const bC2 = parseInt(bParts2[1]), bR2 = parseInt(bParts2[2])
+    const [p2c, p2r] = WORLD_P2_BOSS[0]
+    if (bC2 === p2c && bR2 === p2r) {
+      g.pickups.push({
+        id: "rex_baton", kind: "baton",
+        x: e.x + e.w / 2,
+        y: e.y + e.h * 0.2,
+        active: true, floatPhase: 0, spawnTimer: 0.8
+      })
+      spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#8B4513", "#D2691E", "#FFD700", "#FFFFFF"], 22, 5, true)
+      g.abilityNotif = { text: "¡El bastón de Rex! Llévalo a Rex el Viejo.", timer: 6.0 }
+      saveGame(g)
+    }
+  }
   // ── Quest media llave: drop de llave en P1-W0 ──────────────────────────────
-  // Caso A: quest activa → drop aleatorio con escalada de probabilidad
-  // Caso B: sin quest (waiting) → drop garantizado al morir el ÚLTIMO enemigo regular P1-W0
   if (!e.boss && e.world === 0 && (g.viejoDogState === "quest_active" || g.viejoDogState === "waiting")) {
     const eRow = Math.floor(e.y / RH)
     if (eRow < TROW) {
@@ -1607,7 +1639,7 @@ function breakCrate(g: G, c: Crate) {
 // ══════════════════════════════════════════════════════════════
 function tickPlayer(g: G) {
   const k = g.keys, p = g.pl, now = performance.now()
-  const STA_RED = 8, STA_DRAIN = 17, STA_RCH_WALK = 12, STA_RCH_IDLE = 22
+  const STA_RED = 8, STA_DRAIN = 17, STA_RCH_WALK = 22, STA_RCH_IDLE = 40
   const moving = (k["a"] || k["arrowleft"] || k["d"] || k["arrowright"]) && !p.crouching
   const canRun = !p.exhausted  // drena hasta 0; STA_RED solo se usa para reinicio tras agotamiento
   if (!moving || !canRun) p.runMode = false
@@ -2493,9 +2525,46 @@ function tickViejoDog(g: G) {
       g.viejoDogState = "surprised"   // ya encontró la pelota sola
     } else {
       g.viejoDogState = "quest_active"
-      // Registrar el baseline de muertes para contar SOLO las de esta quest
       g.questKillBaseline = countP1KillsW0(g.dead)
     }
+  } else if ((g.viejoDogState === "cage_opened" || g.viejoDogState === "surprised" || g.viejoDogState === "quest_done") && g.abilities.has("tball")) {
+    // Jugadora llega con la pelota → primer mensaje especial
+    g.viejoDogState = "ball_held"
+    g.rexBallFirstSeen = false
+    saveGame(g)
+  } else if (g.viejoDogState === "ball_held") {
+    if (!g.rexBallFirstSeen) {
+      // Primera visita con pelota: marcar vista y quedarse en "ball_held"
+      g.rexBallFirstSeen = true
+      saveGame(g)
+    } else if (isPart1BossDead(g, 0)) {
+      // Jefe P1 muerto → recompensar con corazones
+      const needed = g.pl.maxHp - g.pl.hp
+      if (needed > 0) {
+        for (let i = 0; i < needed; i++) {
+          g.drops.push({ x: VIEJO_DOG_POS.x + (Math.random() - 0.5) * 70, y: VIEJO_DOG_POS.y - 20, vx: (Math.random() - 0.5) * 2.5, vy: -3 - Math.random() * 1.8, active: true, life: 24, kind: "h" })
+        }
+        spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FF4444", "#FF8888", "#FFD700", "#FFFFFF"], 18, 4, false)
+        g.viejoDogState = "reward_lives"
+      } else {
+        g.viejoDogState = "reward_full"
+      }
+      saveGame(g)
+    } else {
+      // Segunda+ visita, jefe P1 sigue vivo → guía hacia el jefe
+      g.viejoDogState = "ball_guide"
+      saveGame(g)
+    }
+  } else if ((g.viejoDogState === "ball_guide" || g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full") && g.rexBatonHeld && !g.tballUpgraded) {
+    // Jugadora trae el bastón → mejora la pelota
+    g.rexBatonHeld = false
+    g.tballUpgraded = true
+    g.tballAmmo = Math.min(TB_AMMO_MAX, g.tballAmmo + 2)  // sube a 5 si tenía 3
+    g.viejoDogState = "baton_delivered"
+    spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#8B4513", "#D2691E", "#FFD700", "#CCFF00", "#FFFFFF"], 30, 5, true)
+    triggerShake(g, 7, 0.4)
+    g.abilityNotif = { text: "¡PELOTA MEJORADA! +2 balas • +4 rebotes  🎾", timer: 6.0 }
+    saveGame(g)
   } else if (g.viejoDogState === "key_held" && g.tballKeyHeld) {
     // El jugador lleva la media llave y se acerca a Rex
     // Rex tiene la otra mitad → juntas abren la jaula
@@ -2542,6 +2611,11 @@ function tickPickups(g: G) {
         g.abilityNotif = { text: "½ Llave recogida — ¡Llévala a Rex! Él tiene la otra mitad", timer: 5.0 }
         spawnExplosion(g, pk.x, pk.y, ["#FFD700", "#FFA500", "#FFFFFF", "#FFE066"], 12, 4)
         saveGame(g)
+      } else if (pk.kind === "baton" && !g.rexBatonHeld) {
+        g.rexBatonHeld = true
+        g.abilityNotif = { text: "¡Bastón recogido! Llévalo a Rex el Viejo.", timer: 5.0 }
+        spawnExplosion(g, pk.x, pk.y, ["#8B4513", "#D2691E", "#FFD700", "#FFFFFF"], 14, 4)
+        saveGame(g)
       }
     }
   }
@@ -2554,7 +2628,7 @@ const TB_GRAVITY = 0.12  // gravedad leve
 const TB_MAX_BOUNCES = 5
 const TB_MAX_LIFE = 8    // segundos antes de expirar
 const TB_MAX_SIMULTANEOUS = 3  // máximo en pantalla a la vez (visual)
-const TB_AMMO_INIT = 5   // munición inicial al desbloquear
+const TB_AMMO_INIT = 3   // munición inicial al desbloquear (mejora a 5 tras entregar el bastón)
 const TB_AMMO_MAX = 15   // máximo acumulable
 const TB_AMMO_DROP = 3   // cuánta munición da un drop de caja
 
@@ -2568,7 +2642,8 @@ function fireTBall(g: G) {
   const len = Math.sqrt(dx * dx + dy * dy)
   const px = p.x + (p.facing === 1 ? p.w + 4 : -TB_R * 2 - 4)
   const py = p.y + p.h * 0.4
-  g.tBalls.push({ x: px, y: py, vx: (dx / len) * TB_SPD, vy: (dy / len) * TB_SPD, active: true, bounces: TB_MAX_BOUNCES, life: TB_MAX_LIFE })
+  const extraBounces = g.tballUpgraded ? 4 : 0
+  g.tBalls.push({ x: px, y: py, vx: (dx / len) * TB_SPD, vy: (dy / len) * TB_SPD, active: true, bounces: TB_MAX_BOUNCES + extraBounces, life: TB_MAX_LIFE })
   if (!g.infiniteAmmo) g.tballAmmo--
   spawnExplosion(g, px, py, ["#CCFF00", "#88FF44"], 4, 1.5)
 }
@@ -2805,6 +2880,9 @@ function applyLoad(g: G, s: LulySave): void {
   g.viejoDogState = (s.viejoDogState as G["viejoDogState"]) || "waiting"
   g.tballKeyHeld = s.tballKeyHeld ?? false
   g.questKillBaseline = s.questKillBaseline ?? 0
+  g.rexBallFirstSeen = (s as any).rexBallFirstSeen ?? false
+  g.rexBatonHeld  = s.rexBatonHeld  ?? false
+  g.tballUpgraded = s.tballUpgraded ?? false
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
     // Ubicar llave cerca de donde está la jaula (pickup secundario de emergencia)
@@ -3410,7 +3488,39 @@ function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, sy: numb
 function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
   const { cx, cy } = g, t = Date.now() * 0.001
   for (const pk of g.pickups) {
-    if (!pk.active || pk.kind !== "tball_key") continue
+    if (!pk.active) continue
+    const floatY0 = Math.sin(pk.floatPhase) * 6
+    const sx0 = pk.x - cx, sy0 = pk.y - cy + floatY0
+    if (pk.kind === "baton") {
+      if (sx0 < -80 || sx0 > CW + 80 || sy0 < -80 || sy0 > CH + 80) continue
+      ctx.save()
+      // Halo marrón
+      const haloB = ctx.createRadialGradient(sx0, sy0, 2, sx0, sy0, 28)
+      haloB.addColorStop(0, "rgba(180,100,30,0.55)"); haloB.addColorStop(1, "rgba(120,60,10,0)")
+      ctx.fillStyle = haloB; ctx.beginPath(); ctx.arc(sx0, sy0, 28, 0, Math.PI * 2); ctx.fill()
+      // Bastón diagonal (↗ → ↙)
+      ctx.save()
+      ctx.translate(sx0, sy0); ctx.rotate(-0.45)
+      ctx.strokeStyle = "#8B4513"; ctx.lineWidth = 5; ctx.lineCap = "round"
+      ctx.beginPath(); ctx.moveTo(-14, 8); ctx.lineTo(10, -10); ctx.stroke()
+      // Mango curvo (parte superior)
+      ctx.strokeStyle = "#A0522D"; ctx.lineWidth = 4
+      ctx.beginPath(); ctx.moveTo(10, -10); ctx.bezierCurveTo(14, -14, 18, -12, 16, -7); ctx.stroke()
+      // Brillo
+      ctx.strokeStyle = "#D2A060"; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.moveTo(-12, 6); ctx.lineTo(8, -8); ctx.stroke()
+      ctx.restore()
+      // Etiqueta
+      const pulseB = 0.65 + 0.35 * Math.sin(t * 4)
+      ctx.globalAlpha = pulseB
+      ctx.fillStyle = "#D2691E"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText("BASTÓN", sx0, sy0 - 22)
+      ctx.fillStyle = "#C8A060"; ctx.font = "7px 'Courier New',monospace"
+      ctx.fillText("lleva a Rex", sx0, sy0 - 12)
+      ctx.textAlign = "left"; ctx.restore()
+      continue
+    }
+    if (pk.kind !== "tball_key") continue
     const floatY = Math.sin(pk.floatPhase) * 6
     const sx = pk.x - cx, sy = pk.y - cy + floatY
     if (sx < -80 || sx > CW + 80 || sy < -80 || sy > CH + 80) continue
@@ -3802,6 +3912,14 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       ? "¡Tengo la otra mitad! 🗝"
       : g.viejoDogState === "key_dropped"
       ? "¡Recoge la media llave!"
+      : g.viejoDogState === "ball_held"
+      ? (!g.rexBallFirstSeen ? "¡Lo sabía, Luly!" : "¡Sigue adelante!")
+      : g.viejoDogState === "ball_guide"
+      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : "¡Aún falta el jefe!")
+      : (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")
+      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : "¡Toma esto, Luly!")
+      : g.viejoDogState === "baton_delivered"
+      ? "¡Puedo caminar mejor!"
       : "¡Psst! ¡Acércate!"
     const cw2 = ctx.measureText(callText).width + 14
     const cbx = bx - cw2 / 2, cby = by - 88 + bobY
@@ -3819,106 +3937,173 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
   if (dist >= VIEJO_DOG_CALLOUT_R) return  // demasiado lejos, sin callout
 
-  // ── Sistema de quests / diálogo completo ─────────────────────────────────
-  // Diseñado para múltiples quests: el NPC tiene "slots" de misión.
-  // Por ahora: slot 0 = tball quest. Los demás slots dicen "próximamente".
-  const TOTAL_QUEST_SLOTS = 3   // reservados para el futuro
-  const completedQuests = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised") ? 1 : 0
-  const activeQuests = (g.viejoDogState === "quest_active" || g.viejoDogState === "key_dropped" || g.viejoDogState === "key_held") ? 1 : 0
+  // ── Sistema de quests / diálogo con tipografía animada ───────────────────
+  const TOTAL_QUEST_SLOTS = 3
   const kills = Math.max(0, countP1KillsW0(g.dead) - g.questKillBaseline)
 
-  let dialogLines: string[]
-  let dialogColor = "#E8D8C0"
-  let headerLine = ""
+  // Cada estado devuelve { pages, colors, headers } — pages = array de páginas (array de líneas)
+  type DlgDef = { pages: string[][]; colors: string[]; headers: string[] }
+  let dlg: DlgDef
 
   if (g.viejoDogState === "surprised") {
-    headerLine = "◈ MISIÓN: COMPLETADA ◈"
-    dialogColor = "#CCFF88"
-    dialogLines = [
+    dlg = { headers: ["◈ MISIÓN: COMPLETADA ◈"], colors: ["#CCFF88"], pages: [[
       "¡Caray! ¡La encontraste",
       "tú sola! Eres más lista",
       "de lo que pensaba, Luly.",
       "Quizás pronto tenga",
       "otro secreto para ti. 🎾",
-    ]
+    ]]}
   } else if (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done") {
-    headerLine = "◈ MISIÓN: COMPLETADA ◈"
-    dialogColor = "#AAFFAA"
-    dialogLines = [
+    dlg = { headers: ["◈ MISIÓN: COMPLETADA ◈"], colors: ["#AAFFAA"], pages: [[
       "¡Sigue el pasillo al",
       "este! Mi pelota está en",
       "una jaula al fondo.",
       "¡Ve por ella, es tuya,",
       "te la ganaste! 🎾",
-    ]
+    ]]}
   } else if (g.viejoDogState === "key_held") {
-    // Rex ve la media llave y reacciona dramáticamente
-    headerLine = `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ¡LA TIENES! ◈`
-    dialogColor = "#FFE088"
-    dialogLines = [
+    dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ¡LA TIENES! ◈`], colors: ["#FFE088"], pages: [[
       "¡La otra mitad de la",
       "llave de mi antiguo amo!",
       "Aquí tengo la mía...",
       "¡Tómala, Luly! Las dos",
       "juntas abren la jaula.",
-    ]
+    ]]}
   } else if (g.viejoDogState === "key_dropped") {
-    headerLine = `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`
-    dialogColor = "#FFCC66"
-    dialogLines = [
+    dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`], colors: ["#FFCC66"], pages: [[
       "¡Uno de ellos tenía",
       "mi media llave! ¡Brilla",
       "en el suelo, cógela y",
       "tráemela pronto, Luly!",
       "¡Yo tengo la otra mitad!",
-    ]
+    ]]}
   } else if (g.viejoDogState === "quest_active") {
-    headerLine = `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`
-    // Barra de "búsqueda" — no sabemos cuántos hay que matar, solo mostramos kills
     const barFill = Math.min(kills, 10)
     const bar = "█".repeat(barFill) + "░".repeat(Math.max(0, 10 - barFill))
-    dialogLines = [
+    dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`], colors: ["#FFCC66"], pages: [[
       "Uno de esos perros lleva",
       "mi media llave. ¡Búscala!",
-      `${bar}`,
+      bar,
       kills === 0 ? "Eliminados: 0 — ¡Empieza!" :
         `Eliminados: ${kills} — ${kills < 3 ? "¡Sigue buscando!" : kills < 8 ? "¡Puede estar cerca!" : "¡Alguno debe tenerla!"}`,
       "Yo tengo la otra mitad.",
-    ]
+    ]]}
+  } else if (g.viejoDogState === "ball_held" && !g.rexBallFirstSeen) {
+    dlg = { headers: ["◈ ¡LA TIENES! ◈"], colors: ["#CCFFAA"], pages: [[
+      "¡La tienes! Es la mejor",
+      "de todas, su saber es",
+      "indiscutible. Pero su",
+      "fuerza de rebote es mayor",
+      "de lo normal... luego",
+      "la mejoraremos juntos. 🎾",
+    ]]}
+  } else if (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide") {
+    // Dos páginas: primero el jefe, luego la quest del bastón
+    dlg = {
+      headers: ["◈ SIGUE ADELANTE ◈", "◈ NUEVA MISIÓN ◈"],
+      colors:  ["#FFDD88",            "#C8A0FF"],
+      pages: [
+        [
+          "Bien, tienes que seguir",
+          "derrotando enemigos para",
+          "poder enfrentarte al jefe",
+          "de esta sección...",
+          "Le llaman El Castigador.",
+        ],
+        [
+          "Mejoraremos el rebote de",
+          "tu pelota, Luly. Tendrás",
+          "más pelotas para lanzar...",
+          "pero primero vence al",
+          "Herrero. Él tiene mi bastón.",
+          "Derrótalo y tráemelo,",
+          "así podré caminar mejor.",
+        ],
+      ]
+    }
+  } else if (g.viejoDogState === "reward_lives") {
+    dlg = { headers: ["◈ ¡BIEN HECHO! ◈"], colors: ["#FF8888"], pages: [[
+      "¡Luly, eres increíble!",
+      "Veo que estás débil...",
+      "Te daré una ayuda.",
+      "Toma esto y recupérate",
+      "antes de seguir. ❤",
+    ]]}
+  } else if (g.viejoDogState === "reward_full") {
+    dlg = { headers: ["◈ ¡IMPRESIONANTE! ◈"], colors: ["#88FFCC"], pages: [[
+      "¡Luly, eres más fuerte",
+      "de lo que pensé! No",
+      "perdiste ninguna vida.",
+      "Ahora debes ir abajo...",
+      "te espera El Herrero.",
+      "Construyó las perreras",
+      "y se encerró a sí mismo.",
+    ]]}
+  } else if (g.viejoDogState === "baton_delivered") {
+    dlg = { headers: ["◈ ¡GRACIAS, LULY! ◈"], colors: ["#C8A0FF"], pages: [[
+      "¡Mi bastón! Ahora puedo",
+      "caminar mucho mejor.",
+      "Tu pelota ya tiene más",
+      "rebote y más munición.",
+      "¡Sigue adelante, Luly! 🪄",
+    ]]}
   } else {
-    // "waiting" — primera vez que el jugador se acerca
-    headerLine = `◈ MISIONES: ${TOTAL_QUEST_SLOTS} en total ◈`
-    dialogLines = [
+    dlg = { headers: [`◈ MISIONES: ${TOTAL_QUEST_SLOTS} en total ◈`], colors: ["#E8D8C0"], pages: [[
       "¡Hola, Luly! Soy Rex,",
       "el guardián de secretos.",
       "Por ahora solo tengo",
       "una misión para ti...",
       "¡Cuando seas más fuerte",
       "te daré las demás! 🐾",
-    ]
+    ]]}
   }
+
+  // ── Tipografía animada (typewriter) ──────────────────────────────────────
+  const dlgKey = g.viejoDogState + (g.rexBallFirstSeen ? "_s" : "")
+  if (dlgKey !== _rexDlgKey) {
+    _rexDlgKey = dlgKey; _rexDlgMs = Date.now(); _rexDlgPage = 0
+  }
+  const numPages = dlg.pages.length
+  const elapsed = Date.now() - _rexDlgMs
+  const page0TotalChars = dlg.pages[0].join("").length
+  // Avance automático a página 1 cuando la página 0 terminó + pausa
+  if (_rexDlgPage === 0 && numPages > 1) {
+    if (elapsed > page0TotalChars * REX_TYPING_MS + REX_PAGE_GAP_MS) {
+      _rexDlgPage = 1
+      _rexDlgMs = Date.now(); // reiniciar timer para la nueva página
+    }
+  }
+  const curPage  = Math.min(_rexDlgPage, numPages - 1)
+  const elapsed2 = _rexDlgPage > 0 ? (Date.now() - _rexDlgMs) : elapsed
+  const charsShown = Math.min(
+    dlg.pages[curPage].join("").length,
+    Math.floor(elapsed2 / REX_TYPING_MS)
+  )
+  const dialogLines = dlg.pages[curPage]
+  const dialogColor = dlg.colors[curPage] ?? dlg.colors[0]
+  const headerLine  = dlg.headers[curPage] ?? dlg.headers[0]
 
   // ── Renderizar burbuja de diálogo ─────────────────────────────────────────
   const bub_lh = 13, bub_pad = 9, bub_w = 210
   const totalLines = (headerLine ? 1 : 0) + dialogLines.length
   const bub_h = bub_pad * 2 + totalLines * bub_lh + (headerLine ? 4 : 0)
-  // Posicionar encima del NPC, centrada en bx
   const bub_x = Math.max(4, Math.min(CW - bub_w - 4, bx - bub_w / 2))
-  const bub_y = by - bub_h - 78  // 78px encima de los pies
+  const bub_y = by - bub_h - 78
 
   ctx.save()
-  // Fondo
   ctx.fillStyle = "rgba(14,10,6,0.92)"
   ctx.beginPath(); ctx.roundRect(bub_x, bub_y, bub_w, bub_h, 9); ctx.fill()
-  // Borde con color según estado
   const borderCol = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done" || g.viejoDogState === "surprised")
     ? "#44BB44"
     : (g.viejoDogState === "key_held") ? "#FFD700"
     : (g.viejoDogState === "key_dropped" || g.viejoDogState === "quest_active") ? "#DDAA44"
+    : (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide") ? (curPage === 1 ? "#C8A0FF" : "#88CC44")
+    : (g.viejoDogState === "reward_lives") ? "#FF6666"
+    : (g.viejoDogState === "reward_full") ? "#44FFCC"
+    : (g.viejoDogState === "baton_delivered") ? "#C8A0FF"
     : "#A08060"
   ctx.strokeStyle = borderCol; ctx.lineWidth = 1.4; ctx.stroke()
 
-  // Cola del globo
   const tailX = Math.max(bub_x + 20, Math.min(bub_x + bub_w - 20, bx))
   ctx.fillStyle = "rgba(14,10,6,0.92)"
   ctx.beginPath()
@@ -3934,22 +4119,40 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.stroke()
 
   let textY = bub_y + bub_pad
-  // Header
   if (headerLine) {
     ctx.fillStyle = borderCol; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(headerLine, bub_x + bub_w / 2, textY + bub_lh - 2)
     textY += bub_lh + 4
-    // Separador
     ctx.strokeStyle = borderCol + "55"; ctx.lineWidth = 0.8
     ctx.beginPath(); ctx.moveTo(bub_x + 8, textY); ctx.lineTo(bub_x + bub_w - 8, textY); ctx.stroke()
     textY += 3
   }
-  // Líneas de diálogo
+  // Tipografía animada: revelar carácter a carácter
   ctx.fillStyle = dialogColor; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
-  dialogLines.forEach(line => {
-    ctx.fillText(line, bub_x + bub_w / 2, textY + bub_lh - 2)
+  let charsLeft = charsShown
+  for (let li = 0; li < dialogLines.length; li++) {
+    const line = dialogLines[li]
+    if (charsLeft <= 0) break
+    const shown = line.slice(0, charsLeft)
+    ctx.fillText(shown, bub_x + bub_w / 2, textY + bub_lh - 2)
+    charsLeft -= line.length
     textY += bub_lh
-  })
+  }
+  // Cursor parpadeante al final de la última línea visible
+  const totalPageChars = dialogLines.join("").length
+  if (charsShown < totalPageChars) {
+    const cursorOn = Math.floor(Date.now() / 400) % 2 === 0
+    if (cursorOn) {
+      ctx.fillStyle = dialogColor; ctx.fillText("▋", bub_x + bub_w / 2 + 2, textY - bub_lh + bub_lh - 2)
+    }
+  } else if (numPages > 1 && curPage < numPages - 1) {
+    // Indicador "más →" cuando espera avanzar a página siguiente
+    const pulseMore = 0.5 + 0.5 * Math.sin(Date.now() * 0.006)
+    ctx.globalAlpha = pulseMore
+    ctx.fillStyle = borderCol; ctx.font = "bold 9px 'Courier New',monospace"
+    ctx.fillText("▶ ▶ ▶", bub_x + bub_w / 2, textY)
+    ctx.globalAlpha = 1
+  }
   ctx.textAlign = "left"
   ctx.restore()
 }
@@ -4255,10 +4458,10 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
       // rw, rh: tamaño de render. feet: píxeles desde arriba hasta el suelo del sprite.
       // Calculados con PIL para que el contenido mida ~88 px y las bases toquen sy.
       const KENNEL_DIM: { rw: number; rh: number; feet: number }[] = [
-        { rw: 100, rh: 100, feet: 90 },  // ambar (1254×1254)
-        { rw: 122, rh: 100, feet: 88 },  // red   (1386×1135)
-        { rw: 100, rh: 100, feet: 89 },  // blue  (1254×1254)
-        { rw: 122, rh: 100, feet: 86 },  // violet(1386×1135)
+        { rw: 130, rh: 130, feet: 117 },  // ambar (1254×1254)
+        { rw: 158, rh: 130, feet: 114 },  // red   (1386×1135)
+        { rw: 130, rh: 130, feet: 116 },  // blue  (1254×1254)
+        { rw: 158, rh: 130, feet: 112 },  // violet(1386×1135)
       ]
       const wi = Math.max(0, Math.min(cp.w, 3))
       const kspr = sprs[KENNEL_KEYS[wi]]
@@ -5648,16 +5851,21 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.textAlign = "left"
   }
   // ── Barra de boss — solo visible cuando el jugador está EN la sala del boss ──
-  const inBossRoom = isBossRoom(curW, curC, curR) !== null
-  const boss = inBossRoom ? g.enemies.find(e => e.active && !e.dying && e.boss && e.world === curW) : null
+  const bossRoomType = isBossRoom(curW, curC, curR)
+  const inBossRoom = bossRoomType !== null
+  // Buscar SOLO el boss de la sala actual (por ID de sala) para evitar mostrar el boss equivocado
+  const roomPrefix = `${curW}_${curC}_${curR}_`
+  const boss = inBossRoom ? g.enemies.find(e => e.active && !e.dying && e.boss && e.originalId.startsWith(roomPrefix)) : null
   if (boss) {
+    const BOSS_NAMES: Record<string, string> = { p1: "El Castigador", p2: "El Herrero", ultra: "El Torturado" }
+    const bossName = (bossRoomType && BOSS_NAMES[bossRoomType]) || WORLD_NAMES[boss.world]
     const barW = 420, barH = 14, barX = (CW - barW) / 2, barY = CH - 34
     ctx.fillStyle = "rgba(0,0,0,0.85)"
     ctx.beginPath(); ctx.roundRect(barX - 8, barY - 22, barW + 16, barH + 30, 7); ctx.fill()
     ctx.strokeStyle = th.doorC + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(barX - 8, barY - 22, barW + 16, barH + 30)
     // Nombre del boss y fase
     ctx.fillStyle = th.doorC; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-    ctx.fillText(`⚠ JEFE — ${WORLD_NAMES[boss.world]}`, CW / 2 - 50, barY - 8)
+    ctx.fillText(`⚠ ${bossName} ⚠`, CW / 2 - 50, barY - 8)
     if ((boss as any).phase === 2) {
       const pulse = 0.7 + 0.3 * Math.sin(Date.now() * 0.008)
       ctx.fillStyle = `rgba(255,80,0,${pulse})`; ctx.font = "bold 9px 'Courier New',monospace"
