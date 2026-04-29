@@ -345,11 +345,13 @@ const CP_LOCS_BOSS: [number, number, "p1" | "ultra" | "p2"][] = [
 const TBALL_SECRET_C = 6, TBALL_SECRET_R = TROW
 const { x: _TBALL_RX, y: _TBALL_RY } = ro(0, TBALL_SECRET_C, TBALL_SECRET_R)
 // Jaula: 80px ancha, 116px alta, sentada en el piso del corredor TROW
-const _CAGE_H = 116
+// Cell sprite: 581×454 → render a h=130, w=Math.round(130*581/454)=166
+const _CAGE_H = 130
+const _CAGE_W = Math.round(_CAGE_H * 581 / 454)   // ≈ 166 — mantiene aspect ratio del sprite
 const TBALL_WALL = {
-  x: _TBALL_RX + Math.floor(RW * 0.50) - 40,   // al 50% del ancho — centro de la sala
-  y: _TBALL_RY + RH - WT - _CAGE_H,             // bottom = piso del corredor
-  w: 80,
+  x: _TBALL_RX + Math.floor(RW * 0.50) - Math.floor(_CAGE_W / 2),  // centrado en sala
+  y: _TBALL_RY + RH - WT - _CAGE_H,
+  w: _CAGE_W,
   h: _CAGE_H,
 }
 // Pelota en el tercio superior de la jaula (bien visible)
@@ -370,7 +372,10 @@ let _rexNameAlpha = 1.0                  // fade suave del nombre: 1=visible, 0=
 let _rexDlgKey    = ""                   // clave de estado — cambio = reinicio de tipografía
 let _rexDlgMs     = 0                    // timestamp en que empezó la página actual
 let _rexDlgPage    = 0                   // página actual (0 o 1 para diálogos de 2 páginas)
-let _rexPageWaiting = false              // true cuando página 0 terminó y espera botón E
+let _rexPageWaiting  = false             // true cuando página 0 terminó y espera botón E
+let _rexTypingActive = false             // true mientras el typewriter está corriendo → bloquea movimiento
+let _rexWasInRange   = false             // detecta re-entrada al rango para reiniciar tipografía
+const _rexReadPages: Record<string, number> = {}  // última página completamente leída por dlgKey
 const REX_TYPING_MS   = 36              // ms por carácter
 const TBALL_KEY_DROP_CHANCE = 0.20       // 20% de probabilidad por kill (tras 3 kills mínimo)
 const TBALL_KEY_MIN_KILLS = 3            // primeros 3 kills nunca tienen la llave (build-up)
@@ -2546,6 +2551,7 @@ function tickViejoDog(g: G) {
     return
   }
 
+
   if (g.viejoDogState === "waiting") {
     // Primera vez que el jugador se acerca → mostrar introducción
     if (g.abilities.has("tball")) {
@@ -3078,6 +3084,26 @@ function tickCheckpoints(g: G) {
 function tick(g: G) {
   if (g.tpAnim && g.tpAnim.phase === 0) { tickCheckpoints(g); return }  // congelar juego durante fade-out
   const now = performance.now()
+  // Bloqueo TOTAL durante diálogos de 2 páginas de Rex — va ANTES de tickPlayer
+  if (_rexTypingActive) {
+    // Movimiento
+    g.keys["arrowleft"] = false;  g.keys["a"] = false
+    g.keys["arrowright"] = false; g.keys["d"] = false
+    g.keys["arrowup"] = false;    g.keys["w"] = false
+    g.keys["arrowdown"] = false;  g.keys["s"] = false
+    g.keys[" "] = false           // saltar
+    g.keys["shift"] = false       // dash
+    g.keys["control"] = false     // correr
+    // Combate
+    g.keys["n"] = false           // disparo T-ball
+    g.keys["m"] = false           // látigo / parry
+    g.keys["v"] = false           // hueso
+    g.keys["t"] = false           // teleport
+    // g.keys["e"] se preserva — es la tecla para avanzar la página del diálogo
+    // Limpiar velocidad y estado de movimiento
+    g.pl.vx = 0
+    g.pl.crouching = false
+  }
   tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
 }
 
@@ -3628,168 +3654,114 @@ function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
   }
 }
 
-// ── Jaula + pelota — dibujada DESPUÉS de drawWalls para quedar encima de tiles ──
-function drawCage(ctx: CanvasRenderingContext2D, g: G) {
+// ── Jaula + pelota — sprite Cell_Close / Cell_Open + pelota flotante ─────────
+// Truco de profundidad: cerrada → pelota DETRÁS del sprite (las barras tapan la pelota).
+//                       abierta → pelota DELANTE del sprite (flota libremente).
+function drawCage(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const tbPickup = g.pickups.find(p => p.id === "tball_w0")
-  if (!tbPickup?.active) return   // ya recogida, nada que dibujar
+  if (!tbPickup?.active) return
 
   const { cx, cy } = g, t = Date.now() * 0.001
   const cageOpen = g.viejoDogState === "cage_opened"
 
+  const cw2 = TBALL_WALL.w, ch2 = TBALL_WALL.h
   const sx = TBALL_WALL.x - cx
   const sy = TBALL_WALL.y - cy
-  const cw2 = TBALL_WALL.w, ch2 = TBALL_WALL.h
 
-  if (sx + cw2 < -80 || sx > CW + 80 || sy + ch2 < -80 || sy > CH + 80) return
+  if (sx + cw2 < -100 || sx > CW + 100 || sy + ch2 < -100 || sy > CH + 100) return
 
-  const cx2 = sx + cw2 / 2   // centro X de la jaula en pantalla
-  const ballY = sy + ch2 * 0.42 + Math.sin(tbPickup.floatPhase) * 5
+  const cx2 = sx + cw2 / 2   // centro X del sprite en pantalla
+
+  // La pelota flota en el tercio superior del interior del sprite
+  // (el interior de la celda ocupa aprox. 5%–82% vertical del sprite)
+  const ballRadius = 14
+  const ballCenterY = sy + ch2 * 0.38   // 38% desde arriba = mitad superior del interior
+  const floatAmp = cageOpen ? 7 : 5
+  const ballY = ballCenterY + Math.sin(tbPickup.floatPhase) * floatAmp
 
   ctx.save()
 
-  if (cageOpen) {
-    // ── Jaula ABIERTA: barras dobladas hacia los lados (NO hacia abajo) ────
-    // Las barras se abren como una puerta — la mitad izq. se dobla a la izq,
-    // la mitad der. a la derecha. Así nunca atraviesan el suelo del juego.
-    ctx.strokeStyle = "#788A9A"; ctx.lineWidth = 3; ctx.lineCap = "round"
-    const half = Math.floor(cw2 / 2)
-    for (let i = 0; i < 5; i++) {
-      // Lado izquierdo — barras dobladas hacia la izquierda
-      const lx = sx + 4 + i * (half / 5)
-      ctx.save(); ctx.globalAlpha = 0.5
-      ctx.translate(lx, sy + 4)
-      ctx.rotate(-(0.5 + i * 0.12))   // rotan hacia la izquierda
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, ch2 * 0.7); ctx.stroke()
-      ctx.restore()
-      // Lado derecho — barras dobladas hacia la derecha
-      const rx = sx + cw2 - 4 - i * (half / 5)
-      ctx.save(); ctx.globalAlpha = 0.5
-      ctx.translate(rx, sy + 4)
-      ctx.rotate(0.5 + i * 0.12)      // rotan hacia la derecha
-      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, ch2 * 0.7); ctx.stroke()
-      ctx.restore()
+  // ── Helper: dibuja la pelota de tenis ───────────────────────────────────
+  const drawBall = (alpha = 1) => {
+    ctx.globalAlpha = alpha
+    // Halo verde-amarillo
+    const haloR = cageOpen ? 34 : 22
+    const haloA = cageOpen ? 0.55 : 0.40
+    const halo = ctx.createRadialGradient(cx2, ballY, 2, cx2, ballY, haloR)
+    halo.addColorStop(0, `rgba(190,255,60,${haloA})`); halo.addColorStop(1, "rgba(100,220,0,0)")
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx2, ballY, haloR, 0, Math.PI * 2); ctx.fill()
+    // Cuerpo de la pelota
+    const bg = ctx.createRadialGradient(cx2 - 4, ballY - 4, 1, cx2, ballY, ballRadius)
+    bg.addColorStop(0, "#EEFF66"); bg.addColorStop(0.55, "#88CC00"); bg.addColorStop(1, "#3A5800")
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(cx2, ballY, ballRadius, 0, Math.PI * 2); ctx.fill()
+    // Líneas de tenis (rotando suavemente)
+    const rot = t * (cageOpen ? 1.8 : 0.7)
+    ctx.save(); ctx.translate(cx2, ballY); ctx.rotate(rot)
+    ctx.strokeStyle = "rgba(200,240,0,0.75)"; ctx.lineWidth = 1.8; ctx.lineCap = "round"
+    ctx.beginPath(); ctx.arc(0, 0, ballRadius, -0.7, 0.7); ctx.stroke()
+    ctx.beginPath(); ctx.arc(0, 0, ballRadius, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke()
+    ctx.restore()
+    ctx.globalAlpha = 1
+  }
+
+  // ── Helper: dibuja el sprite (con fallback de sombra) ───────────────────
+  const drawSprite = (key: string) => {
+    const spr = sprs[key]
+    if (spr?.complete && spr.naturalWidth) {
+      ctx.drawImage(spr, sx, sy, cw2, ch2)
     }
-    // Marco superior roto (partido al centro)
-    ctx.globalAlpha = 0.55; ctx.strokeStyle = "#8A9AAA"; ctx.lineWidth = 4
-    ctx.beginPath(); ctx.moveTo(sx + 2, sy); ctx.lineTo(sx + cw2 * 0.35, sy); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(sx + cw2 * 0.65, sy); ctx.lineTo(sx + cw2 - 2, sy); ctx.stroke()
-    // Postes laterales del marco aún en pie
-    ctx.strokeStyle = "#7A8A9A"; ctx.lineWidth = 4
-    ctx.beginPath(); ctx.moveTo(sx + 2, sy); ctx.lineTo(sx + 2, sy + ch2); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(sx + cw2 - 2, sy); ctx.lineTo(sx + cw2 - 2, sy + ch2); ctx.stroke()
+  }
+
+  if (cageOpen) {
+    // ABIERTA: sprite primero, pelota encima (flota libremente)
+    drawSprite("cell_open")
+    drawBall()
+
+    // Etiqueta animada
+    const lp = 0.8 + 0.2 * Math.sin(t * 3.5)
+    ctx.globalAlpha = lp
+    ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillStyle = "#CCFF88"; ctx.fillText("¡RECÓGELA!", cx2, sy - 12)
+    ctx.font = "7px 'Courier New',monospace"
+    ctx.fillStyle = "#88FF88"; ctx.fillText("¡celda abierta!", cx2, sy - 2)
     ctx.globalAlpha = 1
 
   } else {
-    // ── Jaula CERRADA ──────────────────────────────────────────────────────
+    // CERRADA: pelota primero (detrás), sprite encima → barras tapan la pelota
+    drawBall()
+    drawSprite("cell_close")
 
-    // Sombra debajo de la jaula
-    ctx.fillStyle = "rgba(0,0,0,0.35)"
-    ctx.beginPath(); ctx.ellipse(cx2, sy + ch2 + 4, cw2 * 0.55, 6, 0, 0, Math.PI * 2); ctx.fill()
-
-    // Fondo interior oscuro
-    ctx.fillStyle = "rgba(0,0,0,0.55)"
-    ctx.fillRect(sx + 3, sy + 3, cw2 - 6, ch2 - 6)
-
-    // Marco exterior — hierro grueso oxidado
-    const frameGrad = ctx.createLinearGradient(sx, sy, sx + cw2, sy + ch2)
-    frameGrad.addColorStop(0, "#7A8E9E"); frameGrad.addColorStop(0.5, "#4A6070"); frameGrad.addColorStop(1, "#5A7080")
-    ctx.strokeStyle = frameGrad; ctx.lineWidth = 5; ctx.lineJoin = "miter"
-    ctx.strokeRect(sx + 1, sy + 1, cw2 - 2, ch2 - 2)
-
-    // Refuerzo horizontal doble
-    const midY = sy + ch2 * 0.48
-    ctx.strokeStyle = "#5A6E7E"; ctx.lineWidth = 3
-    ctx.beginPath(); ctx.moveTo(sx + 3, midY); ctx.lineTo(sx + cw2 - 3, midY); ctx.stroke()
-    ctx.strokeStyle = "#6A7E8E"; ctx.lineWidth = 1.5
-    ctx.beginPath(); ctx.moveTo(sx + 3, midY + 4); ctx.lineTo(sx + cw2 - 3, midY + 4); ctx.stroke()
-
-    // Barras verticales
-    const barSpacing = 9
-    const barCount = Math.floor((cw2 - 6) / barSpacing)
-    for (let i = 1; i <= barCount; i++) {
-      const bx2 = sx + 3 + i * barSpacing
-      ctx.strokeStyle = "#6A7E90"; ctx.lineWidth = 2.5; ctx.lineCap = "butt"
-      ctx.beginPath(); ctx.moveTo(bx2, sy + 3); ctx.lineTo(bx2, sy + ch2 - 3); ctx.stroke()
-      // Reflejos en las barras
-      ctx.strokeStyle = "rgba(200,230,255,0.12)"; ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(bx2 - 0.5, sy + 5); ctx.lineTo(bx2 - 0.5, sy + ch2 - 5); ctx.stroke()
-      // Remaches alternos
-      if (i % 2 === 0) {
-        ctx.fillStyle = "#7A9AAA"
-        ctx.beginPath(); ctx.arc(bx2, sy + ch2 * 0.22, 2.5, 0, Math.PI * 2); ctx.fill()
-        ctx.beginPath(); ctx.arc(bx2, sy + ch2 * 0.74, 2.5, 0, Math.PI * 2); ctx.fill()
-      }
-    }
-
-    // ── Candado central ─────────────────────────────────────────────────
-    const lkX = cx2, lkY = midY + 1
-    // Sombra
-    ctx.fillStyle = "rgba(0,0,0,0.5)"
-    ctx.beginPath(); ctx.roundRect(lkX - 11, lkY - 7, 22, 16, 3); ctx.fill()
-    // Cuerpo
-    const lkG = ctx.createLinearGradient(lkX - 10, lkY - 6, lkX + 10, lkY + 8)
-    lkG.addColorStop(0, "#9A7E50"); lkG.addColorStop(1, "#5A3E20")
-    ctx.fillStyle = lkG
-    ctx.beginPath(); ctx.roundRect(lkX - 10, lkY - 6, 20, 14, 3); ctx.fill()
-    ctx.strokeStyle = "#7A5E30"; ctx.lineWidth = 1.5
-    ctx.beginPath(); ctx.roundRect(lkX - 10, lkY - 6, 20, 14, 3); ctx.stroke()
-    // Ojo
-    ctx.fillStyle = "#2A1800"
-    ctx.beginPath(); ctx.arc(lkX, lkY + 2, 3.5, 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = "#4A3010"; ctx.beginPath(); ctx.arc(lkX, lkY + 2, 1.5, 0, Math.PI * 2); ctx.fill()
-    // Arco
-    ctx.strokeStyle = "#8A6E40"; ctx.lineWidth = 3.5; ctx.lineCap = "round"
-    ctx.beginPath(); ctx.arc(lkX, lkY - 6, 6.5, Math.PI, 0); ctx.stroke()
-
-    // Glow según estado
+    // Glow de estado encima del sprite (tinte sutil de color)
     const questActive = g.viejoDogState === "quest_active" || g.viejoDogState === "key_dropped"
-    const keyHeld = g.viejoDogState === "key_held"
-    const waitState = g.viejoDogState === "waiting"
+    const keyHeld     = g.viejoDogState === "key_held"
+    const waitState   = g.viejoDogState === "waiting"
     if (keyHeld) {
-      const glow = 0.18 + 0.1 * Math.sin(t * 5)
-      ctx.fillStyle = `rgba(255,210,0,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
-      ctx.strokeStyle = `rgba(255,230,0,${glow * 2.2})`; ctx.lineWidth = 2.5
-      ctx.strokeRect(sx + 2, sy + 2, cw2 - 4, ch2 - 4)
+      const glow = 0.15 + 0.08 * Math.sin(t * 5)
+      ctx.fillStyle   = `rgba(255,210,0,${glow})`
+      ctx.fillRect(sx, sy, cw2, ch2)
+      ctx.strokeStyle = `rgba(255,230,0,${glow * 2})`; ctx.lineWidth = 2
+      ctx.strokeRect(sx + 1, sy + 1, cw2 - 2, ch2 - 2)
     } else if (questActive) {
-      const glow = 0.06 + 0.03 * Math.sin(t * 2.2)
-      ctx.fillStyle = `rgba(255,100,0,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
+      const glow = 0.05 + 0.03 * Math.sin(t * 2.2)
+      ctx.fillStyle = `rgba(255,110,0,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
     } else if (!waitState) {
-      // "quest_done", "surprised" — verde sutil
       const glow = 0.04 + 0.02 * Math.sin(t * 1.6)
       ctx.fillStyle = `rgba(0,255,100,${glow})`; ctx.fillRect(sx, sy, cw2, ch2)
     }
-    // waiting: sin glow (la jaula parece un objeto decorativo)
+
+    // Sombra proyectada hacia abajo
+    ctx.fillStyle = "rgba(0,0,0,0.28)"
+    ctx.beginPath(); ctx.ellipse(cx2, sy + ch2 + 5, cw2 * 0.42, 5, 0, 0, Math.PI * 2); ctx.fill()
+
+    // Etiqueta flotante encima
+    const lp = 0.45 + 0.15 * Math.sin(t * 1.8)
+    ctx.globalAlpha = lp
+    ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"
+    ctx.fillStyle = "#AACCAA"; ctx.fillText("🎾", cx2, sy - 5)
+    ctx.globalAlpha = 1
   }
 
-  // ── Pelota flotante (siempre visible, encima de las barras) ──────────────
-  // Halo
-  const haloR = cageOpen ? 32 : 20
-  const haloAlpha = cageOpen ? 0.5 : 0.35
-  const halo = ctx.createRadialGradient(cx2, ballY, 3, cx2, ballY, haloR)
-  halo.addColorStop(0, `rgba(180,255,60,${haloAlpha})`); halo.addColorStop(1, "rgba(100,220,0,0)")
-  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx2, ballY, haloR, 0, Math.PI * 2); ctx.fill()
-  // Pelota
-  const ballGrad = ctx.createRadialGradient(cx2 - 3, ballY - 3, 1, cx2, ballY, 13)
-  ballGrad.addColorStop(0, "#EEFF55"); ballGrad.addColorStop(0.5, "#88CC00"); ballGrad.addColorStop(1, "#446600")
-  ctx.fillStyle = ballGrad; ctx.beginPath(); ctx.arc(cx2, ballY, 13, 0, Math.PI * 2); ctx.fill()
-  // Líneas de tenis
-  ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.8; ctx.lineCap = "round"
-  ctx.beginPath(); ctx.arc(cx2, ballY, 13, -0.75, 0.75); ctx.stroke()
-  ctx.beginPath(); ctx.arc(cx2, ballY, 13, Math.PI - 0.75, Math.PI + 0.75); ctx.stroke()
-  // Etiqueta encima de la jaula (siempre visible)
-  const labelPulse = cageOpen ? (0.8 + 0.2 * Math.sin(t * 3.5)) : (0.45 + 0.15 * Math.sin(t * 1.8))
-  ctx.globalAlpha = labelPulse
-  ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-  if (cageOpen) {
-    ctx.fillStyle = "#CCFF88"
-    ctx.fillText("¡RECÓGELA!", cx2, sy - 14)
-    ctx.font = "7px 'Courier New',monospace"
-    ctx.fillStyle = "#88FF88"; ctx.fillText("¡jaula abierta!", cx2, sy - 4)
-  } else {
-    ctx.fillStyle = "#AACCAA"; ctx.fillText("🎾", cx2, sy - 8)
-  }
-  ctx.textAlign = "left"; ctx.globalAlpha = 1
-
+  ctx.textAlign = "left"
   ctx.restore()
 }
 
@@ -3828,12 +3800,12 @@ function drawTBalls(ctx: CanvasRenderingContext2D, g: G) {
 // Por ahora solo tiene la quest "tball". El sistema de slots permite añadir más.
 function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
-  if (curW !== 0) return
+  if (curW !== 0) { _rexTypingActive = false; _rexWasInRange = false; return }
 
   const { cx, cy } = g
   const nx = VIEJO_DOG_POS.x - cx
   const ny = VIEJO_DOG_POS.y - cy
-  if (nx < -120 || nx > CW + 120 || ny < -180 || ny > CH + 20) return
+  if (nx < -120 || nx > CW + 120 || ny < -180 || ny > CH + 20) { _rexTypingActive = false; _rexWasInRange = false; return }
 
   // bx/by = centro X / pies del NPC en pantalla
   const bx = nx, by = ny
@@ -4007,9 +3979,10 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ctx.fillStyle = "#3A2800"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(callText, bx, cby + 11)
     ctx.textAlign = "left"; ctx.restore()
+    _rexTypingActive = false; _rexWasInRange = false   // fuera del rango de diálogo
     return
   }
-  if (dist >= VIEJO_DOG_CALLOUT_R) return  // demasiado lejos, sin callout
+  if (dist >= VIEJO_DOG_CALLOUT_R) { _rexTypingActive = false; _rexWasInRange = false; return }
 
   // ── Sistema de quests / diálogo con tipografía animada ───────────────────
   const TOTAL_QUEST_SLOTS = 3
@@ -4023,7 +3996,7 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
   if (g.viejoDogState === "intro") {
     dlg = {
-      headers: ["◈ ¡BIENVENIDA, LULY! ◈", "◈ PRIMERA MISIÓN ◈"],
+      headers: ["◈ ¡BIENVENIDO, LULY! ◈", "◈ PRIMERA MISIÓN ◈"],
       colors:  ["#E8D8C0",               "#FFDD88"],
       pages: [
         [
@@ -4047,7 +4020,7 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   } else if (g.viejoDogState === "surprised") {
     dlg = { headers: ["◈ MISIÓN: COMPLETADA ◈"], colors: ["#CCFF88"], pages: [[
       "¡Caray! ¡La encontraste",
-      "tú sola! Eres más lista",
+      "tú solo! Eres más listo",
       "de lo que pensaba, Luly.",
       "Quizás pronto tenga",
       "otro secreto para ti. 🎾",
@@ -4080,14 +4053,14 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`], colors: ["#FFCC66"], pages: [[
       "Uno de esos perros lleva",
       "mi media llave. ¡Búscala!",
-      kills === 0 ? "Eliminados: 0 — ¡Empieza!" :
+      kills === 0 ? "" :
         `Eliminados: ${kills} — ${kills < 3 ? "¡Sigue buscando!" : kills < 8 ? "¡Puede estar cerca!" : "¡Alguno debe tenerla!"}`,
       "Yo tengo la otra mitad.",
     ]]}
   } else if (g.viejoDogState === "ball_held" && !g.rexBallFirstSeen) {
     dlg = { headers: ["◈ ¡LA TIENES! ◈"], colors: ["#CCFFAA"], pages: [[
       "¡La tienes! Es la mejor",
-      "de todas, su saber es",
+      "de todas, su sabor es",
       "indiscutible. Pero su",
       "fuerza de rebote es mayor",
       "de lo normal... luego",
@@ -4188,7 +4161,7 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           "¡Mi bastón! Ahora puedo",
           "caminar mucho mejor.",
           "Tu pelota ya tiene más",
-          "rebote y más munición.",
+          "rebote y más cantidad.",
           "¡Sigue adelante, Luly! 🪄",
         ],
         [
@@ -4256,8 +4229,24 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ]]}
   }
 
-  // ── Tipografía animada (typewriter) ──────────────────────────────────────
+  // ── Clave de estado para el typewriter ───────────────────────────────────
   const dlgKey = g.viejoDogState + (g.rexBallFirstSeen ? "_s" : "") + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
+
+  // ── Re-entrada al rango: mostrar instantáneo si ya fue leído, sino reiniciar ──
+  const nowInRange = dist < VIEJO_DOG_TALK_R
+  if (nowInRange && !_rexWasInRange) {
+    const lastRead = _rexReadPages[dlgKey] ?? -1
+    if (lastRead >= 0) {
+      // Página ya leída → mostrar la última página leída completa (sin typewriter)
+      _rexDlgKey = dlgKey; _rexDlgPage = lastRead; _rexDlgMs = Date.now() - 999999
+    } else {
+      // Nunca leído o incompleto → reiniciar desde el principio
+      _rexDlgKey = ""; _rexDlgPage = 0
+    }
+  }
+  _rexWasInRange = nowInRange
+
+  // ── Tipografía animada (typewriter) ──────────────────────────────────────
   if (dlgKey !== _rexDlgKey) {
     _rexDlgKey = dlgKey; _rexDlgMs = Date.now(); _rexDlgPage = 0
   }
@@ -4268,6 +4257,7 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const page0Done = _rexDlgPage === 0 && numPages > 1 && elapsed >= page0TotalChars * REX_TYPING_MS
   _rexPageWaiting = page0Done
   if (page0Done && g.keys["e"]) {
+    _rexReadPages[dlgKey] = 0   // página 0 ya vista → no volver a tipear
     _rexDlgPage = 1
     _rexDlgMs = Date.now()
     g.keys["e"] = false
@@ -4279,6 +4269,17 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     Math.floor(elapsed2 / REX_TYPING_MS)
   )
   const dialogLines = dlg.pages[curPage]
+
+  // ── Actualizar flag de tipografía activa (leído por tickViejoDog siguiente tick) ─
+  // Se calcula aquí porque 'dialogLines' ya está disponible; 'totalPageChars' se redeclara abajo
+  const _curPageChars = dialogLines.join("").length
+  // Marcar página como leída si el typewriter llegó al final
+  if (charsShown >= _curPageChars) {
+    const prevRead = _rexReadPages[dlgKey] ?? -1
+    if (curPage > prevRead) _rexReadPages[dlgKey] = curPage
+  }
+  // Solo bloquear movimiento en diálogos de 2 páginas (los que requieren pulsar E)
+  _rexTypingActive = nowInRange && numPages > 1 && !(curPage === numPages - 1 && charsShown >= _curPageChars)
   const dialogColor = dlg.colors[curPage] ?? dlg.colors[0]
   const headerLine  = dlg.headers[curPage] ?? dlg.headers[0]
 
@@ -4345,12 +4346,12 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const totalPageChars = dialogLines.join("").length
   if (numPages > 1 && charsShown >= totalPageChars && curPage < numPages - 1) {
     const gt = g.gpadType ?? "keyboard"
-    const btnLabel = g.isMobile ? "[ TAP ]" : gt === "xbox" ? "[ B ]" : gt === "ps" ? "[ ○ ]" : "[ E ]"
+    const btnLabel = g.isMobile ? "TAP ▶" : gt === "xbox" ? "B ▶" : gt === "ps" ? "○ ▶" : "E ▶"
     const btnColor = g.isMobile ? "#FFDD88" : gt === "xbox" ? "#E03030" : gt === "ps" ? "#C8A0FF" : "#88FF88"
     const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.006)
     ctx.globalAlpha = pulse
-    ctx.fillStyle = btnColor; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
-    ctx.fillText(btnLabel, bub_x + bub_w / 2, textY + 2)
+    ctx.fillStyle = btnColor; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"
+    ctx.fillText(btnLabel, bub_x + bub_w - 6, bub_y + bub_h - 4)
     ctx.globalAlpha = 1
   }
   ctx.textAlign = "left"
@@ -5294,7 +5295,10 @@ function drawDevPanel(ctx: CanvasRenderingContext2D, g: G) {
   tog(3, 3, "U", "OHKO", g.ohko)
   tog(3, 4, "J", g.staDisplay === "circle" ? "STA●" : "STA▬", g.staDisplay === "circle")
   tog(3, 5, "P", g.mobileZoom === "close" ? "ZOOM×" : "ZOOM○", g.mobileZoom === "close")
-  row(3, 6, "[L]", "→ DEVMAP  [J] modo dev")
+  // Selector de tipo de input (G = ciclar gpadType, V = toggle mobile)
+  const gpadIcon = g.gpadType === "xbox" ? "XBOX" : g.gpadType === "ps" ? "PS" : "PC"
+  const gpadColor = g.gpadType === "keyboard" ? "#88FF88" : g.gpadType === "xbox" ? "#6699FF" : "#CC88FF"
+  row(3, 6, "[G]", `${gpadIcon}  [V] MOB:${g.isMobile ? "■ON" : "□OFF"}`, gpadColor)
 
   // ── Col 4: FLAGS / ESTADÍSTICAS ─────────────────────────────
   hdr("ESTADÍSTICAS", 4)
@@ -5312,6 +5316,57 @@ function drawDevPanel(ctx: CanvasRenderingContext2D, g: G) {
   row(4, 5, "PROJS:", `${g.projs.filter(pr => pr.active).length}`)
   row(4, 6, "SPARKS:", `${g.sparks.filter(s => s.life > 0).length}`)
 
+  ctx.textAlign = "left"
+
+  // ── UI PREVIEW: strip de botones según input mode actual ──────────────────
+  const gt = g.gpadType
+  // Tablas inline (no dependen de GPAD_BTN / XB_COL que se definen más abajo en el archivo)
+  const _KB:  Record<string, string> = { jump:"ESPACIO", dash:"SHIFT", shoot:"N", whip:"M", interact:"E", pause:"P", map:"TAB", teleport:"T" }
+  const _XB:  Record<string, string> = { jump:"A", dash:"LT", shoot:"X", whip:"Y", interact:"B", pause:"START", map:"SEL", teleport:"LB" }
+  const _PS:  Record<string, string> = { jump:"✕", dash:"L2", shoot:"□", whip:"△", interact:"○", pause:"OPT", map:"SHARE", teleport:"L1" }
+  const _MOB: Record<string, string> = { jump:"A", dash:"LT", shoot:"X", whip:"Y", interact:"B", pause:"START", map:"SEL", teleport:"LB" }
+  const _XBC: Record<string, string> = { A:"#1DB954", B:"#E03030", X:"#1565C0", Y:"#F9A825" }
+  const btnMap = g.isMobile ? _MOB : gt === "xbox" ? _XB : gt === "ps" ? _PS : _KB
+  const previewActions: { label: string; key: string; col: string }[] = [
+    { label: "SALTAR",   key: btnMap.jump,     col: gt === "xbox" ? (_XBC[_XB.jump]  ?? "#AAFFAA") : gt === "ps" ? "#AAAAFF" : "#FFDD44" },
+    { label: "DASH",     key: btnMap.dash,     col: gt === "xbox" ? "#FF8800" : gt === "ps" ? "#AAAAFF" : "#FFDD44" },
+    { label: "DISPARO",  key: btnMap.shoot,    col: gt === "xbox" ? (_XBC[_XB.shoot] ?? "#AAFFAA") : gt === "ps" ? "#8888FF" : "#FFDD44" },
+    { label: "LÁTIGO",   key: btnMap.whip,     col: gt === "xbox" ? (_XBC[_XB.whip]  ?? "#AAFFAA") : gt === "ps" ? "#AAAAFF" : "#FFDD44" },
+    { label: "INTERACT", key: btnMap.interact, col: gt === "xbox" ? (_XBC[_XB.interact] ?? "#AAFFAA") : gt === "ps" ? "#AAAAFF" : "#88FF88" },
+    { label: "PAUSA",    key: btnMap.pause,    col: "#AAFFAA" },
+    { label: "MAPA",     key: btnMap.map,      col: "#AAFFAA" },
+    { label: "TELEP",    key: btnMap.teleport, col: "#AAFFFF" },
+  ]
+  // Strip anclado ENCIMA del panel dev (panY), mismo ancho que el panel → no se solapa nunca
+  const stripH = 26
+  const stripY = panY - stripH - 3   // justo encima del panel
+  const n = previewActions.length
+  const gap2 = 3
+  const btnW = Math.floor((panW - (n - 1) * gap2) / n)  // se estira para cubrir todo panW
+  const borderColor = g.isMobile ? "#FFDD88" : gt === "xbox" ? "#6699FF" : gt === "ps" ? "#CC88FF" : "#22AA44"
+  // Fondo
+  ctx.fillStyle = "rgba(0,8,0,0.88)"
+  ctx.beginPath(); ctx.roundRect(panX, stripY, panW, stripH, 4); ctx.fill()
+  ctx.strokeStyle = borderColor; ctx.lineWidth = 1
+  ctx.strokeRect(panX, stripY, panW, stripH)
+  // Etiqueta de modo (esquina izquierda)
+  const modeStr = g.isMobile ? "MÓVIL" : gt === "xbox" ? "XBOX" : gt === "ps" ? "PS" : "TECLADO"
+  ctx.fillStyle = "#FFDD44"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "left"
+  ctx.fillText(`◈ ${modeStr}  [G] ciclar  [V] móvil`, panX + 4, stripY + 9)
+  // Botones
+  for (let i = 0; i < n; i++) {
+    const { label, key, col } = previewActions[i]
+    const bx2 = panX + i * (btnW + gap2)
+    const by2 = stripY + 11
+    const bh2 = stripH - 13
+    ctx.fillStyle = col + "28"
+    ctx.beginPath(); ctx.roundRect(bx2, by2, btnW, bh2, 3); ctx.fill()
+    ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.strokeRect(bx2, by2, btnW, bh2)
+    ctx.fillStyle = col; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText(key, bx2 + btnW / 2, by2 + bh2 - 3)
+    ctx.fillStyle = "#777777"; ctx.font = "6px 'Courier New',monospace"
+    ctx.fillText(label, bx2 + btnW / 2, by2 - 1)
+  }
   ctx.textAlign = "left"
 }
 
@@ -5890,7 +5945,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
   drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
@@ -6425,6 +6480,8 @@ export default function ProyectoLuly() {
     L("wall_sprite",            "/assets/Enviroment/Walls/W-3.png")
     L("internal_wall_sprite",   "/assets/Enviroment/Walls/W-2.png")
     L("rex_house",              "/assets/Enviroment/Rex_House/Rex_House.png")
+    L("cell_close",             "/assets/Enviroment/Cell/Cell_Close.png")
+    L("cell_open",              "/assets/Enviroment/Cell/Cell_Open.png")
     L("rex_idle",               "/assets/NPCs/Rex_The_Old/idle.png")
     L("rex_saludo_left",        "/assets/NPCs/Rex_The_Old/saludo_left.png")
     L("rex_saludo_right",       "/assets/NPCs/Rex_The_Old/saludo_right.png")
@@ -6530,7 +6587,7 @@ export default function ProyectoLuly() {
           ; (g as any)._gfxMsg = true
         g.kennelMsg = 1.8
       }
-      if (k === "v") fireTBall(g)
+      if (k === "v" && !g.devMode) fireTBall(g)
       if (k === "r") G.current = mkG_lazy()
       if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
       if (g.devMode && k === "i") g.godMode = !g.godMode
@@ -6539,6 +6596,11 @@ export default function ProyectoLuly() {
       if (g.devMode && k === "u") g.ohko = !g.ohko
       if (g.devMode && k === "j") g.staDisplay = g.staDisplay === "circle" ? "bar" : "circle"
       if (g.devMode && k === "p") g.mobileZoom = g.mobileZoom === "far" ? "close" : "far"
+      if (g.devMode && k === "g") {
+        const cycle: G["gpadType"][] = ["keyboard", "xbox", "ps"]
+        g.gpadType = cycle[(cycle.indexOf(g.gpadType) + 1) % cycle.length]
+      }
+      if (g.devMode && k === "v") g.isMobile = !g.isMobile
       if (g.devMode && k === "h") {
         g.showDevMap = !g.showDevMap
         g.paused = g.showDevMap
@@ -7588,7 +7650,7 @@ export default function ProyectoLuly() {
               userSelect: "none",
             }}
           >
-            Continuar ▶
+            TAP ▶
           </div>
         )}
       </>
