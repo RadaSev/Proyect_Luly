@@ -97,12 +97,15 @@ type G = {
   activePower: string | null          // poder seleccionado actualmente
   bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
   // Quest del perrito viejo (NPC en TROW [1,4] de W0)
-  viejoDogState: "waiting" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised" | "ball_held" | "ball_guide" | "reward_lives" | "reward_full" | "baton_delivered"
+  viejoDogState: "waiting" | "intro" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised" | "ball_held" | "ball_guide" | "reward_lives" | "reward_full" | "baton_delivered" | "p2_warning" | "ultra_hint" | "ultra_done" | "world2_ready"
   tballKeyHeld: boolean
   questKillBaseline: number
   rexBallFirstSeen: boolean
-  rexBatonHeld: boolean          // jugadora lleva el bastón del Herrero
-  tballUpgraded: boolean         // bastón entregado → rebote y munición mejorados
+  rexIntroLeft: boolean           // jugadora salió del rango después de ver la intro
+  rexBatonHeld: boolean           // jugadora lleva el bastón del Herrero
+  tballUpgraded: boolean          // bastón entregado → rebote y munición mejorados
+  rexBatonDeliveredSeen: boolean  // jugadora vio el diálogo post-bastón al menos una vez
+  rexUltraDoneSeen: boolean       // jugadora vio el diálogo de ultra_done al menos una vez
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
@@ -179,8 +182,11 @@ interface LulySave {
   tballKeyHeld?: boolean
   questKillBaseline?: number
   rexBallFirstSeen?: boolean
+  rexIntroLeft?: boolean
   rexBatonHeld?: boolean
   tballUpgraded?: boolean
+  rexBatonDeliveredSeen?: boolean
+  rexUltraDoneSeen?: boolean
 }
 
 function saveGame(g: G): void {
@@ -197,8 +203,11 @@ function saveGame(g: G): void {
       tballKeyHeld: g.tballKeyHeld,
       questKillBaseline: g.questKillBaseline,
       rexBallFirstSeen: g.rexBallFirstSeen,
+      rexIntroLeft: g.rexIntroLeft,
       rexBatonHeld: g.rexBatonHeld,
       tballUpgraded: g.tballUpgraded,
+      rexBatonDeliveredSeen: g.rexBatonDeliveredSeen,
+      rexUltraDoneSeen: g.rexUltraDoneSeen,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -360,9 +369,9 @@ const VIEJO_DOG_CALLOUT_R = 230          // radio para el "¡Psst!"
 let _rexNameAlpha = 1.0                  // fade suave del nombre: 1=visible, 0=oculto
 let _rexDlgKey    = ""                   // clave de estado — cambio = reinicio de tipografía
 let _rexDlgMs     = 0                    // timestamp en que empezó la página actual
-let _rexDlgPage   = 0                    // página actual (0 o 1 para diálogos de 2 páginas)
+let _rexDlgPage    = 0                   // página actual (0 o 1 para diálogos de 2 páginas)
+let _rexPageWaiting = false              // true cuando página 0 terminó y espera botón E
 const REX_TYPING_MS   = 36              // ms por carácter
-const REX_PAGE_GAP_MS = 1300            // ms de pausa entre páginas
 const TBALL_KEY_DROP_CHANCE = 0.20       // 20% de probabilidad por kill (tras 3 kills mínimo)
 const TBALL_KEY_MIN_KILLS = 3            // primeros 3 kills nunca tienen la llave (build-up)
 const TBALL_KEY_FORCE_KILL = 20          // kill 20: drop garantizado si aún no cayó
@@ -1307,8 +1316,11 @@ function mkG_lazy(): G {
     tballKeyHeld: false,
     questKillBaseline: 0,
     rexBallFirstSeen: false,
+    rexIntroLeft: false,
     rexBatonHeld: false,
     tballUpgraded: false,
+    rexBatonDeliveredSeen: false,
+    rexUltraDoneSeen: false,
     gpadType: "keyboard",
     isMobile: false,
     mapView: "single",
@@ -2517,16 +2529,37 @@ function tickViejoDog(g: G) {
   const dx = p.x + PW / 2 - VIEJO_DOG_POS.x
   const dy = p.y + PH / 2 - VIEJO_DOG_POS.y
   const dist = Math.sqrt(dx * dx + dy * dy)
-  if (dist > VIEJO_DOG_TALK_R) return
+
+  // Detectar cuando el jugador sale del rango de diálogo
+  if (dist > VIEJO_DOG_TALK_R) {
+    if (g.viejoDogState === "intro") g.rexIntroLeft = true
+    // baton_delivered → salir después de verlo → siguiente fase
+    if (g.viejoDogState === "baton_delivered" && g.rexBatonDeliveredSeen) {
+      g.viejoDogState = g.cw.has(0) ? "ultra_done" : "ultra_hint"
+      saveGame(g)
+    }
+    // ultra_done → salir después de verlo → world2_ready
+    if (g.viejoDogState === "ultra_done" && g.rexUltraDoneSeen) {
+      g.viejoDogState = "world2_ready"
+      saveGame(g)
+    }
+    return
+  }
 
   if (g.viejoDogState === "waiting") {
-    // Primera vez que el jugador se acerca
+    // Primera vez que el jugador se acerca → mostrar introducción
     if (g.abilities.has("tball")) {
-      g.viejoDogState = "surprised"   // ya encontró la pelota sola
+      g.viejoDogState = "surprised"
     } else {
-      g.viejoDogState = "quest_active"
-      g.questKillBaseline = countP1KillsW0(g.dead)
+      g.viejoDogState = "intro"
+      g.rexIntroLeft = false
+      saveGame(g)
     }
+  } else if (g.viejoDogState === "intro" && g.rexIntroLeft) {
+    // Volvió después de leer la intro → arrancar la quest
+    g.viejoDogState = "quest_active"
+    g.questKillBaseline = countP1KillsW0(g.dead)
+    saveGame(g)
   } else if ((g.viejoDogState === "cage_opened" || g.viejoDogState === "surprised" || g.viejoDogState === "quest_done") && g.abilities.has("tball")) {
     // Jugadora llega con la pelota → primer mensaje especial
     g.viejoDogState = "ball_held"
@@ -2555,7 +2588,31 @@ function tickViejoDog(g: G) {
       g.viejoDogState = "ball_guide"
       saveGame(g)
     }
-  } else if ((g.viejoDogState === "ball_guide" || g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full") && g.rexBatonHeld && !g.tballUpgraded) {
+  } else if (g.viejoDogState === "ball_guide" && isPart1BossDead(g, 0) && !g.rexBatonHeld) {
+    // Castigador muerto, jugadora vuelve a Rex → recompensar y revelar segunda sección
+    const needed = g.pl.maxHp - g.pl.hp
+    if (needed > 0) {
+      for (let i = 0; i < needed; i++) {
+        g.drops.push({ x: VIEJO_DOG_POS.x + (Math.random() - 0.5) * 70, y: VIEJO_DOG_POS.y - 20, vx: (Math.random() - 0.5) * 2.5, vy: -3 - Math.random() * 1.8, active: true, life: 24, kind: "h" })
+      }
+      spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FF4444", "#FF8888", "#FFD700", "#FFFFFF"], 18, 4, false)
+      g.viejoDogState = "reward_lives"
+    } else {
+      g.viejoDogState = "reward_full"
+    }
+    saveGame(g)
+  } else if ((g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full") && areRegularP2EnemiesDead(g, 0) && !isPart2BossDead(g, 0)) {
+    // Todos los enemigos P2 muertos pero El Herrero sigue vivo → aviso especial
+    g.viejoDogState = "p2_warning"
+    saveGame(g)
+  } else if (g.viejoDogState === "baton_delivered") {
+    // Primera vez que vuelve después de entregar el bastón: marcar vista
+    if (!g.rexBatonDeliveredSeen) { g.rexBatonDeliveredSeen = true; saveGame(g) }
+  } else if (g.viejoDogState === "ultra_hint" && g.cw.has(0)) {
+    g.viejoDogState = "ultra_done"; saveGame(g)
+  } else if (g.viejoDogState === "ultra_done") {
+    if (!g.rexUltraDoneSeen) { g.rexUltraDoneSeen = true; saveGame(g) }
+  } else if ((g.viejoDogState === "ball_guide" || g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" || g.viejoDogState === "p2_warning") && g.rexBatonHeld && !g.tballUpgraded) {
     // Jugadora trae el bastón → mejora la pelota
     g.rexBatonHeld = false
     g.tballUpgraded = true
@@ -2881,8 +2938,11 @@ function applyLoad(g: G, s: LulySave): void {
   g.tballKeyHeld = s.tballKeyHeld ?? false
   g.questKillBaseline = s.questKillBaseline ?? 0
   g.rexBallFirstSeen = (s as any).rexBallFirstSeen ?? false
-  g.rexBatonHeld  = s.rexBatonHeld  ?? false
-  g.tballUpgraded = s.tballUpgraded ?? false
+  g.rexIntroLeft  = (s as any).rexIntroLeft  ?? false
+  g.rexBatonHeld           = s.rexBatonHeld           ?? false
+  g.tballUpgraded          = s.tballUpgraded          ?? false
+  g.rexBatonDeliveredSeen  = s.rexBatonDeliveredSeen  ?? false
+  g.rexUltraDoneSeen       = s.rexUltraDoneSeen       ?? false
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
     // Ubicar llave cerca de donde está la jaula (pickup secundario de emergencia)
@@ -3904,7 +3964,11 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const t = Date.now() * 0.001
     const bobY = Math.sin(t * 2.8) * 4
     // Burbuja pequeña de llamado
-    const callText = (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done")
+    const p1Dead = isPart1BossDead(g, 0)
+    const allP1Clear = areRegularP1EnemiesDead(g, 0)
+    const callText = g.viejoDogState === "intro"
+      ? "¡Hola! ¡Acércate, Luly!"
+      : (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done")
       ? "¡Ve por la pelota!"
       : g.viejoDogState === "surprised"
       ? "¡Qué sorpresa!"
@@ -3913,13 +3977,23 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       : g.viejoDogState === "key_dropped"
       ? "¡Recoge la media llave!"
       : g.viejoDogState === "ball_held"
-      ? (!g.rexBallFirstSeen ? "¡Lo sabía, Luly!" : "¡Sigue adelante!")
+      ? (p1Dead ? "¡Lo venciste!!" : !g.rexBallFirstSeen ? "¡Lo sabía, Luly!" : "¡Sigue adelante!")
       : g.viejoDogState === "ball_guide"
-      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : "¡Aún falta el jefe!")
+      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : p1Dead ? "¡Lo venciste!!" : allP1Clear ? "¡Ya están todos!" : "¡Aún falta el jefe!")
       : (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")
-      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : "¡Toma esto, Luly!")
+      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : "¡Muy bien hecho!")
       : g.viejoDogState === "baton_delivered"
       ? "¡Puedo caminar mejor!"
+      : g.viejoDogState === "p2_warning"
+      ? "¡Ese Herrero caerá en tus brasas!"
+      : g.viejoDogState === "ultra_hint"
+      ? "¡Recarga antes de enfrentarlo!"
+      : g.viejoDogState === "ultra_done"
+      ? "¡Luly, lo hiciste! 🎉"
+      : g.viejoDogState === "world2_ready"
+      ? "¿Tienes todo listo? ¡Te vemos allá!"
+      : g.viejoDogState === "quest_active"
+      ? "¡Ve por ellos, derrótalo!"
       : "¡Psst! ¡Acércate!"
     const cw2 = ctx.measureText(callText).width + 14
     const cbx = bx - cw2 / 2, cby = by - 88 + bobY
@@ -3940,12 +4014,37 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   // ── Sistema de quests / diálogo con tipografía animada ───────────────────
   const TOTAL_QUEST_SLOTS = 3
   const kills = Math.max(0, countP1KillsW0(g.dead) - g.questKillBaseline)
+  const allP1Clear_dlg = areRegularP1EnemiesDead(g, 0)
+  const p1Dead_dlg = isPart1BossDead(g, 0)
 
   // Cada estado devuelve { pages, colors, headers } — pages = array de páginas (array de líneas)
   type DlgDef = { pages: string[][]; colors: string[]; headers: string[] }
   let dlg: DlgDef
 
-  if (g.viejoDogState === "surprised") {
+  if (g.viejoDogState === "intro") {
+    dlg = {
+      headers: ["◈ ¡BIENVENIDA, LULY! ◈", "◈ PRIMERA MISIÓN ◈"],
+      colors:  ["#E8D8C0",               "#FFDD88"],
+      pages: [
+        [
+          "Hola, soy Rex. Veo que",
+          "eres Luly, ya me hablaron",
+          "de ti. Estas son las",
+          "Perreras: 3 Jefes y",
+          "muchos enemigos. Primero",
+          "haz la sección de arriba.",
+        ],
+        [
+          "Necesito tu ayuda. Mi",
+          "pelota está encerrada,",
+          "me la quitaron y rompieron",
+          "mi llave. Yo tengo la",
+          "primera parte, pero algún",
+          "perro malo tiene la otra.",
+        ],
+      ]
+    }
+  } else if (g.viejoDogState === "surprised") {
     dlg = { headers: ["◈ MISIÓN: COMPLETADA ◈"], colors: ["#CCFF88"], pages: [[
       "¡Caray! ¡La encontraste",
       "tú sola! Eres más lista",
@@ -3978,12 +4077,9 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       "¡Yo tengo la otra mitad!",
     ]]}
   } else if (g.viejoDogState === "quest_active") {
-    const barFill = Math.min(kills, 10)
-    const bar = "█".repeat(barFill) + "░".repeat(Math.max(0, 10 - barFill))
     dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`], colors: ["#FFCC66"], pages: [[
       "Uno de esos perros lleva",
       "mi media llave. ¡Búscala!",
-      bar,
       kills === 0 ? "Eliminados: 0 — ¡Empieza!" :
         `Eliminados: ${kills} — ${kills < 3 ? "¡Sigue buscando!" : kills < 8 ? "¡Puede estar cerca!" : "¡Alguno debe tenerla!"}`,
       "Yo tengo la otra mitad.",
@@ -3998,54 +4094,156 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       "la mejoraremos juntos. 🎾",
     ]]}
   } else if (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide") {
-    // Dos páginas: primero el jefe, luego la quest del bastón
+    if (allP1Clear_dlg && !p1Dead_dlg) {
+      // Todos los enemigos regulares muertos, El Castigador sigue vivo
+      dlg = { headers: ["◈ ¡ES LA HORA! ◈"], colors: ["#FFAA44"], pages: [[
+        "¡Luly, derrotaste a todos!",
+        "Es hora de enfrentar al",
+        "Castigador. Tiene un látigo",
+        "y es muy rápido. Debes",
+        "ser fuerte, Luly.",
+        "La pelota te ayudará.",
+      ]]}
+    } else if (!p1Dead_dlg) {
+      // Enemigos regulares aún vivos, El Castigador vivo → solo página 1
+      dlg = { headers: ["◈ SIGUE ADELANTE ◈"], colors: ["#FFDD88"], pages: [[
+        "Bien, tienes que seguir",
+        "derrotando enemigos para",
+        "poder enfrentarte al jefe",
+        "de esta sección...",
+        "Le llaman El Castigador.",
+      ]]}
+    } else {
+      // El Castigador cayó → revelar quest del bastón (2 páginas)
+      dlg = {
+        headers: ["◈ SIGUE ADELANTE ◈", "◈ NUEVA MISIÓN ◈"],
+        colors:  ["#FFDD88",            "#C8A0FF"],
+        pages: [
+          [
+            "Bien, tienes que seguir",
+            "derrotando enemigos para",
+            "poder enfrentarte al jefe",
+            "de esta sección...",
+            "Le llaman El Castigador.",
+          ],
+          [
+            "Mejoraremos el rebote de",
+            "tu pelota, Luly. Tendrás",
+            "más pelotas para lanzar...",
+            "pero primero vence al",
+            "Herrero. Él tiene mi bastón.",
+            "Derrótalo y tráemelo,",
+            "así podré caminar mejor.",
+          ],
+        ]
+      }
+    }
+  } else if (g.viejoDogState === "reward_lives") {
     dlg = {
-      headers: ["◈ SIGUE ADELANTE ◈", "◈ NUEVA MISIÓN ◈"],
-      colors:  ["#FFDD88",            "#C8A0FF"],
+      headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈"],
+      colors:  ["#FF8888",          "#C8A0FF"],
       pages: [
         [
-          "Bien, tienes que seguir",
-          "derrotando enemigos para",
-          "poder enfrentarte al jefe",
-          "de esta sección...",
-          "Le llaman El Castigador.",
+          "¡Muy bien hecho, Luly!",
+          "Veo que estás débil...",
+          "Toma esto y recupérate.",
+          "Eres increíble. ❤",
         ],
         [
-          "Mejoraremos el rebote de",
-          "tu pelota, Luly. Tendrás",
-          "más pelotas para lanzar...",
-          "pero primero vence al",
-          "Herrero. Él tiene mi bastón.",
+          "Ahora mejoraremos tu",
+          "pelota, pero primero:",
+          "vence al Herrero. Él",
+          "tiene mi bastón.",
           "Derrótalo y tráemelo,",
           "así podré caminar mejor.",
         ],
       ]
     }
-  } else if (g.viejoDogState === "reward_lives") {
-    dlg = { headers: ["◈ ¡BIEN HECHO! ◈"], colors: ["#FF8888"], pages: [[
-      "¡Luly, eres increíble!",
-      "Veo que estás débil...",
-      "Te daré una ayuda.",
-      "Toma esto y recupérate",
-      "antes de seguir. ❤",
-    ]]}
   } else if (g.viejoDogState === "reward_full") {
-    dlg = { headers: ["◈ ¡IMPRESIONANTE! ◈"], colors: ["#88FFCC"], pages: [[
-      "¡Luly, eres más fuerte",
-      "de lo que pensé! No",
-      "perdiste ninguna vida.",
-      "Ahora debes ir abajo...",
-      "te espera El Herrero.",
-      "Construyó las perreras",
-      "y se encerró a sí mismo.",
-    ]]}
+    dlg = {
+      headers: ["◈ ¡IMPRESIONANTE! ◈", "◈ NUEVA MISIÓN ◈"],
+      colors:  ["#88FFCC",            "#C8A0FF"],
+      pages: [
+        [
+          "¡Luly, eres más fuerte",
+          "de lo que pensé! No",
+          "perdiste ninguna vida.",
+          "¡Increíble, Luly! ✨",
+        ],
+        [
+          "Ahora debes ir abajo,",
+          "te espera El Herrero.",
+          "Él tiene mi bastón.",
+          "Derrótalo y tráemelo,",
+          "así podré caminar mejor.",
+        ],
+      ]
+    }
   } else if (g.viejoDogState === "baton_delivered") {
-    dlg = { headers: ["◈ ¡GRACIAS, LULY! ◈"], colors: ["#C8A0FF"], pages: [[
-      "¡Mi bastón! Ahora puedo",
-      "caminar mucho mejor.",
-      "Tu pelota ya tiene más",
-      "rebote y más munición.",
-      "¡Sigue adelante, Luly! 🪄",
+    dlg = {
+      headers: ["◈ ¡GRACIAS, LULY! ◈", "◈ EL ÚLTIMO JEFE ◈"],
+      colors:  ["#C8A0FF",             "#FF8844"],
+      pages: [
+        [
+          "¡Mi bastón! Ahora puedo",
+          "caminar mucho mejor.",
+          "Tu pelota ya tiene más",
+          "rebote y más munición.",
+          "¡Sigue adelante, Luly! 🪄",
+        ],
+        [
+          "Luly, ahora el reto",
+          "más difícil: el jefe",
+          "de jefes. Le llaman",
+          "El Torturado. Era un",
+          "prisionero, lo conocí.",
+          "Era bueno, lo destruyeron",
+          "hasta colapsar su mente.",
+          "Ahora es parte de HUDOG.",
+          "Tendrás el Dash. 💨",
+          "¡Vamos, rezaré por ti!",
+        ],
+      ]
+    }
+  } else if (g.viejoDogState === "p2_warning") {
+    dlg = { headers: ["◈ ¡CUIDADO, LULY! ◈"], colors: ["#FFAA44"], pages: [[
+      "Luly, lo has hecho",
+      "de nuevo... ahora te",
+      "falta derrotarlo.",
+      "El Herrero es muy",
+      "fuerte, su martillo",
+      "golpea con todo.",
+      "Ten cuidado Luly,",
+      "¡sé que lo lograrás!",
+    ]]}
+  } else if (g.viejoDogState === "ultra_hint") {
+    dlg = { headers: ["◈ ÁNIMO, LULY ◈"], colors: ["#88AAFF"], pages: [[
+      "No temas, recarga",
+      "todo antes de",
+      "enfrentarlo. Luly,",
+      "descansa si es",
+      "necesario. ¡Tú",
+      "puedes con él! 💪",
+    ]]}
+  } else if (g.viejoDogState === "ultra_done") {
+    dlg = { headers: ["◈ ¡LO HICISTE, LULY! ◈"], colors: ["#FFDD44"], pages: [[
+      "Ahora debemos seguir,",
+      "nos esperan más jefes.",
+      "Iremos a la Fábrica",
+      "Canina... hacen cosas",
+      "muy malas allí, pero",
+      "tenemos a alguien",
+      "dentro. Nos ayudará",
+      "cuando estemos allá.",
+    ]]}
+  } else if (g.viejoDogState === "world2_ready") {
+    dlg = { headers: ["◈ NOS VEMOS ALLÁ ◈"], colors: ["#AADDFF"], pages: [[
+      "Ya lo tienes todo.",
+      "Yo y mi casa nos",
+      "moveremos pronto.",
+      "¡Te vemos en la",
+      "Fábrica Canina, Luly!",
+      "¡Ten cuidado! 🐾",
     ]]}
   } else {
     dlg = { headers: [`◈ MISIONES: ${TOTAL_QUEST_SLOTS} en total ◈`], colors: ["#E8D8C0"], pages: [[
@@ -4059,19 +4257,20 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
 
   // ── Tipografía animada (typewriter) ──────────────────────────────────────
-  const dlgKey = g.viejoDogState + (g.rexBallFirstSeen ? "_s" : "")
+  const dlgKey = g.viejoDogState + (g.rexBallFirstSeen ? "_s" : "") + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
   if (dlgKey !== _rexDlgKey) {
     _rexDlgKey = dlgKey; _rexDlgMs = Date.now(); _rexDlgPage = 0
   }
   const numPages = dlg.pages.length
   const elapsed = Date.now() - _rexDlgMs
   const page0TotalChars = dlg.pages[0].join("").length
-  // Avance automático a página 1 cuando la página 0 terminó + pausa
-  if (_rexDlgPage === 0 && numPages > 1) {
-    if (elapsed > page0TotalChars * REX_TYPING_MS + REX_PAGE_GAP_MS) {
-      _rexDlgPage = 1
-      _rexDlgMs = Date.now(); // reiniciar timer para la nueva página
-    }
+  // Avance manual a página 1: espera botón E/B/○
+  const page0Done = _rexDlgPage === 0 && numPages > 1 && elapsed >= page0TotalChars * REX_TYPING_MS
+  _rexPageWaiting = page0Done
+  if (page0Done && g.keys["e"]) {
+    _rexDlgPage = 1
+    _rexDlgMs = Date.now()
+    g.keys["e"] = false
   }
   const curPage  = Math.min(_rexDlgPage, numPages - 1)
   const elapsed2 = _rexDlgPage > 0 ? (Date.now() - _rexDlgMs) : elapsed
@@ -4097,10 +4296,15 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ? "#44BB44"
     : (g.viejoDogState === "key_held") ? "#FFD700"
     : (g.viejoDogState === "key_dropped" || g.viejoDogState === "quest_active") ? "#DDAA44"
-    : (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide") ? (curPage === 1 ? "#C8A0FF" : "#88CC44")
-    : (g.viejoDogState === "reward_lives") ? "#FF6666"
-    : (g.viejoDogState === "reward_full") ? "#44FFCC"
-    : (g.viejoDogState === "baton_delivered") ? "#C8A0FF"
+    : (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide") ? (curPage === 1 ? "#C8A0FF" : allP1Clear_dlg && !p1Dead_dlg ? "#FFAA44" : "#88CC44")
+    : (g.viejoDogState === "reward_lives") ? (curPage === 1 ? "#C8A0FF" : "#FF6666")
+    : (g.viejoDogState === "reward_full") ? (curPage === 1 ? "#C8A0FF" : "#44FFCC")
+    : (g.viejoDogState === "baton_delivered") ? (curPage === 1 ? "#FF8844" : "#C8A0FF")
+    : (g.viejoDogState === "intro") ? (curPage === 1 ? "#FFDD88" : "#E8D8C0")
+    : (g.viejoDogState === "p2_warning") ? "#FFAA44"
+    : (g.viejoDogState === "ultra_hint") ? "#88AAFF"
+    : (g.viejoDogState === "ultra_done") ? "#FFDD44"
+    : (g.viejoDogState === "world2_ready") ? "#AADDFF"
     : "#A08060"
   ctx.strokeStyle = borderCol; ctx.lineWidth = 1.4; ctx.stroke()
 
@@ -4138,19 +4342,15 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     charsLeft -= line.length
     textY += bub_lh
   }
-  // Cursor parpadeante al final de la última línea visible
   const totalPageChars = dialogLines.join("").length
-  if (charsShown < totalPageChars) {
-    const cursorOn = Math.floor(Date.now() / 400) % 2 === 0
-    if (cursorOn) {
-      ctx.fillStyle = dialogColor; ctx.fillText("▋", bub_x + bub_w / 2 + 2, textY - bub_lh + bub_lh - 2)
-    }
-  } else if (numPages > 1 && curPage < numPages - 1) {
-    // Indicador "más →" cuando espera avanzar a página siguiente
-    const pulseMore = 0.5 + 0.5 * Math.sin(Date.now() * 0.006)
-    ctx.globalAlpha = pulseMore
-    ctx.fillStyle = borderCol; ctx.font = "bold 9px 'Courier New',monospace"
-    ctx.fillText("▶ ▶ ▶", bub_x + bub_w / 2, textY)
+  if (numPages > 1 && charsShown >= totalPageChars && curPage < numPages - 1) {
+    const gt = g.gpadType ?? "keyboard"
+    const btnLabel = g.isMobile ? "[ TAP ]" : gt === "xbox" ? "[ B ]" : gt === "ps" ? "[ ○ ]" : "[ E ]"
+    const btnColor = g.isMobile ? "#FFDD88" : gt === "xbox" ? "#E03030" : gt === "ps" ? "#C8A0FF" : "#88FF88"
+    const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.006)
+    ctx.globalAlpha = pulse
+    ctx.fillStyle = btnColor; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
+    ctx.fillText(btnLabel, bub_x + bub_w / 2, textY + 2)
     ctx.globalAlpha = 1
   }
   ctx.textAlign = "left"
@@ -7365,6 +7565,32 @@ export default function ProyectoLuly() {
               () => { if (!g.tpMenu?.open) releaseKey(" ") })}
           </div>
         </div>
+        {/* ── Botón "Continuar" para avanzar diálogo de 2 páginas de Rex ── */}
+        {_rexPageWaiting && (
+          <div
+            onTouchStart={e => { e.preventDefault(); pressKey("e"); setTimeout(() => releaseKey("e"), 120) }}
+            style={{
+              position: "absolute",
+              bottom: `calc(${SAFE_B}px + ${Math.round(ACT_H * 1.15)}px)`,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 30,
+              background: "rgba(255,221,136,0.92)",
+              border: "2px solid #AA8800",
+              borderRadius: 10,
+              padding: "6px 18px",
+              fontFamily: "'Courier New',monospace",
+              fontWeight: "bold",
+              fontSize: 13,
+              color: "#3A2800",
+              letterSpacing: "0.05em",
+              pointerEvents: "auto",
+              userSelect: "none",
+            }}
+          >
+            Continuar ▶
+          </div>
+        )}
       </>
     )
   }
