@@ -4346,8 +4346,9 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const totalPageChars = dialogLines.join("").length
   if (numPages > 1 && charsShown >= totalPageChars && curPage < numPages - 1) {
     const gt = g.gpadType ?? "keyboard"
-    const btnLabel = g.isMobile ? "TAP ▶" : gt === "xbox" ? "B ▶" : gt === "ps" ? "○ ▶" : "E ▶"
-    const btnColor = g.isMobile ? "#FFDD88" : gt === "xbox" ? "#E03030" : gt === "ps" ? "#C8A0FF" : "#88FF88"
+    const egt = (g.isMobile && gt === "keyboard") ? "xbox" : gt   // móvil siempre usa botones de gamepad
+    const btnLabel = egt === "xbox" ? "B ▶" : egt === "ps" ? "○ ▶" : "E ▶"
+    const btnColor = egt === "xbox" ? "#E03030" : egt === "ps" ? "#C8A0FF" : "#88FF88"
     const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.006)
     ctx.globalAlpha = pulse
     ctx.fillStyle = btnColor; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"
@@ -4750,8 +4751,9 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
     if (near && discovered) {
       const canTP = g.discoveredCPs.size >= 2
       const gt: GpadType = g.gpadType ?? "keyboard"
-      const saveKey  = GPAD_BTN.interact[gt]
-      const tpKey    = GPAD_BTN.teleport[gt]
+      const egt: GpadType = (g.isMobile && gt === "keyboard") ? "xbox" : gt
+      const saveKey  = GPAD_BTN.interact[egt]
+      const tpKey    = GPAD_BTN.teleport[egt]
       ctx.globalAlpha = pulse
       ctx.fillStyle = "rgba(0,0,0,0.82)"; ctx.beginPath()
       ctx.roundRect(sx - 80, sy - 68, 160, canTP ? 42 : 26, 5); ctx.fill()
@@ -4819,6 +4821,7 @@ function tpDoConfirm(g: G) {
 function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
   if (!g.tpMenu?.open) return
   const gt: GpadType = g.gpadType ?? "keyboard"
+  const egt: GpadType = (g.isMobile && gt === "keyboard") ? "xbox" : gt
   const worlds = tpAvailWorlds(g)
   const curW  = g.tpMenu.world
   const th     = THEMES[curW]
@@ -4844,9 +4847,9 @@ function drawTPMenu(ctx: CanvasRenderingContext2D, g: G) {
   // ── Título + controles ─────────────────────────────────────────────────────
   ctx.fillStyle = th.accent; ctx.font = "bold 13px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("⚡  TELETRANSPORTACIÓN", mX + mW / 2, mY + 20)
-  const navUD = gt === "keyboard" ? "↑↓" : (gt === "ps" ? "D↕" : "D↕")
-  const navLR = gt === "keyboard" ? "←→" : (gt === "ps" ? "D←→" : "D←→")
-  const cfm   = GPAD_BTN.confirm[gt], cnl = GPAD_BTN.cancel[gt]
+  const navUD = egt === "keyboard" ? "↑↓" : "D↕"
+  const navLR = egt === "keyboard" ? "←→" : "D←→"
+  const cfm   = GPAD_BTN.confirm[egt], cnl = GPAD_BTN.cancel[egt]
   ctx.fillStyle = "#445544"; ctx.font = "8px 'Courier New',monospace"
   ctx.fillText(`[${navUD}] punto  [${navLR}] mundo  [${cfm}] ir  [${cnl}] cerrar`, mX + mW / 2, mY + 36)
   ctx.textAlign = "left"
@@ -5537,7 +5540,8 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
   ctx.strokeStyle = "#2A2A2A"; ctx.lineWidth = 2; ctx.strokeRect(2, 2, CW - 4, CH - 4)
   ctx.fillStyle = "#CCC"; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText("// MAPA DEL COMPLEJO CANINO //", CW / 2, 22)
-  const mapCloseKey = GPAD_BTN.map[g.gpadType ?? "keyboard"]
+  const _mapGT: GpadType = g.gpadType ?? "keyboard"
+  const mapCloseKey = GPAD_BTN.map[(g.isMobile && _mapGT === "keyboard") ? "xbox" : _mapGT]
   ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText(`[${mapCloseKey}] cerrar   ★ = checkpoint   negro = sin explorar`, CW / 2, 36)
   ctx.textAlign = "left"
@@ -7333,22 +7337,32 @@ export default function ProyectoLuly() {
       const BTN_SZ  = Math.round(ACT_H * 0.38)
       return (
         <>
-          {/* Indicador táctil de deslizar — lado derecho, a la izquierda del botón B */}
+          {/* Indicador táctil de deslizar — encima del botón B */}
           <div
             style={{
               position: "absolute",
-              bottom: SAFE_B + Math.round(vh * 0.18),
-              right: `calc(5% + ${BTN_SZ + 18}px)`,
+              bottom: ACT_B + Math.round(ACT_H * 0.12) + BTN_SZ + 14,
+              right: `calc(5% + ${Math.round((BTN_SZ - swipeSz) / 2)}px)`,
               width: swipeSz,
               display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
               zIndex: 100, opacity: 0.65,
               touchAction: "none", userSelect: "none",
             }}
-            onPointerDown={(e) => { e.preventDefault(); pauseSwipeY.current = e.clientY }}
+            onPointerDown={(e) => {
+              e.preventDefault()
+              e.currentTarget.setPointerCapture(e.pointerId)
+              pauseSwipeY.current = e.clientY
+            }}
+            onPointerMove={(e) => {
+              if (!pauseSwipeY.current) return
+              const dy = pauseSwipeY.current - e.clientY
+              if (Math.abs(dy) > 18) { navPause(dy > 0 ? -1 : 1); pauseSwipeY.current = e.clientY }
+            }}
             onPointerUp={(e) => {
               e.preventDefault()
               const dy = pauseSwipeY.current - e.clientY
               if (Math.abs(dy) > 18) navPause(dy > 0 ? -1 : 1)
+              pauseSwipeY.current = 0
             }}
             onPointerCancel={() => { pauseSwipeY.current = 0 }}
           >
@@ -7613,11 +7627,15 @@ export default function ProyectoLuly() {
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.X, "X", "DISPARO",
               ()=>pressKey("n"), ()=>releaseKey("n"))}
           </div>
-          {/* B — derecha (checkpoint / cerrar tpMenu) */}
+          {/* B — derecha (checkpoint / siguiente diálogo / cerrar tpMenu) */}
           <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-55%)" }}>
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
-              g.tpMenu?.open ? "CERRAR" : "GUARDAR",
-              () => { if (g.tpMenu?.open) { g.tpMenu = null } else activateCheckpoint() }, () => {})}
+              g.tpMenu?.open ? "CERRAR" : _rexPageWaiting ? "SIGUIENTE" : "GUARDAR",
+              () => {
+                if (g.tpMenu?.open) { g.tpMenu = null }
+                else if (_rexPageWaiting) { pressKey("e"); setTimeout(() => releaseKey("e"), 120) }
+                else activateCheckpoint()
+              }, () => {})}
           </div>
           {/* A — abajo (saltar / confirmar tpMenu) — más grande */}
           <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)" }}>
@@ -7627,32 +7645,6 @@ export default function ProyectoLuly() {
               () => { if (!g.tpMenu?.open) releaseKey(" ") })}
           </div>
         </div>
-        {/* ── Botón "Continuar" para avanzar diálogo de 2 páginas de Rex ── */}
-        {_rexPageWaiting && (
-          <div
-            onTouchStart={e => { e.preventDefault(); pressKey("e"); setTimeout(() => releaseKey("e"), 120) }}
-            style={{
-              position: "absolute",
-              bottom: `calc(${SAFE_B}px + ${Math.round(ACT_H * 1.15)}px)`,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 30,
-              background: "rgba(255,221,136,0.92)",
-              border: "2px solid #AA8800",
-              borderRadius: 10,
-              padding: "6px 18px",
-              fontFamily: "'Courier New',monospace",
-              fontWeight: "bold",
-              fontSize: 13,
-              color: "#3A2800",
-              letterSpacing: "0.05em",
-              pointerEvents: "auto",
-              userSelect: "none",
-            }}
-          >
-            TAP ▶
-          </div>
-        )}
       </>
     )
   }
