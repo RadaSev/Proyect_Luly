@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.2"
+const GAME_VERSION = "0.0.3"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -7769,48 +7769,83 @@ export default function ProyectoLuly() {
           {/* Hub central decorativo */}
           <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
             background:"#252525", border:"1px solid rgba(255,255,255,0.09)", pointerEvents:"none"}}/>
-          {/* Brazos */}
-          {dArrow("up",    {left:ARM, top:0,       width:HUB, height:ARM},
-            () => { if (g.tpMenu?.open) navTP(-1); else pressKey("arrowup") },
-            () => { if (!g.tpMenu?.open) releaseKey("arrowup") })}
-          {dArrow("down",  {left:ARM, top:ARM+HUB, width:HUB, height:ARM},
-            () => { if (g.tpMenu?.open) navTP(1);  else pressKey("arrowdown") },
-            () => { if (!g.tpMenu?.open) releaseKey("arrowdown") })}
-          {/* Zona horizontal unificada — soporta arrastrar el dedo para cambiar dirección */}
-          <div
-            style={{
-              position: "absolute", left: 0, top: ARM, width: TOTAL, height: HUB,
-              cursor: "pointer", userSelect: "none", touchAction: "none", zIndex: 11,
-            }}
-            onPointerDown={(e) => {
-              e.preventDefault()
-              try { e.currentTarget.setPointerCapture(e.pointerId) } catch (_) {}
-              const rect = e.currentTarget.getBoundingClientRect()
-              const x = e.clientX - rect.left
-              if (g.tpMenu?.open) { if (x < TOTAL / 2) navTPWorld(-1); else navTPWorld(1); return }
-              if (x < TOTAL / 2) { dpadDown("left", "arrowleft"); releaseKey("arrowright") }
-              else { dpadDown("right", "arrowright"); releaseKey("arrowleft") }
-            }}
-            onPointerMove={(e) => {
-              if (!(e.buttons & 1)) return
-              if (g.tpMenu?.open) return
-              const rect = e.currentTarget.getBoundingClientRect()
-              const x = e.clientX - rect.left
-              if (x < TOTAL / 2) {
-                if (!G.current.keys["arrowleft"]) { releaseKey("arrowright"); pressKey("arrowleft") }
-              } else {
-                if (!G.current.keys["arrowright"]) { releaseKey("arrowleft"); pressKey("arrowright") }
-              }
-            }}
-            onPointerUp={(e) => { e.preventDefault(); releaseKey("arrowleft"); releaseKey("arrowright") }}
-            onPointerCancel={() => { releaseKey("arrowleft"); releaseKey("arrowright") }}
-          />
-          {/* Flecha izquierda (decorativa, sin eventos) */}
+          {/* ── Overlay único TOTAL×TOTAL — maneja las 4 direcciones sin pointer capture ── */}
+          {(() => {
+            // Sin setPointerCapture → onPointerLeave dispara al salir → teclas liberadas siempre
+            const releaseAll = () => {
+              releaseKey("arrowleft"); releaseKey("arrowright")
+              releaseKey("arrowup");   releaseKey("arrowdown")
+            }
+            // Detecta en qué brazo del cross está el dedo
+            // Prioridad horizontal: si y está en la banda horizontal devuelve left/right
+            // Las esquinas (fuera del cross) devuelven null
+            const getDir = (x: number, y: number): "left"|"right"|"up"|"down"|null => {
+              const inH = y >= ARM && y <= ARM + HUB
+              const inV = x >= ARM && x <= ARM + HUB
+              if (!inH && !inV) return null          // esquina — fuera de la cruz
+              if (inH) return x < TOTAL / 2 ? "left" : "right"
+              return y < TOTAL / 2 ? "up" : "down"
+            }
+            const applyDir = (dir: "left"|"right"|"up"|"down", isInitialTap: boolean) => {
+              const k = G.current.keys
+              if (dir !== "left")  releaseKey("arrowleft")
+              if (dir !== "right") releaseKey("arrowright")
+              if (dir !== "up")    releaseKey("arrowup")
+              if (dir !== "down")  releaseKey("arrowdown")
+              if (dir === "left"  && !k["arrowleft"])  { if (isInitialTap) dpadDown("left","arrowleft");   else pressKey("arrowleft") }
+              if (dir === "right" && !k["arrowright"]) { if (isInitialTap) dpadDown("right","arrowright"); else pressKey("arrowright") }
+              if (dir === "up"    && !k["arrowup"]    && !g.tpMenu?.open) pressKey("arrowup")
+              if (dir === "down"  && !k["arrowdown"]  && !g.tpMenu?.open) pressKey("arrowdown")
+            }
+            return (
+              <div
+                style={{
+                  position: "absolute", left: 0, top: 0, width: TOTAL, height: TOTAL,
+                  cursor: "pointer", userSelect: "none", touchAction: "none", zIndex: 12,
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const x = e.clientX - rect.left, y = e.clientY - rect.top
+                  const dir = getDir(x, y)
+                  if (!dir) return
+                  if (g.tpMenu?.open) {
+                    if (dir === "left")  navTPWorld(-1)
+                    else if (dir === "right") navTPWorld(1)
+                    else if (dir === "up")    navTP(-1)
+                    else if (dir === "down")  navTP(1)
+                    return
+                  }
+                  applyDir(dir, true)
+                }}
+                onPointerMove={(e) => {
+                  if (!(e.buttons & 1)) return
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const x = e.clientX - rect.left, y = e.clientY - rect.top
+                  const dir = getDir(x, y)
+                  if (!dir) { releaseAll(); return }   // dedo en esquina → soltar todo
+                  if (g.tpMenu?.open) return
+                  applyDir(dir, false)
+                }}
+                onPointerUp={releaseAll}
+                onPointerLeave={releaseAll}            // ← clave: sin capture, esto SIEMPRE dispara
+                onPointerCancel={releaseAll}
+              />
+            )
+          })()}
+          {/* Flechas decorativas (sin eventos de puntero) */}
+          <div style={{ position:"absolute", left:ARM, top:0, width:HUB, height:ARM,
+            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+            <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 2 L16 12 L2 12 Z" fill="rgba(255,255,255,0.65)"/></svg>
+          </div>
+          <div style={{ position:"absolute", left:ARM, top:ARM+HUB, width:HUB, height:ARM,
+            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+            <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 12 L16 2 L2 2 Z" fill="rgba(255,255,255,0.65)"/></svg>
+          </div>
           <div style={{ position:"absolute", left:0, top:ARM, width:ARM, height:HUB,
             display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
             <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
           </div>
-          {/* Flecha derecha (decorativa, sin eventos) */}
           <div style={{ position:"absolute", left:ARM+HUB, top:ARM, width:ARM, height:HUB,
             display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
             <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
