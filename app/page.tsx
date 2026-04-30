@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.6"
+const GAME_VERSION = "0.1.7"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -3798,26 +3798,32 @@ function drawCage(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 }
 
 // ── Pelotas rebotantes en vuelo ───────────────────────────────────────────────
-function drawTBalls(ctx: CanvasRenderingContext2D, g: G) {
-  const { cx, cy } = g, t = Date.now() * 0.001
+function drawTBalls(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
+  const { cx, cy } = g
+  const tbSpr = sprs["tennis_ball"]
   for (const b of g.tBalls) {
     if (!b.active) continue
     const sx = b.x - cx, sy = b.y - cy
     if (sx < -20 || sx > CW + 20 || sy < -20 || sy > CH + 20) continue
-    // Estela
-    ctx.fillStyle = `rgba(180,255,60,${0.25 * (b.bounces / TB_MAX_BOUNCES)})`
-    ctx.beginPath(); ctx.arc(sx - b.vx * 2, sy - b.vy * 2, TB_R + 2, 0, Math.PI * 2); ctx.fill()
-    // Pelota
-    const bGrad = ctx.createRadialGradient(sx - 2, sy - 2, 1, sx, sy, TB_R)
-    bGrad.addColorStop(0, "#EEFF66"); bGrad.addColorStop(0.6, "#88CC00"); bGrad.addColorStop(1, "#336600")
-    ctx.fillStyle = bGrad; ctx.beginPath(); ctx.arc(sx, sy, TB_R, 0, Math.PI * 2); ctx.fill()
-    // Líneas de tenis (rotadas con el movimiento)
-    const rot = t * 8
-    ctx.save(); ctx.translate(sx, sy); ctx.rotate(rot)
-    ctx.strokeStyle = "rgba(200,230,0,0.7)"; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.arc(0, 0, TB_R, -0.7, 0.7); ctx.stroke()
-    ctx.beginPath(); ctx.arc(0, 0, TB_R, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke()
+    const d = TB_R * 2
+    // Estela semi-transparente
+    ctx.save()
+    ctx.globalAlpha = 0.30 * (b.bounces / TB_MAX_BOUNCES)
+    if (tbSpr && tbSpr.complete) {
+      ctx.drawImage(tbSpr, sx - b.vx * 2 - TB_R - 1, sy - b.vy * 2 - TB_R - 1, d + 2, d + 2)
+    } else {
+      ctx.fillStyle = "rgba(180,255,60,1)"
+      ctx.beginPath(); ctx.arc(sx - b.vx * 2, sy - b.vy * 2, TB_R + 2, 0, Math.PI * 2); ctx.fill()
+    }
     ctx.restore()
+    // Pelota — sprite o fallback
+    if (tbSpr && tbSpr.complete) {
+      ctx.drawImage(tbSpr, sx - TB_R, sy - TB_R, d, d)
+    } else {
+      const bGrad = ctx.createRadialGradient(sx - 2, sy - 2, 1, sx, sy, TB_R)
+      bGrad.addColorStop(0, "#EEFF66"); bGrad.addColorStop(0.6, "#88CC00"); bGrad.addColorStop(1, "#336600")
+      ctx.fillStyle = bGrad; ctx.beginPath(); ctx.arc(sx, sy, TB_R, 0, Math.PI * 2); ctx.fill()
+    }
     // Contador de rebotes restantes
     if (g.gfx >= 1 && b.bounces < TB_MAX_BOUNCES) {
       ctx.fillStyle = b.bounces <= 1 ? "#FF4444" : "#AAFFAA"
@@ -6105,7 +6111,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
-  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g); drawWhip(ctx, g)
+  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
@@ -6309,27 +6315,35 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
 
   // ── Indicadores de habilidades desbloqueadas ─────────────────────────
   {
-    const aY = 206, aX = panX + 8, aGap = 36
-    ctx.fillStyle = th.accent + "55"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("HABILIDADES", aX, aY)
+    const mob  = g.isMobile
+    const aY   = mob ? 160 : 206
+    const aX   = panX + 8
+    const aGap = mob ? 52 : 36
+    const bW   = mob ? 44 : 30
+    const bH   = mob ? 32 : 22
+    const fIcon = mob ? "bold 14px 'Courier New',monospace" : "bold 9px 'Courier New',monospace"
+    const fLbl  = mob ? "10px 'Courier New',monospace" : "9px 'Courier New',monospace"
+    ctx.fillStyle = th.accent + "55"; ctx.font = mob ? "10px 'Courier New',monospace" : "9px 'Courier New',monospace"
+    ctx.fillText("HABILIDADES", aX, aY)
     const icons: [string, string, boolean][] = [
       ["DASH", "⚡", g.abilities.has("dash")],
-      ["W.JUMP", "↑↑", g.abilities.has("walljump")],
+      ["W.JMP", "↑↑", g.abilities.has("walljump")],
       ["HP+1", "❤+", g.abilities.has("hpup")],
     ]
     icons.forEach(([label, icon, unlocked], i) => {
       const ix = aX + i * aGap
       ctx.fillStyle = unlocked ? "rgba(0,0,0,0.7)" : "rgba(0,0,0,0.4)"
-      ctx.beginPath(); ctx.roundRect(ix, aY + 4, 30, 22, 3); ctx.fill()
-      ctx.strokeStyle = unlocked ? th.accent : "#333"; ctx.lineWidth = 1; ctx.strokeRect(ix, aY + 4, 30, 22)
-      ctx.fillStyle = unlocked ? th.accent : "#444"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-      ctx.fillText(icon, ix + 15, aY + 14)
-      ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = "9px 'Courier New',monospace"
-      ctx.fillText(label, ix + 15, aY + 23); ctx.textAlign = "left"
+      ctx.beginPath(); ctx.roundRect(ix, aY + 4, bW, bH, 3); ctx.fill()
+      ctx.strokeStyle = unlocked ? th.accent : "#333"; ctx.lineWidth = 1; ctx.strokeRect(ix, aY + 4, bW, bH)
+      ctx.fillStyle = unlocked ? th.accent : "#444"; ctx.font = fIcon; ctx.textAlign = "center"
+      ctx.fillText(icon, ix + bW / 2, aY + 4 + bH * 0.54)
+      ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = fLbl
+      ctx.fillText(label, ix + bW / 2, aY + 4 + bH - 3); ctx.textAlign = "left"
     })
   }
 
-  // ── Selector de poder activo ─────────────────────────────────────────
-  {
+  // ── Selector de poder activo — en móvil se oculta (la UI del gamepad ya lo muestra) ──
+  if (!g.isMobile) {
     const POWER_LIST: { id: string; icon: string; label: string; key: string }[] = [
       { id: "tball", icon: "🎾", label: "T.BALL", key: "V" },
     ]
@@ -6349,7 +6363,6 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
         ctx.lineWidth = isActive ? 1.5 : 1; ctx.strokeRect(px2, pyStart + 4, 30, 26)
         ctx.font = "13px sans-serif"; ctx.textAlign = "center"
         ctx.fillText(pw.icon, px2 + 15, pyStart + 17)
-        // Contador de munición (reemplaza la etiqueta label)
         ctx.fillStyle = noAmmo ? "#FF4444" : (isActive ? "#CCFF44" : "#888")
         ctx.font = "bold 8px 'Courier New',monospace"
         ctx.fillText(`×${ammo}`, px2 + 15, pyStart + 28); ctx.textAlign = "left"
@@ -6705,6 +6718,7 @@ export default function ProyectoLuly() {
     L("rex_mitad_llave_left",   "/assets/NPCs/Rex_The_Old/mitad_llave_left.png")
     L("rex_mitad_llave_right",  "/assets/NPCs/Rex_The_Old/mitad_llave_right.png")
     L("luly_map_icon",  "/assets/Enviroment/Icon_Face_Luly_Map/Icon_Face.png")
+    L("tennis_ball",   "/assets/Enviroment/Tennis_Ball/Tennis_Ball.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -7632,23 +7646,31 @@ export default function ProyectoLuly() {
           </svg>
         </div>
 
-        {/* TELE — centro-inferior, solo cuando hay ≥2 CPs y la jugadora está cerca */}
-        {g.discoveredCPs.size >= 2 && nearAnyCP && (
-          <div
-            style={{ ...SYS_BTN, bottom: SAFE_B, left: "50%", transform: "translateX(-50%)",
-                     width: 66, height: 32, fontSize: 10, gap: 3, borderColor: "#D4C40066", zIndex: 25 }}
-            {...makeTouch(() => {
-              if (g.tpMenu?.open) g.tpMenu = null
-              else tpOpenMenu(g)
-            }, () => {})}
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" style={{ opacity: 0.85 }}>
-              <circle cx="6" cy="6" r="4.5" fill="none" stroke="#D4C400" strokeWidth="1.2"/>
-              <path d="M6 2 L8 6 L6 5 L6 10 L4 6 L6 7 Z" fill="#D4C400" opacity="0.9"/>
-            </svg>
-            <span style={{ color: "#D4C400CC" }}>TELE</span>
-          </div>
-        )}
+        {/* TELE — encima del joystick (izquierda), solo cuando hay ≥2 CPs y la jugadora está cerca */}
+        {g.discoveredCPs.size >= 2 && nearAnyCP && (() => {
+          // Calcular altura del joystick para posicionar TELE justo encima
+          const jBase = Math.round(Math.max(52, Math.min(72, vh * 0.155)))
+          const jDiam = jBase * 2
+          return (
+            <div
+              style={{ ...SYS_BTN,
+                       bottom: DPAD_B + jDiam + 8,
+                       left: "15%", transform: "translateX(-50%)",
+                       width: 66, height: 32, fontSize: 10, gap: 3,
+                       borderColor: "#D4C40066", zIndex: 25 }}
+              {...makeTouch(() => {
+                if (g.tpMenu?.open) g.tpMenu = null
+                else tpOpenMenu(g)
+              }, () => {})}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" style={{ opacity: 0.85 }}>
+                <circle cx="6" cy="6" r="4.5" fill="none" stroke="#D4C400" strokeWidth="1.2"/>
+                <path d="M6 2 L8 6 L6 5 L6 10 L4 6 L6 7 Z" fill="#D4C400" opacity="0.9"/>
+              </svg>
+              <span style={{ color: "#D4C400CC" }}>TELE</span>
+            </div>
+          )
+        })()}
 
         {/* ══════════════════════════════════════════════════
             HOMBROS — solo cuando la habilidad existe.
@@ -7705,21 +7727,21 @@ export default function ProyectoLuly() {
                 flexShrink: 0,
               }}>
                 {/* Ícono de pelota */}
-                <svg width={Math.round(tballSz * 0.52)} height={Math.round(tballSz * 0.52)}
-                  viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="8"
-                    fill={unlocked ? (hasAmmo ? "#c86010" : "#4a2a08") : "#2a2a2a"}
-                    stroke={unlocked ? (hasAmmo ? "#ff9030" : "#3a1a04") : "#333"}
-                    strokeWidth="1.2"/>
-                  <path d="M3.5 7 Q10 4 16.5 7" fill="none"
-                    stroke={unlocked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"} strokeWidth="1"/>
-                  <path d="M3.5 13 Q10 16 16.5 13" fill="none"
-                    stroke={unlocked ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.08)"} strokeWidth="1"/>
-                  {!unlocked && (
-                    <text x="10" y="14" textAnchor="middle" fontSize="9"
-                      fill="rgba(255,255,255,0.25)">🔒</text>
-                  )}
-                </svg>
+                {/* Imagen real del asset */}
+                <img
+                  src="/assets/Enviroment/Tennis_Ball/Tennis_Ball.png"
+                  width={Math.round(tballSz * 0.60)}
+                  height={Math.round(tballSz * 0.60)}
+                  style={{
+                    imageRendering: "pixelated",
+                    opacity: unlocked ? (hasAmmo ? 1 : 0.35) : 0.15,
+                    display: "block",
+                  }}
+                  alt="T-Ball"
+                />
+                {!unlocked && (
+                  <span style={{ position:"absolute", fontSize: Math.round(tballSz*0.30), lineHeight:1, opacity:0.5 }}>🔒</span>
+                )}
               </div>
               {/* Etiqueta con munición o estado */}
               <span style={{
