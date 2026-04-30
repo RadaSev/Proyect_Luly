@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.4"
+const GAME_VERSION = "0.1.5"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -7618,7 +7618,7 @@ export default function ProyectoLuly() {
             MAP — esquina superior derecha, icono solo
         ══════════════════════════════════════════════════ */}
         <div
-          style={{ ...SYS_BTN, top: 10, right: "3%", width: 40, height: 40, borderRadius: 10, zIndex: 25 }}
+          style={{ ...SYS_BTN, top: Math.round(44 * vh / 600) + 8, right: "3%", width: 40, height: 40, borderRadius: 10, zIndex: 25 }}
           {...makeTouch(() => {
             g.showMap = !g.showMap; g.paused = g.showMap
             if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW-1, Math.floor(g.pl.x/(NC*RW)))); g.mapView = "single" }
@@ -7674,9 +7674,9 @@ export default function ProyectoLuly() {
             <div
               style={{
                 position: "absolute",
-                // Anclado encima del diamante, alineado a su borde derecho
-                bottom: ACT_B + ACT_H + 10,
-                right: `calc(3% + ${Math.round(ACT_H * 0.08)}px)`,
+                // Entre Y y B, en el área superior del diamante (como RUN está entre X y A)
+                bottom: ACT_B + Math.round(ACT_H * 0.82),
+                right: `calc(3% + ${Math.round(ACT_H * 0.04)}px)`,
                 zIndex: 22,
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
                 pointerEvents: active ? "auto" : "none",
