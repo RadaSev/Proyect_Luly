@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.2"
+const GAME_VERSION = "0.1.3"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -6250,8 +6250,9 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
       : "★  CHECKPOINT  GUARDADO  ★"
     const msgColor = (g as any)._gfxMsg ? th.accent : "#00FF88"
     ctx.save(); ctx.globalAlpha = alpha
-    // En mobile los botones virtuales cubren el fondo — subir el mensaje para quedar justo encima
-    const cpY = g.isMobile ? Math.round(CH * 0.36) : CH - 72
+    // En mobile los botones MAP/PAUSA ocupan ~42px desde el fondo del canvas (3%vh + 32px).
+    // Checkpoint justo encima con ~6px de separación → bottom del box a CH-48.
+    const cpY = g.isMobile ? CH - 88 : CH - 72
     ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW / 2 - 136, cpY, 272, 40, 8); ctx.fill()
     ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, cpY, 272, 40)
     ctx.fillStyle = msgColor; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
@@ -6276,8 +6277,8 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     const BOSS_NAMES: Record<string, string> = { p1: "El Castigador", p2: "El Herrero", ultra: "El Torturado" }
     const bossName = (bossRoomType && BOSS_NAMES[bossRoomType]) || WORLD_NAMES[boss.world]
     const barW = 420, barH = 14, barX = (CW - barW) / 2
-    // En mobile subir la barra para que quede sobre los controles táctiles
-    const barY = g.isMobile ? Math.round(CH * 0.42) : CH - 34
+    // En mobile: barra boss sobre los botones MAP/PAUSA (contenedor barY-22 a barY+22 → bottom ~CH-46)
+    const barY = g.isMobile ? CH - 68 : CH - 34
     ctx.fillStyle = "rgba(0,0,0,0.85)"
     ctx.beginPath(); ctx.roundRect(barX - 8, barY - 22, barW + 16, barH + 30, 7); ctx.fill()
     ctx.strokeStyle = th.doorC + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(barX - 8, barY - 22, barW + 16, barH + 30)
