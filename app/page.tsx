@@ -7206,7 +7206,7 @@ export default function ProyectoLuly() {
       }
 
       // ── Menú de pausa ─────────────────────────────────────────────
-      if (screen === "playing" && ui.paused && !ui.showDevMap && !ui.showMap) {
+      if (screen === "playing" && ui.paused && !ui.tpMenuOpen && !ui.showDevMap && !ui.showMap) {
         const COUNT = 2  // CONTINUAR | MENÚ PRINCIPAL
         if (navCd <= 0) {
           if (ly < -THRESH || btn(GP.UP)) {
@@ -7599,7 +7599,7 @@ export default function ProyectoLuly() {
     // ══════════════════════════════════════════════════════════════════════
     //  MODO PAUSA — swipe ↑↓ para navegar + B para salir (sin D-pad ni A)
     // ══════════════════════════════════════════════════════════════════════
-    if (ui.paused && !ui.showDevMap) {
+    if (ui.paused && !ui.tpMenuOpen && !ui.showDevMap) {
       const PAUSE_COUNT = 3
       const navPause = (dir: 1 | -1) => {
         const next = (pauseSelRef.current + dir + PAUSE_COUNT) % PAUSE_COUNT
@@ -8326,7 +8326,7 @@ export default function ProyectoLuly() {
         <VirtualGamepad />
 
         {/* ── Pausa ── (solo cuando no está el mapa ni el devmap abiertos) */}
-        {screen === "playing" && ui.paused && !ui.over && !ui.won && !ui.showDevMap && !ui.showMap && (() => {
+        {screen === "playing" && ui.paused && !ui.tpMenuOpen && !ui.over && !ui.won && !ui.showDevMap && !ui.showMap && (() => {
           const g = G.current; const p = g.pl
           const curW = getWorldAtX(g.cx); const th = THEMES[curW]
           const MAX_POSSIBLE_HP = 4  // 3 base + 1 por hpup (boss W2)
