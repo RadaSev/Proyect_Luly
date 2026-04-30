@@ -7,3 +7,4 @@ out/
 .vscode/
 *.tsbuildinfo
 .claude/
+.DS_Store
