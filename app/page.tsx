@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.1"
+const GAME_VERSION = "0.1.2"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -8026,19 +8026,6 @@ export default function ProyectoLuly() {
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.X, "X", "DISPARO",
               ()=>pressKey("n"), ()=>releaseKey("n"))}
           </div>
-          {/* RUN — debajo de X, solo en modo joystick (toggle correr) */}
-          {dpadMode === "joystick" && (
-            <div style={{ position:"absolute", left:"3%", bottom:"19%", transform:"none" }}>
-              {xbCircle(
-                Math.round(ACT_H * 0.27),
-                runActive ? "#2A7A3A" : "#4A4A4A",
-                "R",
-                "RUN",
-                () => { G.current.pl.runMode = true;  setRunActive(true)  },
-                () => { G.current.pl.runMode = false; setRunActive(false) }
-              )}
-            </div>
-          )}
           {/* B — derecha (checkpoint / siguiente diálogo / cerrar tpMenu) */}
           <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-55%)" }}>
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
@@ -8057,6 +8044,27 @@ export default function ProyectoLuly() {
               () => { if (!g.tpMenu?.open) releaseKey(" ") })}
           </div>
         </div>
+
+        {/* RUN — fuera del diamante, alineado bajo X, separado de A y X */}
+        {dpadMode === "joystick" && !ui.tpMenuOpen && (
+          <div style={{
+            position: "absolute",
+            // Alineado horizontalmente con el centro de X (borde izq. del diamante + radio de X)
+            right: `calc(3% + ${Math.round(ACT_H * 0.725)}px)`,
+            // Verticalmente: entre X y el borde inferior, con margen suficiente respecto a A
+            bottom: ACT_B + Math.round(ACT_H * 0.09),
+            zIndex: 21,
+          }}>
+            {xbCircle(
+              Math.round(ACT_H * 0.22),
+              runActive ? "#2A7A3A" : "#4A4A4A",
+              "R",
+              "RUN",
+              () => { G.current.pl.runMode = true;  setRunActive(true)  },
+              () => { G.current.pl.runMode = false; setRunActive(false) }
+            )}
+          </div>
+        )}
       </>
     )
   }
