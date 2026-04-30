@@ -5702,9 +5702,13 @@ function _drawMapWorldGrid(
       ctx.fillText("🎾?",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
     }
   }
-  // Checkpoints
+  // Checkpoints (ocultar si la celda muestra un skull de jefe desbloqueado)
   for (const cp of ALL_CPS) {
     if (cp.w!==w || !g.discoveredCPs.has(cp.id)) continue
+    const isP1Boss   = cp.c===p1c_m && cp.r===p1r_m && g.p1BossRexSeen
+    const isP2Boss   = cp.c===p2c_m && cp.r===p2r_m && g.p2BossRexSeen
+    const isUltraBoss = cp.c===TRANSIT_BOSS_COL && cp.r===TROW && g.ultraBossRexSeen
+    if (isP1Boss || isP2Boss || isUltraBoss) continue
     const cpRx=gx+cp.c*(rW+gap)+Math.round(rW/2), cpRy=gy+cp.r*(rH+gap)+Math.round(rH/2)
     const isActive=g.checkpoint.w===cp.w && Math.abs(g.checkpoint.x-cp.x)<40
     ctx.fillStyle=isActive?THEMES[w].accent:"#FFD700"
