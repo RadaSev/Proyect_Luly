@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.8"
+const GAME_VERSION = "0.0.9"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -6612,7 +6612,7 @@ export default function ProyectoLuly() {
   const G = useRef<G>(mkG_lazy())
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
-  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false })
+  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false })
   // Diferir la lectura de localStorage al cliente para evitar hydration mismatch
   const [hasSave, setHasSave] = useState(false)
   const [saveChecked, setSaveChecked] = useState(false)  // true tras primer check de localStorage
@@ -6756,7 +6756,7 @@ export default function ProyectoLuly() {
         // // Garantía absoluta: gfx=0 nunca debería ocurrir via autoGfx
         // if (g.gfx < 1) g.gfx = 1
         // FIX: incluir showDevMap en el estado UI para controlar el overlay de pausa
-        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap, devMode: g.devMode })
+        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap, devMode: g.devMode, tpMenuOpen: !!g.tpMenu?.open })
       }
       raf = requestAnimationFrame(loop)
     }
@@ -7147,7 +7147,7 @@ export default function ProyectoLuly() {
         if (edgeDown(pad, GP.A)) {
           const sel = pauseSelRef.current
           if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
-          else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false }); setScreen("start"); gameActiveRef.current = false }
+          else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false }); setScreen("start"); gameActiveRef.current = false }
         }
         if (edgeDown(pad, GP.B)) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
       }
@@ -7157,7 +7157,7 @@ export default function ProyectoLuly() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, ui.paused, ui.showDevMap, ui.showMap, hasSave, showSettings])
 
-  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false }) }
+  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false }) }
 
   const handlePlay = () => {
     gameActiveRef.current = true
@@ -7179,7 +7179,7 @@ export default function ProyectoLuly() {
       applyLoad(G.current, save)
       setHasSave(true)
     }
-    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false })
+    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false })
     setScreen("playing")
     gameActiveRef.current = true
     if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement)
@@ -7855,12 +7855,12 @@ export default function ProyectoLuly() {
           fontFamily:"'Courier New',monospace", pointerEvents:"none", zIndex:20 }}>2× ← / → = RUN</div>
         </>)}
 
-        {/* ── MODO JOYSTICK (DEV) — pointer capture: sigue el dedo a donde vaya ── */}
+        {/* ── MODO JOYSTICK (DEV) ── */}
         {dpadMode === "joystick" && (() => {
-          const JBASE  = Math.round(Math.max(52, Math.min(72, vh * 0.155)))  // radio base
-          const JTHUMB = Math.round(JBASE * 0.40)                             // radio thumb
+          const JBASE  = Math.round(Math.max(52, Math.min(72, vh * 0.155)))
+          const JTHUMB = Math.round(JBASE * 0.40)
           const JDIAM  = JBASE * 2
-          const DEAD   = JBASE * 0.18                                         // zona muerta
+          const DEAD   = JBASE * 0.18
 
           const releaseJoy = () => {
             releaseKey("arrowleft"); releaseKey("arrowright")
@@ -7871,15 +7871,66 @@ export default function ProyectoLuly() {
             const dist = Math.sqrt(rawOx * rawOx + rawOy * rawOy)
             const scale = dist > JBASE ? JBASE / dist : 1
             const ox = rawOx * scale, oy = rawOy * scale
-            // El thumb sigue el dedo en 2D visualmente, pero solo controla el eje horizontal
             setJstickThumb({ x: ox, y: oy })
-            // Solo horizontal — el salto se hace con el botón A
             if (Math.abs(ox) > DEAD) {
               if (ox < 0) { releaseKey("arrowright"); if (!G.current.keys["arrowleft"])  pressKey("arrowleft") }
               else        { releaseKey("arrowleft");  if (!G.current.keys["arrowright"]) pressKey("arrowright") }
             } else { releaseKey("arrowleft"); releaseKey("arrowright") }
           }
 
+          // ── Si el menú TP está abierto → D-cross de navegación TP ────────────
+          if (ui.tpMenuOpen) {
+            const crossBg = `polygon(${ARM}px 0,${ARM+HUB}px 0,${ARM+HUB}px ${ARM}px,${TOTAL}px ${ARM}px,${TOTAL}px ${ARM+HUB}px,${ARM+HUB}px ${ARM+HUB}px,${ARM+HUB}px ${TOTAL}px,${ARM}px ${TOTAL}px,${ARM}px ${ARM+HUB}px,0 ${ARM+HUB}px,0 ${ARM}px,${ARM}px ${ARM}px)`
+            return (
+              <div style={{ position:"absolute", bottom:DPAD_B, left:"15%", transform:"translateX(-50%)",
+                width:TOTAL, height:TOTAL, touchAction:"none", zIndex:20 }}>
+                {/* Fondo cruz — tono cian para indicar modo TP */}
+                <div style={{ position:"absolute", inset:0,
+                  background:"linear-gradient(145deg,#1A3A3A 0%,#0C1C1C 100%)",
+                  clipPath: crossBg, boxShadow:"0 6px 20px rgba(0,0,0,0.75)" }}/>
+                <svg style={{ position:"absolute",inset:0,overflow:"visible",pointerEvents:"none" }} width={TOTAL} height={TOTAL}>
+                  <path d={`M${ARM} 0 H${ARM+HUB} V${ARM} H${TOTAL} V${ARM+HUB} H${ARM+HUB} V${TOTAL} H${ARM} V${ARM+HUB} H0 V${ARM} H${ARM} Z`}
+                    fill="none" stroke="rgba(80,220,220,0.30)" strokeWidth="1.5"/>
+                </svg>
+                <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
+                  background:"#0D2222", border:"1px solid rgba(80,220,220,0.15)", pointerEvents:"none"}}/>
+                {/* Label TP en el hub */}
+                <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:9, color:"rgba(80,220,220,0.55)", fontFamily:"'Courier New',monospace",
+                  pointerEvents:"none", letterSpacing:"0.1em" }}>TP</div>
+                {/* Overlay — solo tap, navega el menú TP */}
+                <div style={{ position:"absolute",left:0,top:0,width:TOTAL,height:TOTAL,
+                  cursor:"pointer",userSelect:"none",touchAction:"none",zIndex:12 }}
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const x = e.clientX - rect.left, y = e.clientY - rect.top
+                    const inH = y >= ARM && y <= ARM + HUB
+                    const inV = x >= ARM && x <= ARM + HUB
+                    if (!inH && !inV) return
+                    if (inH) { x < TOTAL / 2 ? navTPWorld(-1) : navTPWorld(1) }
+                    else     { y < TOTAL / 2 ? navTP(-1)      : navTP(1) }
+                  }}
+                />
+                {/* Flechas decorativas en tono cian */}
+                <div style={{ position:"absolute",left:ARM,top:0,width:HUB,height:ARM,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
+                  <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 2 L16 12 L2 12 Z" fill="rgba(80,220,220,0.60)"/></svg>
+                </div>
+                <div style={{ position:"absolute",left:ARM,top:ARM+HUB,width:HUB,height:ARM,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
+                  <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 12 L16 2 L2 2 Z" fill="rgba(80,220,220,0.60)"/></svg>
+                </div>
+                <div style={{ position:"absolute",left:0,top:ARM,width:ARM,height:HUB,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
+                  <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(80,220,220,0.60)"/></svg>
+                </div>
+                <div style={{ position:"absolute",left:ARM+HUB,top:ARM,width:ARM,height:HUB,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
+                  <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(80,220,220,0.60)"/></svg>
+                </div>
+              </div>
+            )
+          }
+
+          // ── Menú TP cerrado → joystick normal ─────────────────────────────
           return (
             <div style={{ position:"absolute", bottom:DPAD_B, left:"15%", transform:"translateX(-50%)",
               width:JDIAM, height:JDIAM, touchAction:"none", zIndex:20 }}>
