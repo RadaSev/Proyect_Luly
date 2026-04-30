@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.7"
+const GAME_VERSION = "0.0.8"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -7909,23 +7909,33 @@ export default function ProyectoLuly() {
                 transition: jstickThumb.x === 0 && jstickThumb.y === 0 ? "left 0.12s,top 0.12s" : "none",
               }}/>
               {/* Capa interactiva — con setPointerCapture para seguir el dedo a donde vaya */}
+              {/* Capa interactiva — listeners nativos en window para garantizar release
+                  aunque el dedo se levante fuera del joystick o de la pantalla */}
               <div
                 style={{ position:"absolute", inset:0, borderRadius:"50%",
                   cursor:"pointer", touchAction:"none" }}
                 onPointerDown={(e) => {
                   e.preventDefault()
-                  try { e.currentTarget.setPointerCapture(e.pointerId) } catch(_) {}
                   const rect = e.currentTarget.getBoundingClientRect()
                   jstickBaseRef.current = { cx: rect.left + JBASE, cy: rect.top + JBASE }
                   applyJoy(e.clientX - jstickBaseRef.current.cx, e.clientY - jstickBaseRef.current.cy)
+                  // Listeners nativos en window — no dependen de pointer capture ni de React
+                  const pid = e.pointerId
+                  const onMove = (ev: PointerEvent) => {
+                    if (ev.pointerId !== pid) return
+                    applyJoy(ev.clientX - jstickBaseRef.current.cx, ev.clientY - jstickBaseRef.current.cy)
+                  }
+                  const onEnd = (ev: PointerEvent) => {
+                    if (ev.pointerId !== pid) return
+                    releaseJoy()
+                    window.removeEventListener("pointermove", onMove)
+                    window.removeEventListener("pointerup",   onEnd)
+                    window.removeEventListener("pointercancel", onEnd)
+                  }
+                  window.addEventListener("pointermove",   onMove)
+                  window.addEventListener("pointerup",     onEnd)
+                  window.addEventListener("pointercancel", onEnd)
                 }}
-                onPointerMove={(e) => {
-                  if (!(e.buttons & 1)) return
-                  applyJoy(e.clientX - jstickBaseRef.current.cx, e.clientY - jstickBaseRef.current.cy)
-                }}
-                onPointerUp={releaseJoy}
-                onPointerCancel={releaseJoy}
-                onLostPointerCapture={releaseJoy}
               />
             </div>
           )
@@ -7963,12 +7973,8 @@ export default function ProyectoLuly() {
                 runActive ? "#2A7A3A" : "#4A4A4A",
                 "R",
                 "RUN",
-                () => {
-                  const next = !G.current.pl.runMode
-                  G.current.pl.runMode = next
-                  setRunActive(next)
-                },
-                () => {}
+                () => { G.current.pl.runMode = true;  setRunActive(true)  },
+                () => { G.current.pl.runMode = false; setRunActive(false) }
               )}
             </div>
           )}
