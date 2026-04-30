@@ -4894,6 +4894,14 @@ function tpAvailWorlds(g: G): number[] {
 function tpCPsInWorld(g: G, w: number): CPDef[] {
   return ALL_CPS.filter(cp => cp.w === w && g.discoveredCPs.has(cp.id))
 }
+function _tpClearMvKeys(g: G) {
+  g.keys["arrowleft"] = false; g.keys["a"] = false
+  g.keys["arrowright"] = false; g.keys["d"] = false
+  g.keys["arrowup"] = false; g.keys["w"] = false
+  g.keys["arrowdown"] = false; g.keys["s"] = false
+  g.pl.runMode = false
+}
+
 function tpOpenMenu(g: G) {
   // Solo puede abrirse si el jugador está junto a una perrera/checkpoint descubierto
   const p = g.pl
@@ -4910,6 +4918,7 @@ function tpOpenMenu(g: G) {
   const world = worlds.includes(curW) ? curW : worlds[0]
   g.tpMenu = { open: true, world, cpIdx: 0 }
   g.paused = true
+  _tpClearMvKeys(g)
 }
 function tpNavWorld(g: G, dir: 1 | -1) {
   if (!g.tpMenu) return
@@ -4932,6 +4941,7 @@ function tpDoConfirm(g: G) {
   if (!dest) return
   g.tpMenu = null
   g.paused = false
+  _tpClearMvKeys(g)
   g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
   spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
 }
@@ -6622,7 +6632,7 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
       else if (lx > THRESH || btn(GP.RIGHT)) { tpNavWorld(g, 1);  _gpStickNavCd = 200 }
     }
     if (edgeDown(GP.A)) tpDoConfirm(g)
-    if (edgeDown(GP.B) || edgeDown(GP.START)) { g.tpMenu = null; g.paused = false }
+    if (edgeDown(GP.B) || edgeDown(GP.START)) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g) }
     return
   }
 
@@ -6842,6 +6852,17 @@ export default function ProyectoLuly() {
         }
       }
 
+      // ── TP menu abierto: interceptar ANTES de g.keys para que no muevan al player ──
+      if (g.tpMenu?.open) {
+        if (k === "arrowup"    || k === "w") { tpNavCP(g, -1);    return }
+        if (k === "arrowdown"  || k === "s") { tpNavCP(g, 1);     return }
+        if (k === "arrowleft"  || k === "a") { tpNavWorld(g, -1); return }
+        if (k === "arrowright" || k === "d") { tpNavWorld(g, 1);  return }
+        if (k === "enter" || k === " ")      { tpDoConfirm(g);    return }
+        if (k === "escape" || k === "t")     { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g); return }
+        return  // bloquear cualquier otra tecla mientras el menú está abierto
+      }
+
       G.current.keys[k] = true; if (e.repeat) return
       const TAP_WIN = 280
       if (k === "a" || k === "arrowleft") { if (performance.now() - g.pl.tapLeft < TAP_WIN && g.pl.tapLeft > 0) g.pl.runMode = true; g.pl.tapLeft = performance.now() }
@@ -6884,7 +6905,7 @@ export default function ProyectoLuly() {
       }
       if (k === "f") handleToggleFS()
       if (k === "escape") {
-        if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; return }
+        if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g); return }
         if (g.showMap) { g.showMap = false; g.paused = false }
         if (g.showDevMap) { g.showDevMap = false; g.paused = false }
       }
@@ -6908,16 +6929,7 @@ export default function ProyectoLuly() {
         }
       }
       if (k === "t" && !g.tpAnim) {
-        if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; return }
         tpOpenMenu(g)
-      }
-      // Navegación menú de teleporte — ↑↓ = CP, ←→ = mundo
-      if (g.tpMenu?.open) {
-        if (k === "arrowup"    || k === "w") { tpNavCP(g, -1);    return }
-        if (k === "arrowdown"  || k === "s") { tpNavCP(g, 1);     return }
-        if (k === "arrowleft"  || k === "a") { tpNavWorld(g, -1); return }
-        if (k === "arrowright" || k === "d") { tpNavWorld(g, 1);  return }
-        if (k === "enter" || k === " ")      { tpDoConfirm(g);    return }
       }
     }
     const up = (e: KeyboardEvent) => { G.current.keys[e.key.toLowerCase()] = false }
@@ -7694,7 +7706,7 @@ export default function ProyectoLuly() {
                        width: 66, height: 32, fontSize: 10, gap: 3,
                        borderColor: "#D4C40066", zIndex: 25 }}
               {...makeTouch(() => {
-                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false }
+                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g) }
                 else tpOpenMenu(g)
               }, () => {})}
             >
@@ -8092,7 +8104,7 @@ export default function ProyectoLuly() {
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
               g.tpMenu?.open ? "CERRAR" : _rexPageWaiting ? "SIGUIENTE" : "GUARDAR",
               () => {
-                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false }
+                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g) }
                 else if (_rexPageWaiting) { pressKey("e"); setTimeout(() => releaseKey("e"), 120) }
                 else activateCheckpoint()
               }, () => {})}
