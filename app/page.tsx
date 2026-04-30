@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.9"
+const GAME_VERSION = "0.1.1"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -4388,7 +4388,12 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const headerLine  = dlg.headers[curPage] ?? dlg.headers[0]
 
   // ── Renderizar burbuja de diálogo ─────────────────────────────────────────
-  const bub_lh = 13, bub_pad = 9, bub_w = 210
+  // En mobile el texto del diálogo es más grande para mejor legibilidad
+  const dlgMob = g.isMobile
+  const bub_fontSize = dlgMob ? 13 : 9
+  const bub_lh  = dlgMob ? 18 : 13
+  const bub_pad = dlgMob ? 13 : 9
+  const bub_w   = dlgMob ? 300 : 210
   const totalLines = (headerLine ? 1 : 0) + dialogLines.length
   const bub_h = bub_pad * 2 + totalLines * bub_lh + (headerLine ? 4 : 0)
   const bub_x = Math.max(4, Math.min(CW - bub_w - 4, bx - bub_w / 2))
@@ -4437,7 +4442,7 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     textY += 3
   }
   // Tipografía animada: revelar carácter a carácter
-  ctx.fillStyle = dialogColor; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
+  ctx.fillStyle = dialogColor; ctx.font = `${bub_fontSize}px 'Courier New',monospace`; ctx.textAlign = "center"
   let charsLeft = charsShown
   for (let li = 0; li < dialogLines.length; li++) {
     const line = dialogLines[li]
@@ -6245,10 +6250,12 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
       : "★  CHECKPOINT  GUARDADO  ★"
     const msgColor = (g as any)._gfxMsg ? th.accent : "#00FF88"
     ctx.save(); ctx.globalAlpha = alpha
-    ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW / 2 - 136, CH - 72, 272, 40, 8); ctx.fill()
-    ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, CH - 72, 272, 40)
+    // En mobile los botones virtuales cubren el fondo — subir el mensaje para quedar justo encima
+    const cpY = g.isMobile ? Math.round(CH * 0.36) : CH - 72
+    ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW / 2 - 136, cpY, 272, 40, 8); ctx.fill()
+    ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, cpY, 272, 40)
     ctx.fillStyle = msgColor; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
-    ctx.fillText(msgText, CW / 2, CH - 46); ctx.textAlign = "left"; ctx.restore()
+    ctx.fillText(msgText, CW / 2, cpY + 26); ctx.textAlign = "left"; ctx.restore()
   }
   if (g.devMode) {
     // Badge debajo de los indicadores JUMP/PLAT (que terminan en ~y≈70)
@@ -6268,7 +6275,9 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
   if (boss) {
     const BOSS_NAMES: Record<string, string> = { p1: "El Castigador", p2: "El Herrero", ultra: "El Torturado" }
     const bossName = (bossRoomType && BOSS_NAMES[bossRoomType]) || WORLD_NAMES[boss.world]
-    const barW = 420, barH = 14, barX = (CW - barW) / 2, barY = CH - 34
+    const barW = 420, barH = 14, barX = (CW - barW) / 2
+    // En mobile subir la barra para que quede sobre los controles táctiles
+    const barY = g.isMobile ? Math.round(CH * 0.42) : CH - 34
     ctx.fillStyle = "rgba(0,0,0,0.85)"
     ctx.beginPath(); ctx.roundRect(barX - 8, barY - 22, barW + 16, barH + 30, 7); ctx.fill()
     ctx.strokeStyle = th.doorC + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(barX - 8, barY - 22, barW + 16, barH + 30)
@@ -6381,15 +6390,16 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     const plSx = g.pl.x - g.cx + PW / 2
     const plSy = g.pl.y - g.cy
     const sc = g.mobileZoom === "close" ? 1.35 : 1.0
-    const bx2 = Math.max(4, Math.min(CW / sc - bw - 4, plSx / sc - bw / 2))
-    const by2 = Math.max(4, plSy / sc - bh - 36)
+    // plSx/plSy son coords en el espacio sin zoom → en canvas real el jugador aparece en plSx*sc, plSy*sc
+    const bx2 = Math.max(4, Math.min(CW - bw - 4, plSx * sc - bw / 2))
+    const by2 = Math.max(4, plSy * sc - bh - 28)
     // Fondo cian oscuro (teléfono)
     ctx.fillStyle = "rgba(0,30,40,0.94)"
     ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 6); ctx.fill()
     ctx.strokeStyle = "#00CCDD88"; ctx.lineWidth = 1.2
     ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 6); ctx.stroke()
     // Cola apuntando hacia Luly
-    const tailX = Math.max(bx2 + 12, Math.min(bx2 + bw - 12, plSx / sc))
+    const tailX = Math.max(bx2 + 12, Math.min(bx2 + bw - 12, plSx * sc))
     ctx.fillStyle = "rgba(0,30,40,0.94)"
     ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX + 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 8); ctx.closePath(); ctx.fill()
     ctx.strokeStyle = "#00CCDD88"; ctx.lineWidth = 1
@@ -7684,7 +7694,7 @@ export default function ProyectoLuly() {
           const tballSz  = Math.round(ACT_H * 0.29)
           const unlocked = hasTBall
           const hasAmmo  = g.tballAmmo > 0 || g.infiniteAmmo
-          const active   = unlocked && hasAmmo
+          const active   = unlocked && hasAmmo && !_rexTypingActive
           return (
             <div
               style={{
@@ -8018,7 +8028,7 @@ export default function ProyectoLuly() {
           </div>
           {/* RUN — debajo de X, solo en modo joystick (toggle correr) */}
           {dpadMode === "joystick" && (
-            <div style={{ position:"absolute", left:0, bottom:"4%", transform:"none" }}>
+            <div style={{ position:"absolute", left:"3%", bottom:"19%", transform:"none" }}>
               {xbCircle(
                 Math.round(ACT_H * 0.27),
                 runActive ? "#2A7A3A" : "#4A4A4A",
