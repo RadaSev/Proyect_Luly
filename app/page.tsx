@@ -1,6 +1,7 @@
 "use client"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { CSSProperties } from "react"
+import RealMapDev from "./RealMapDev"
 
 // Prefijo de ruta para GitHub Pages — vacío en local, "/Proyect_Luly" en producción
 const BASE_PATH = process.env.NODE_ENV === "production" ? "/Proyect_Luly" : ""
@@ -118,6 +119,9 @@ type G = {
   // Vista del mapa: "single" = mundo actual ampliado, "all" = los 4 mundos
   mapView: "single" | "all"
   mapViewWorld: number   // índice del mundo mostrado en modo "single"
+  // ── DEV: mapa realista miniaturizado (solo dev/PC) ──
+  showRealMap: boolean
+  realMapWorld: number   // mundo actualmente visible en el real map dev
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -174,7 +178,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.9"
+const GAME_VERSION = "0.2.0"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1346,6 +1350,8 @@ function mkG_lazy(): G {
     isMobile: typeof window !== "undefined" && (window.innerWidth < 900 || navigator.maxTouchPoints > 0),
     mapView: "single",
     mapViewWorld: 0,
+    showRealMap: false,
+    realMapWorld: 0,
   } as G
 }
 
@@ -5881,6 +5887,165 @@ function devTeleport(g: G, targetWorld: number, targetC: number, targetR: number
 }
 
 // ══════════════════════════════════════════════════════════════
+//  drawRealMapDev — mapa realista miniaturizado (solo devMode/PC)
+//  Renderiza las plataformas reales de cada cubículo a escala y
+//  muestra el sprite frame-0 de Luly en su posición exacta.
+// ══════════════════════════════════════════════════════════════
+function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
+  const p   = g.pl
+  const w   = Math.max(0, Math.min(NW - 1, g.realMapWorld))
+  const th  = THEMES[w]
+  const curW = Math.max(0, Math.min(NW - 1, Math.floor(p.x / (NC * RW))))
+  const plC  = Math.max(0, Math.min(NC - 1, Math.floor((p.x - curW * NC * RW) / RW)))
+  const plR  = Math.max(0, Math.min(NR - 1, Math.floor(p.y / RH)))
+
+  // ── Layout ────────────────────────────────────────────────────
+  const HDR = 28, MARG = 6, GAP = 2
+  const availW = CW - MARG * 2
+  const availH = CH - HDR - MARG * 2
+  const cellW  = Math.floor((availW - (NC - 1) * GAP) / NC)
+  const cellH  = Math.floor((availH - (NR - 1) * GAP) / NR)
+  const gridX  = MARG
+  const gridY  = HDR + MARG / 2
+  const scX    = cellW / RW
+  const scY    = cellH / RH
+
+  // ── Fondo ─────────────────────────────────────────────────────
+  ctx.fillStyle = "#060606"; ctx.fillRect(0, 0, CW, CH)
+  ctx.strokeStyle = "#1A1A1A"; ctx.lineWidth = 1.5; ctx.strokeRect(1, 1, CW - 2, CH - 2)
+
+  // ── Header ────────────────────────────────────────────────────
+  ctx.fillStyle = "#111"; ctx.fillRect(0, 0, CW, HDR - 2)
+  ctx.fillStyle = "#00FF44"; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "center"
+  ctx.fillText(`⚙ REAL MAP DEV  ·  W${w+1}: ${WORLD_NAMES[w]}  ·  [← →] mundo  [Y / Esc] cerrar`, CW / 2, 17)
+  ctx.textAlign = "left"
+
+  // ── Precargar plataformas del mundo ───────────────────────────
+  const allPlats = getWorldPlats(w)
+
+  for (let c = 0; c < NC; c++) {
+    for (let r = 0; r < NR; r++) {
+      const cx   = gridX + c * (cellW + GAP)
+      const cy   = gridY + r * (cellH + GAP)
+      const x0   = w * NC * RW + c * RW
+      const y0   = r * RH
+      const isPlayerRoom = w === curW && c === plC && r === plR
+      const explored     = g.explored.has(`${w}_${c}_${r}`) || isPlayerRoom
+
+      // ── Fondo de zona ───────────────────────────────────────────
+      const zoneBg = r < TROW
+        ? (explored ? "rgba(0,22,7,1)"  : "#030903")
+        : r === TROW
+          ? (explored ? "rgba(0,12,36,1)" : "#03050E")
+          : (explored ? "rgba(22,4,0,1)"  : "#090302")
+      ctx.fillStyle = zoneBg; ctx.fillRect(cx, cy, cellW, cellH)
+
+      if (!explored) {
+        ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(cx, cy, cellW, cellH)
+        // Borde sutil si hay sala explorada adyacente
+        const nb = (c > 0 && g.explored.has(`${w}_${c-1}_${r}`))
+                || (c < NC-1 && g.explored.has(`${w}_${c+1}_${r}`))
+                || (r > 0 && g.explored.has(`${w}_${c}_${r-1}`))
+                || (r < NR-1 && g.explored.has(`${w}_${c}_${r+1}`))
+        if (nb) { ctx.strokeStyle = "rgba(255,255,255,0.07)"; ctx.lineWidth = 0.5; ctx.strokeRect(cx, cy, cellW, cellH) }
+        continue
+      }
+
+      // ── Plataformas del cubículo ────────────────────────────────
+      for (const pl of allPlats) {
+        if (pl.mode === "d") continue                         // puertas: no dibujar
+        if (pl.x + pl.w <= x0 || pl.x >= x0 + RW) continue  // fuera en X
+        if (pl.y + pl.h <= y0 || pl.y >= y0 + RH) continue  // fuera en Y
+        const rx = cx + (pl.x - x0) * scX
+        const ry = cy + (pl.y - y0) * scY
+        const rw = pl.w * scX
+        const rh = Math.max(1, pl.h * scY)
+        if (pl.mode === "t") {
+          // Plataforma de paso: línea delgada con color del mundo
+          ctx.fillStyle = th.accent + "88"
+          ctx.fillRect(rx, ry, rw, Math.max(1, Math.ceil(rh * 0.25)))
+        } else {
+          // Sólido: paredes y suelos
+          const isThin = pl.h <= WT + 4  // suelo o techo fino
+          ctx.fillStyle = isThin ? th.platC + "EE" : th.wall + "DD"
+          ctx.fillRect(rx, ry, rw, rh)
+          // Borde highlight para fachada superior
+          if (isThin) { ctx.fillStyle = th.platHi + "88"; ctx.fillRect(rx, ry, rw, 1) }
+        }
+      }
+
+      // ── Cajas de suministros activas en este cubículo ───────────
+      {
+        const boxSpr  = sprs["box"]
+        const crW = Math.max(4, Math.round(44 * scX * 1.5))
+        const crH = Math.max(4, Math.round(44 * scY * 1.5))
+        for (const cr of g.crates) {
+          if (!cr.active) continue
+          const crWorld = Math.max(0, Math.min(NW - 1, Math.floor(cr.x / (NC * RW))))
+          if (crWorld !== w) continue
+          if (cr.x < x0 || cr.x >= x0 + RW) continue
+          if (cr.y < y0 || cr.y >= y0 + RH) continue
+          const crMapX = cx + (cr.x - x0) * scX
+          const crMapY = cy + (cr.y - y0) * scY
+          if (boxSpr && boxSpr.complete && boxSpr.naturalWidth > 0) {
+            ctx.drawImage(boxSpr, crMapX, crMapY, crW, crH)
+          } else {
+            // Fallback: cuadrado con acento del mundo
+            ctx.fillStyle = th.accent + "CC"; ctx.fillRect(crMapX, crMapY, crW, crH)
+            ctx.fillStyle = th.wall; ctx.fillRect(crMapX + 1, crMapY + 1, crW - 2, crH - 2)
+          }
+        }
+      }
+
+      // ── Sprite de Luly frame-0 en la sala actual ────────────────
+      if (isPlayerRoom) {
+        const plRelX = p.x - x0, plRelY = p.y - y0
+        const plMapX = cx + plRelX * scX
+        const plMapY = cy + plRelY * scY
+        const sprIdle = sprs["player_idle"]
+        const dw = Math.max(2, Math.round(PW * scX * 1.1))
+        const dh = Math.max(3, Math.round(PH * scY * 1.1))
+        if (sprIdle && sprIdle.complete && sprIdle.naturalWidth > 0) {
+          const fw = Math.round(sprIdle.width / 4), fh = Math.round(sprIdle.height / 4)
+          ctx.save()
+          if (p.facing === -1) {
+            ctx.translate(plMapX + dw, plMapY)
+            ctx.scale(-1, 1)
+            ctx.drawImage(sprIdle, 0, 0, fw, fh, 0, 0, dw, dh)
+          } else {
+            ctx.drawImage(sprIdle, 0, 0, fw, fh, plMapX, plMapY, dw, dh)
+          }
+          ctx.restore()
+        } else {
+          // Fallback: punto fucsia
+          ctx.fillStyle = "#FF66FF"
+          ctx.fillRect(plMapX, plMapY, Math.max(2, Math.round(PW * scX)), Math.max(3, Math.round(PH * scY)))
+        }
+        // Borde sala activa
+        ctx.strokeStyle = "#00FF4499"; ctx.lineWidth = 1.5
+        ctx.strokeRect(cx + 1, cy + 1, cellW - 2, cellH - 2)
+      }
+
+      // ── Borde de celda ──────────────────────────────────────────
+      ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.lineWidth = 0.5
+      ctx.strokeRect(cx, cy, cellW, cellH)
+    }
+  }
+
+  // ── Labels de zona (izquierda del grid) ────────────────────────
+  // (no caben con MARG=6, se omiten; zona es legible por colores)
+
+  // ── Footer ────────────────────────────────────────────────────
+  ctx.fillStyle = "#111"; ctx.fillRect(0, CH - 14, CW, 14)
+  ctx.fillStyle = "#444"; ctx.font = "7px 'Courier New',monospace"; ctx.textAlign = "center"
+  ctx.fillText(
+    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  [Y] cerrar`,
+    CW / 2, CH - 3
+  )
+  ctx.textAlign = "left"
+}
+
+// ══════════════════════════════════════════════════════════════
 //  drawDevMap — cursor celda a celda, sin scroll
 //  La grilla 9×9 con rW=80,gap=4 → gridW=752 cabe en CW=1050
 // ══════════════════════════════════════════════════════════════
@@ -6681,7 +6846,7 @@ export default function ProyectoLuly() {
   const G = useRef<G>(mkG_lazy())
   const sprs = useRef<SprBank>({})
   // FIX: showDevMap en el estado UI para controlar el overlay de pausa
-  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false })
+  const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false, showRealMap: false })
   // Diferir la lectura de localStorage al cliente para evitar hydration mismatch
   const [hasSave, setHasSave] = useState(false)
   const [saveChecked, setSaveChecked] = useState(false)  // true tras primer check de localStorage
@@ -6831,7 +6996,7 @@ export default function ProyectoLuly() {
         // // Garantía absoluta: gfx=0 nunca debería ocurrir via autoGfx
         // if (g.gfx < 1) g.gfx = 1
         // FIX: incluir showDevMap en el estado UI para controlar el overlay de pausa
-        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap, devMode: g.devMode, tpMenuOpen: !!g.tpMenu?.open })
+        setUi({ paused: g.paused, over: g.over, won: g.won, fps: Math.round(g.lfps), score: g.score, showDevMap: g.showDevMap, showMap: g.showMap, devMode: g.devMode, tpMenuOpen: !!g.tpMenu?.open, showRealMap: g.showRealMap })
       }
       raf = requestAnimationFrame(loop)
     }
@@ -6854,6 +7019,14 @@ export default function ProyectoLuly() {
           devTeleport(g, g.devMapWorld, g.devMapCursor.c, g.devMapCursor.r)
           return
         }
+      }
+
+      // ── RealMap DEV abierto: navegación de mundo con ←→, cerrar con N/Esc ─
+      if (g.showRealMap && g.devMode) {
+        if (k === "arrowleft"  || k === "a") { g.realMapWorld = (g.realMapWorld - 1 + NW) % NW; return }
+        if (k === "arrowright" || k === "d") { g.realMapWorld = (g.realMapWorld + 1) % NW; return }
+        if (k === "y" || k === "escape")     { g.showRealMap = false; return }
+        return  // bloquear resto de teclas mientras el mapa real está abierto
       }
 
       // ── TP menu abierto: interceptar ANTES de g.keys para que no muevan al player ──
@@ -6879,7 +7052,7 @@ export default function ProyectoLuly() {
       }
       if (k === "v" && !g.devMode) fireTBall(g)
       if (k === "r") G.current = mkG_lazy()
-      if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
+      if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.showRealMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
       if (g.devMode && k === "i") g.godMode = !g.godMode
       if (g.devMode && k === "o") g.infiniteAmmo = !g.infiniteAmmo
       if (g.devMode && k === "k") g.noEnemies = !g.noEnemies
@@ -6891,6 +7064,14 @@ export default function ProyectoLuly() {
         g.gpadType = cycle[(cycle.indexOf(g.gpadType) + 1) % cycle.length]
       }
       if (g.devMode && k === "v") g.isMobile = !g.isMobile
+      if (g.devMode && k === "y" && !g.isMobile) {
+        // Abrir/cerrar mapa realista miniaturizado
+        g.showRealMap = !g.showRealMap
+        if (g.showRealMap) {
+          // Al abrir, mostrar el mundo donde está el jugador
+          g.realMapWorld = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW))))
+        }
+      }
       if (g.devMode && k === "h") {
         g.showDevMap = !g.showDevMap
         g.paused = g.showDevMap
@@ -7032,6 +7213,11 @@ export default function ProyectoLuly() {
   const dpadTapRef = useRef({ left: 0, right: 0 })      // para doble-tap → run
   const devHoverRef = useRef<{ w: number; c: number; r: number } | null>(null)
   const pauseSwipeY = useRef(0)   // Y inicial del toque en el indicador de swipe (pausa)
+
+  // ── Función de dibujo del RealMapDev (estable: lee G.current/sprs.current en cada frame) ──
+  const realMapDrawFn = useCallback((ctx: CanvasRenderingContext2D) => {
+    drawRealMapDev(ctx, G.current, sprs.current)
+  }, [])
 
   // ── Helpers cross-browser para fullscreen ──────────────────────────────
   const isIOS = typeof window !== "undefined" && (
@@ -7224,7 +7410,7 @@ export default function ProyectoLuly() {
         if (edgeDown(pad, GP.A)) {
           const sel = pauseSelRef.current
           if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
-          else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false }); setScreen("start"); gameActiveRef.current = false }
+          else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false, showRealMap: false }); setScreen("start"); gameActiveRef.current = false }
         }
         if (edgeDown(pad, GP.B)) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
       }
@@ -7234,7 +7420,7 @@ export default function ProyectoLuly() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, ui.paused, ui.showDevMap, ui.showMap, hasSave, showSettings])
 
-  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false }) }
+  const reset = () => { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false, showRealMap: false }) }
 
   const handlePlay = () => {
     gameActiveRef.current = true
@@ -7256,7 +7442,7 @@ export default function ProyectoLuly() {
       applyLoad(G.current, save)
       setHasSave(true)
     }
-    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false })
+    setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false, showRealMap: false })
     setScreen("playing")
     gameActiveRef.current = true
     if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement)
@@ -8324,6 +8510,11 @@ export default function ProyectoLuly() {
           <div className="absolute top-1 left-2 text-xs opacity-80">
             <span style={{ color: "#D4C400" }} title="Control Xbox detectado">🎮</span>
           </div>
+        )}
+
+        {/* ── RealMap DEV — solo devMode/PC, toggle con N ── */}
+        {screen === "playing" && ui.devMode && !G.current.isMobile && (
+          <RealMapDev visible={ui.showRealMap} drawFn={realMapDrawFn} />
         )}
 
         {/* ── Gamepad táctil ── */}
