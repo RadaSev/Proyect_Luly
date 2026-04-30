@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.3"
+const GAME_VERSION = "0.1.4"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -7615,65 +7615,39 @@ export default function ProyectoLuly() {
     return (
       <>
         {/* ══════════════════════════════════════════════════
-            SISTEMA — MAP · TELE · PAUSA en fila centrada
-            en la parte inferior, entre el D-pad y el diamante
+            MAP — esquina superior derecha, icono solo
         ══════════════════════════════════════════════════ */}
-        <div style={{
-          position: "absolute",
-          bottom: SAFE_B,
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 8,
-          pointerEvents: "none",
-        }}>
-          {/* MAP */}
+        <div
+          style={{ ...SYS_BTN, top: 10, right: "3%", width: 40, height: 40, borderRadius: 10, zIndex: 25 }}
+          {...makeTouch(() => {
+            g.showMap = !g.showMap; g.paused = g.showMap
+            if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW-1, Math.floor(g.pl.x/(NC*RW)))); g.mapView = "single" }
+          }, () => {})}
+        >
+          <svg width="18" height="18" viewBox="0 0 14 14" style={{ opacity: 0.80 }}>
+            <rect x="1" y="3" width="4" height="8" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+            <rect x="5" y="1" width="4" height="10" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+            <rect x="9" y="4" width="4" height="7" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+          </svg>
+        </div>
+
+        {/* TELE — centro-inferior, solo cuando hay ≥2 CPs y la jugadora está cerca */}
+        {g.discoveredCPs.size >= 2 && nearAnyCP && (
           <div
-            style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 11, gap: 4, pointerEvents: "auto" }}
+            style={{ ...SYS_BTN, bottom: SAFE_B, left: "50%", transform: "translateX(-50%)",
+                     width: 66, height: 32, fontSize: 10, gap: 3, borderColor: "#D4C40066", zIndex: 25 }}
             {...makeTouch(() => {
-              g.showMap = !g.showMap; g.paused = g.showMap
-              if (g.showMap) { g.mapViewWorld = Math.max(0, Math.min(NW-1, Math.floor(g.pl.x/(NC*RW)))); g.mapView = "single" }
+              if (g.tpMenu?.open) g.tpMenu = null
+              else tpOpenMenu(g)
             }, () => {})}
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" style={{ opacity: 0.75 }}>
-              <rect x="1" y="3" width="4" height="8" fill="none" stroke="currentColor" strokeWidth="1.3"/>
-              <rect x="5" y="1" width="4" height="10" fill="none" stroke="currentColor" strokeWidth="1.3"/>
-              <rect x="9" y="4" width="4" height="7" fill="none" stroke="currentColor" strokeWidth="1.3"/>
+            <svg width="12" height="12" viewBox="0 0 12 12" style={{ opacity: 0.85 }}>
+              <circle cx="6" cy="6" r="4.5" fill="none" stroke="#D4C400" strokeWidth="1.2"/>
+              <path d="M6 2 L8 6 L6 5 L6 10 L4 6 L6 7 Z" fill="#D4C400" opacity="0.9"/>
             </svg>
-            MAPA
+            <span style={{ color: "#D4C400CC" }}>TELE</span>
           </div>
-
-          {/* TELE (solo cuando hay ≥2 CPs Y la jugadora está cerca de uno) */}
-          {g.discoveredCPs.size >= 2 && nearAnyCP && (
-            <div
-              style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 10, gap: 3, borderColor: "#D4C40066", pointerEvents: "auto" }}
-              {...makeTouch(() => {
-                if (g.tpMenu?.open) g.tpMenu = null
-                else tpOpenMenu(g)
-              }, () => {})}
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" style={{ opacity: 0.85 }}>
-                <circle cx="6" cy="6" r="4.5" fill="none" stroke="#D4C400" strokeWidth="1.2"/>
-                <path d="M6 2 L8 6 L6 5 L6 10 L4 6 L6 7 Z" fill="#D4C400" opacity="0.9"/>
-              </svg>
-              <span style={{ color: "#D4C400CC" }}>TELE</span>
-            </div>
-          )}
-
-          {/* PAUSA */}
-          <div
-            style={{ ...SYS_BTN, position: "relative", width: 66, height: 32, fontSize: 11, gap: 4, pointerEvents: "auto" }}
-            {...makeTouch(() => { g.paused = !g.paused }, () => {})}
-          >
-            <svg width="13" height="14" viewBox="0 0 13 14" style={{ opacity: 0.75 }}>
-              <rect x="1" y="1" width="4" height="12" rx="1" fill="currentColor"/>
-              <rect x="8" y="1" width="4" height="12" rx="1" fill="currentColor"/>
-            </svg>
-            PAUSA
-          </div>
-        </div>
+        )}
 
         {/* ══════════════════════════════════════════════════
             HOMBROS — solo cuando la habilidad existe.
@@ -8043,6 +8017,23 @@ export default function ProyectoLuly() {
               g.tpMenu?.open ? "CONFIRMAR" : "SALTAR",
               () => { if (g.tpMenu?.open) confirmTP(); else pressKey(" ") },
               () => { if (!g.tpMenu?.open) releaseKey(" ") })}
+          </div>
+          {/* PAUSA — esquina inferior-derecha del panel, icono solo */}
+          <div
+            style={{
+              position: "absolute", right: 0, bottom: 0,
+              width: Math.round(ACT_H * 0.20), height: Math.round(ACT_H * 0.20),
+              borderRadius: "50%",
+              background: "rgba(20,20,20,0.82)", border: "1.5px solid rgba(255,255,255,0.18)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", userSelect: "none", touchAction: "none", zIndex: 25,
+            }}
+            {...makeTouch(() => { g.paused = !g.paused }, () => {})}
+          >
+            <svg width="12" height="13" viewBox="0 0 13 14" style={{ opacity: 0.70 }}>
+              <rect x="1" y="1" width="4" height="12" rx="1" fill="currentColor"/>
+              <rect x="8" y="1" width="4" height="12" rx="1" fill="currentColor"/>
+            </svg>
           </div>
         </div>
 
