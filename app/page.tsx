@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.1"
+const GAME_VERSION = "0.0.2"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -7776,12 +7776,45 @@ export default function ProyectoLuly() {
           {dArrow("down",  {left:ARM, top:ARM+HUB, width:HUB, height:ARM},
             () => { if (g.tpMenu?.open) navTP(1);  else pressKey("arrowdown") },
             () => { if (!g.tpMenu?.open) releaseKey("arrowdown") })}
-          {dArrow("left",  {left:0,   top:ARM,     width:ARM, height:HUB},
-            () => { if (g.tpMenu?.open) navTPWorld(-1); else dpadDown("left","arrowleft") },
-            () => { if (!g.tpMenu?.open) releaseKey("arrowleft") })}
-          {dArrow("right", {left:ARM+HUB, top:ARM, width:ARM, height:HUB},
-            () => { if (g.tpMenu?.open) navTPWorld(1); else dpadDown("right","arrowright") },
-            () => { if (!g.tpMenu?.open) releaseKey("arrowright") })}
+          {/* Zona horizontal unificada — soporta arrastrar el dedo para cambiar dirección */}
+          <div
+            style={{
+              position: "absolute", left: 0, top: ARM, width: TOTAL, height: HUB,
+              cursor: "pointer", userSelect: "none", touchAction: "none", zIndex: 11,
+            }}
+            onPointerDown={(e) => {
+              e.preventDefault()
+              try { e.currentTarget.setPointerCapture(e.pointerId) } catch (_) {}
+              const rect = e.currentTarget.getBoundingClientRect()
+              const x = e.clientX - rect.left
+              if (g.tpMenu?.open) { if (x < TOTAL / 2) navTPWorld(-1); else navTPWorld(1); return }
+              if (x < TOTAL / 2) { dpadDown("left", "arrowleft"); releaseKey("arrowright") }
+              else { dpadDown("right", "arrowright"); releaseKey("arrowleft") }
+            }}
+            onPointerMove={(e) => {
+              if (!(e.buttons & 1)) return
+              if (g.tpMenu?.open) return
+              const rect = e.currentTarget.getBoundingClientRect()
+              const x = e.clientX - rect.left
+              if (x < TOTAL / 2) {
+                if (!G.current.keys["arrowleft"]) { releaseKey("arrowright"); pressKey("arrowleft") }
+              } else {
+                if (!G.current.keys["arrowright"]) { releaseKey("arrowleft"); pressKey("arrowright") }
+              }
+            }}
+            onPointerUp={(e) => { e.preventDefault(); releaseKey("arrowleft"); releaseKey("arrowright") }}
+            onPointerCancel={() => { releaseKey("arrowleft"); releaseKey("arrowright") }}
+          />
+          {/* Flecha izquierda (decorativa, sin eventos) */}
+          <div style={{ position:"absolute", left:0, top:ARM, width:ARM, height:HUB,
+            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+            <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
+          </div>
+          {/* Flecha derecha (decorativa, sin eventos) */}
+          <div style={{ position:"absolute", left:ARM+HUB, top:ARM, width:ARM, height:HUB,
+            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+            <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
+          </div>
         </div>
 
         {/* Hint doble-tap debajo del D-pad */}
