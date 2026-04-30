@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.4"
+const GAME_VERSION = "0.0.7"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1343,7 +1343,7 @@ function mkG_lazy(): G {
     ultraBossRexSeen: false,
     rexPhoneNotif: null,
     gpadType: "keyboard",
-    isMobile: false,
+    isMobile: typeof window !== "undefined" && (window.innerWidth < 900 || navigator.maxTouchPoints > 0),
     mapView: "single",
     mapViewWorld: 0,
   } as G
@@ -3008,7 +3008,7 @@ function activateWorld(g: G, newWorld: number) {
 
 function tickCamera(g: G) {
   const p = g.pl
-  const sc = g.mobileZoom === "close" ? 1.25 : 1.0
+  const sc = g.mobileZoom === "close" ? 1.35 : 1.0
   const vpW = CW / sc, vpH = CH / sc
   const activeW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const minCX = activeW * NC * RW
@@ -6094,7 +6094,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
   if (g.showMap) { drawFullMap(ctx, g, sprs); return }
   // ── Zoom móvil + screen shake (solo afectan al mundo, no al HUD) ────
-  const sc = g.mobileZoom === "close" ? 1.25 : 1.0
+  const sc = g.mobileZoom === "close" ? 1.35 : 1.0
   const hasShake = g.shakeX !== 0 || g.shakeY !== 0
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
@@ -6179,7 +6179,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     // Círculo de stamina junto al personaje (screen-space)
     ctx.save()
     ctx.globalAlpha = g.staCircleAlpha
-    const _sc = g.mobileZoom === "close" ? 1.25 : 1.0
+    const _sc = g.mobileZoom === "close" ? 1.35 : 1.0
     const scx = (p.x - g.cx + PW / 2) * _sc      // centro X en pantalla (ajustado al zoom)
     const scy = (p.y - g.cy - 20) * _sc           // justo encima del personaje
     const rad = 13, lw = 3.5
@@ -6380,7 +6380,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     // Posición sobre Luly
     const plSx = g.pl.x - g.cx + PW / 2
     const plSy = g.pl.y - g.cy
-    const sc = g.mobileZoom === "close" ? 1.25 : 1.0
+    const sc = g.mobileZoom === "close" ? 1.35 : 1.0
     const bx2 = Math.max(4, Math.min(CW / sc - bw - 4, plSx / sc - bw / 2))
     const by2 = Math.max(4, plSy / sc - bh - 36)
     // Fondo cian oscuro (teléfono)
@@ -6632,6 +6632,7 @@ export default function ProyectoLuly() {
   }, [])
   const [jstickThumb, setJstickThumb] = useState({ x: 0, y: 0 })
   const jstickBaseRef = useRef({ cx: 0, cy: 0 })  // centro del joystick en coords de pantalla
+  const [runActive, setRunActive] = useState(false)  // estado visual del botón RUN (joystick mode)
   const [gpadType, setGpadType] = useState<GpadType>("keyboard")  // tipo de mando detectado
   const menuSelRef = useRef(0)
   const pauseSelRef = useRef(0)
@@ -7870,17 +7871,13 @@ export default function ProyectoLuly() {
             const dist = Math.sqrt(rawOx * rawOx + rawOy * rawOy)
             const scale = dist > JBASE ? JBASE / dist : 1
             const ox = rawOx * scale, oy = rawOy * scale
+            // El thumb sigue el dedo en 2D visualmente, pero solo controla el eje horizontal
             setJstickThumb({ x: ox, y: oy })
-            // Horizontal
+            // Solo horizontal — el salto se hace con el botón A
             if (Math.abs(ox) > DEAD) {
               if (ox < 0) { releaseKey("arrowright"); if (!G.current.keys["arrowleft"])  pressKey("arrowleft") }
               else        { releaseKey("arrowleft");  if (!G.current.keys["arrowright"]) pressKey("arrowright") }
             } else { releaseKey("arrowleft"); releaseKey("arrowright") }
-            // Vertical
-            if (Math.abs(oy) > DEAD) {
-              if (oy < 0) { releaseKey("arrowdown"); if (!G.current.keys["arrowup"])   pressKey("arrowup") }
-              else        { releaseKey("arrowup");   if (!G.current.keys["arrowdown"]) pressKey("arrowdown") }
-            } else { releaseKey("arrowup"); releaseKey("arrowdown") }
           }
 
           return (
@@ -7928,6 +7925,7 @@ export default function ProyectoLuly() {
                 }}
                 onPointerUp={releaseJoy}
                 onPointerCancel={releaseJoy}
+                onLostPointerCapture={releaseJoy}
               />
             </div>
           )
@@ -7957,6 +7955,23 @@ export default function ProyectoLuly() {
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.X, "X", "DISPARO",
               ()=>pressKey("n"), ()=>releaseKey("n"))}
           </div>
+          {/* RUN — debajo de X, solo en modo joystick (toggle correr) */}
+          {dpadMode === "joystick" && (
+            <div style={{ position:"absolute", left:0, bottom:"4%", transform:"none" }}>
+              {xbCircle(
+                Math.round(ACT_H * 0.27),
+                runActive ? "#2A7A3A" : "#4A4A4A",
+                "R",
+                "RUN",
+                () => {
+                  const next = !G.current.pl.runMode
+                  G.current.pl.runMode = next
+                  setRunActive(next)
+                },
+                () => {}
+              )}
+            </div>
+          )}
           {/* B — derecha (checkpoint / siguiente diálogo / cerrar tpMenu) */}
           <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-55%)" }}>
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
