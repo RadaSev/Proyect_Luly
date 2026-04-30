@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.7"
+const GAME_VERSION = "0.1.8"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1357,6 +1357,7 @@ let _apLoadedKey = ""  // string de mundos cargados para invalidar cache
 
 function activePlats(g: G): WPlat[] {
   const key = [...g.loadedWorlds].sort().join(",") + "|" + g.cw.size + "|" + g.dead.size
+    + "|" + (g.p1BossRexSeen ? 1 : 0) + (g.p2BossRexSeen ? 1 : 0) + (g.ultraBossRexSeen ? 1 : 0)
   if (_apCache2 && _apLoadedKey === key) return _apCache2
 
   const allPlats: WPlat[] = []
