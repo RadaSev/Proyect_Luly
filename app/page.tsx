@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.5"
+const GAME_VERSION = "0.1.6"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -6643,7 +6643,8 @@ export default function ProyectoLuly() {
   }, [])
   const [jstickThumb, setJstickThumb] = useState({ x: 0, y: 0 })
   const jstickBaseRef = useRef({ cx: 0, cy: 0 })  // centro del joystick en coords de pantalla
-  const [runActive, setRunActive] = useState(false)  // estado visual del botón RUN (joystick mode)
+  // Detección de doble-flick lateral para correr (análogo al doble-tap de teclado)
+  const joyTapRef = useRef({ left: 0, right: 0, wasLeft: false, wasRight: false })
   const [gpadType, setGpadType] = useState<GpadType>("keyboard")  // tipo de mando detectado
   const menuSelRef = useRef(0)
   const pauseSelRef = useRef(0)
@@ -7851,16 +7852,44 @@ export default function ProyectoLuly() {
             releaseKey("arrowleft"); releaseKey("arrowright")
             releaseKey("arrowup");   releaseKey("arrowdown")
             setJstickThumb({ x: 0, y: 0 })
+            joyTapRef.current.wasLeft  = false
+            joyTapRef.current.wasRight = false
           }
           const applyJoy = (rawOx: number, rawOy: number) => {
             const dist = Math.sqrt(rawOx * rawOx + rawOy * rawOy)
             const scale = dist > JBASE ? JBASE / dist : 1
             const ox = rawOx * scale, oy = rawOy * scale
             setJstickThumb({ x: ox, y: oy })
+            const TAP_WIN = 300
             if (Math.abs(ox) > DEAD) {
-              if (ox < 0) { releaseKey("arrowright"); if (!G.current.keys["arrowleft"])  pressKey("arrowleft") }
-              else        { releaseKey("arrowleft");  if (!G.current.keys["arrowright"]) pressKey("arrowright") }
-            } else { releaseKey("arrowleft"); releaseKey("arrowright") }
+              if (ox < 0) {
+                if (!joyTapRef.current.wasLeft) {
+                  // Acaba de entrar en zona izquierda → registrar instante
+                  const now = performance.now()
+                  if (joyTapRef.current.left > 0 && now - joyTapRef.current.left < TAP_WIN)
+                    G.current.pl.runMode = true   // doble-flick izquierda → correr
+                  joyTapRef.current.left = now
+                  joyTapRef.current.wasLeft  = true
+                  joyTapRef.current.wasRight = false
+                }
+                releaseKey("arrowright"); if (!G.current.keys["arrowleft"])  pressKey("arrowleft")
+              } else {
+                if (!joyTapRef.current.wasRight) {
+                  // Acaba de entrar en zona derecha → registrar instante
+                  const now = performance.now()
+                  if (joyTapRef.current.right > 0 && now - joyTapRef.current.right < TAP_WIN)
+                    G.current.pl.runMode = true   // doble-flick derecha → correr
+                  joyTapRef.current.right = now
+                  joyTapRef.current.wasRight = true
+                  joyTapRef.current.wasLeft  = false
+                }
+                releaseKey("arrowleft"); if (!G.current.keys["arrowright"]) pressKey("arrowright")
+              }
+            } else {
+              releaseKey("arrowleft"); releaseKey("arrowright")
+              joyTapRef.current.wasLeft  = false
+              joyTapRef.current.wasRight = false
+            }
           }
 
           // ── Si el menú TP está abierto → D-cross de navegación TP ────────────
@@ -8037,26 +8066,6 @@ export default function ProyectoLuly() {
           </div>
         </div>
 
-        {/* RUN — fuera del diamante, alineado bajo X, separado de A y X */}
-        {dpadMode === "joystick" && !ui.tpMenuOpen && (
-          <div style={{
-            position: "absolute",
-            // Alineado horizontalmente con el centro de X (borde izq. del diamante + radio de X)
-            right: `calc(3% + ${Math.round(ACT_H * 0.725)}px)`,
-            // Verticalmente: entre X y el borde inferior, con margen suficiente respecto a A
-            bottom: ACT_B + Math.round(ACT_H * 0.09),
-            zIndex: 21,
-          }}>
-            {xbCircle(
-              Math.round(ACT_H * 0.22),
-              runActive ? "#2A7A3A" : "#4A4A4A",
-              "R",
-              "RUN",
-              () => { G.current.pl.runMode = true;  setRunActive(true)  },
-              () => { G.current.pl.runMode = false; setRunActive(false) }
-            )}
-          </div>
-        )}
       </>
     )
   }
