@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.0.3"
+const GAME_VERSION = "0.0.4"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -6625,6 +6625,13 @@ export default function ProyectoLuly() {
   const [pauseSel, setPauseSel] = useState(0)        // ítem seleccionado en menú pausa
   const [showSettings, setShowSettings] = useState(false)  // overlay de configuración
   const [deleteConfirm, setDeleteConfirm] = useState(false) // doble confirmación borrar partida
+  // ── DEV-CELULAR: variante de D-PAD para pruebas en móvil ────────
+  const [dpadMode, setDpadMode] = useState<"cross"|"joystick">("cross")
+  useEffect(() => {
+    try { const v = localStorage.getItem("luly_dev_dpad"); if (v === "joystick") setDpadMode("joystick") } catch(_) {}
+  }, [])
+  const [jstickThumb, setJstickThumb] = useState({ x: 0, y: 0 })
+  const jstickBaseRef = useRef({ cx: 0, cy: 0 })  // centro del joystick en coords de pantalla
   const [gpadType, setGpadType] = useState<GpadType>("keyboard")  // tipo de mando detectado
   const menuSelRef = useRef(0)
   const pauseSelRef = useRef(0)
@@ -7746,11 +7753,15 @@ export default function ProyectoLuly() {
             IZQUIERDA — D-CROSS estilo Xbox
             bottom exacto, sin offset vertical falso
         ══════════════════════════════════════════════════ */}
+        {/* ══ D-PAD IZQUIERDO — modo según dpadMode (DEV-CELULAR) ══ */}
+
+        {/* ── MODO CROSS (default) ── */}
+        {dpadMode === "cross" && (<>
         <div style={{
           position: "absolute",
           bottom: DPAD_B,
           left: "15%",
-          transform: "translateX(-50%)",   // ← solo centra en X, NO mueve en Y
+          transform: "translateX(-50%)",
           width: TOTAL, height: TOTAL,
           touchAction: "none", zIndex: 20,
         }}>
@@ -7761,28 +7772,22 @@ export default function ProyectoLuly() {
             clipPath: `polygon(${ARM}px 0,${ARM+HUB}px 0,${ARM+HUB}px ${ARM}px,${TOTAL}px ${ARM}px,${TOTAL}px ${ARM+HUB}px,${ARM+HUB}px ${ARM+HUB}px,${ARM+HUB}px ${TOTAL}px,${ARM}px ${TOTAL}px,${ARM}px ${ARM+HUB}px,0 ${ARM+HUB}px,0 ${ARM}px,${ARM}px ${ARM}px)`,
             boxShadow: "0 6px 20px rgba(0,0,0,0.75)",
           }}/>
-          {/* Contorno SVG */}
           <svg style={{ position:"absolute",inset:0,overflow:"visible",pointerEvents:"none" }} width={TOTAL} height={TOTAL}>
             <path d={`M${ARM} 0 H${ARM+HUB} V${ARM} H${TOTAL} V${ARM+HUB} H${ARM+HUB} V${TOTAL} H${ARM} V${ARM+HUB} H0 V${ARM} H${ARM} Z`}
               fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="1.5"/>
           </svg>
-          {/* Hub central decorativo */}
           <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
             background:"#252525", border:"1px solid rgba(255,255,255,0.09)", pointerEvents:"none"}}/>
-          {/* ── Overlay único TOTAL×TOTAL — maneja las 4 direcciones sin pointer capture ── */}
+          {/* Overlay único TOTAL×TOTAL — sin pointer capture → onPointerLeave siempre dispara */}
           {(() => {
-            // Sin setPointerCapture → onPointerLeave dispara al salir → teclas liberadas siempre
             const releaseAll = () => {
               releaseKey("arrowleft"); releaseKey("arrowright")
               releaseKey("arrowup");   releaseKey("arrowdown")
             }
-            // Detecta en qué brazo del cross está el dedo
-            // Prioridad horizontal: si y está en la banda horizontal devuelve left/right
-            // Las esquinas (fuera del cross) devuelven null
             const getDir = (x: number, y: number): "left"|"right"|"up"|"down"|null => {
               const inH = y >= ARM && y <= ARM + HUB
               const inV = x >= ARM && x <= ARM + HUB
-              if (!inH && !inV) return null          // esquina — fuera de la cruz
+              if (!inH && !inV) return null
               if (inH) return x < TOTAL / 2 ? "left" : "right"
               return y < TOTAL / 2 ? "up" : "down"
             }
@@ -7799,10 +7804,8 @@ export default function ProyectoLuly() {
             }
             return (
               <div
-                style={{
-                  position: "absolute", left: 0, top: 0, width: TOTAL, height: TOTAL,
-                  cursor: "pointer", userSelect: "none", touchAction: "none", zIndex: 12,
-                }}
+                style={{ position:"absolute", left:0, top:0, width:TOTAL, height:TOTAL,
+                  cursor:"pointer", userSelect:"none", touchAction:"none", zIndex:12 }}
                 onPointerDown={(e) => {
                   e.preventDefault()
                   const rect = e.currentTarget.getBoundingClientRect()
@@ -7810,10 +7813,8 @@ export default function ProyectoLuly() {
                   const dir = getDir(x, y)
                   if (!dir) return
                   if (g.tpMenu?.open) {
-                    if (dir === "left")  navTPWorld(-1)
-                    else if (dir === "right") navTPWorld(1)
-                    else if (dir === "up")    navTP(-1)
-                    else if (dir === "down")  navTP(1)
+                    if (dir === "left") navTPWorld(-1); else if (dir === "right") navTPWorld(1)
+                    else if (dir === "up") navTP(-1);  else if (dir === "down")  navTP(1)
                     return
                   }
                   applyDir(dir, true)
@@ -7823,44 +7824,114 @@ export default function ProyectoLuly() {
                   const rect = e.currentTarget.getBoundingClientRect()
                   const x = e.clientX - rect.left, y = e.clientY - rect.top
                   const dir = getDir(x, y)
-                  if (!dir) { releaseAll(); return }   // dedo en esquina → soltar todo
+                  if (!dir) { releaseAll(); return }
                   if (g.tpMenu?.open) return
                   applyDir(dir, false)
                 }}
                 onPointerUp={releaseAll}
-                onPointerLeave={releaseAll}            // ← clave: sin capture, esto SIEMPRE dispara
+                onPointerLeave={releaseAll}
                 onPointerCancel={releaseAll}
               />
             )
           })()}
-          {/* Flechas decorativas (sin eventos de puntero) */}
-          <div style={{ position:"absolute", left:ARM, top:0, width:HUB, height:ARM,
-            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+          {/* Flechas decorativas */}
+          <div style={{ position:"absolute",left:ARM,top:0,width:HUB,height:ARM,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
             <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 2 L16 12 L2 12 Z" fill="rgba(255,255,255,0.65)"/></svg>
           </div>
-          <div style={{ position:"absolute", left:ARM, top:ARM+HUB, width:HUB, height:ARM,
-            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+          <div style={{ position:"absolute",left:ARM,top:ARM+HUB,width:HUB,height:ARM,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
             <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 12 L16 2 L2 2 Z" fill="rgba(255,255,255,0.65)"/></svg>
           </div>
-          <div style={{ position:"absolute", left:0, top:ARM, width:ARM, height:HUB,
-            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+          <div style={{ position:"absolute",left:0,top:ARM,width:ARM,height:HUB,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
             <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
           </div>
-          <div style={{ position:"absolute", left:ARM+HUB, top:ARM, width:ARM, height:HUB,
-            display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+          <div style={{ position:"absolute",left:ARM+HUB,top:ARM,width:ARM,height:HUB,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
             <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(255,255,255,0.65)"/></svg>
           </div>
         </div>
+        {/* Hint doble-tap */}
+        <div style={{ position:"absolute", bottom:Math.max(4,DPAD_B-14), left:"15%", transform:"translateX(-50%)",
+          fontSize:7, color:"rgba(255,255,255,0.2)", letterSpacing:"0.15em",
+          fontFamily:"'Courier New',monospace", pointerEvents:"none", zIndex:20 }}>2× ← / → = RUN</div>
+        </>)}
 
-        {/* Hint doble-tap debajo del D-pad */}
-        <div style={{
-          position: "absolute",
-          bottom: Math.max(4, DPAD_B - 14),
-          left: "15%", transform: "translateX(-50%)",
-          fontSize: 7, color: "rgba(255,255,255,0.2)",
-          letterSpacing: "0.15em", fontFamily: "'Courier New',monospace",
-          pointerEvents: "none", zIndex: 20,
-        }}>2× ← / → = RUN</div>
+        {/* ── MODO JOYSTICK (DEV) — pointer capture: sigue el dedo a donde vaya ── */}
+        {dpadMode === "joystick" && (() => {
+          const JBASE  = Math.round(Math.max(52, Math.min(72, vh * 0.155)))  // radio base
+          const JTHUMB = Math.round(JBASE * 0.40)                             // radio thumb
+          const JDIAM  = JBASE * 2
+          const DEAD   = JBASE * 0.18                                         // zona muerta
+
+          const releaseJoy = () => {
+            releaseKey("arrowleft"); releaseKey("arrowright")
+            releaseKey("arrowup");   releaseKey("arrowdown")
+            setJstickThumb({ x: 0, y: 0 })
+          }
+          const applyJoy = (rawOx: number, rawOy: number) => {
+            const dist = Math.sqrt(rawOx * rawOx + rawOy * rawOy)
+            const scale = dist > JBASE ? JBASE / dist : 1
+            const ox = rawOx * scale, oy = rawOy * scale
+            setJstickThumb({ x: ox, y: oy })
+            // Horizontal
+            if (Math.abs(ox) > DEAD) {
+              if (ox < 0) { releaseKey("arrowright"); if (!G.current.keys["arrowleft"])  pressKey("arrowleft") }
+              else        { releaseKey("arrowleft");  if (!G.current.keys["arrowright"]) pressKey("arrowright") }
+            } else { releaseKey("arrowleft"); releaseKey("arrowright") }
+            // Vertical
+            if (Math.abs(oy) > DEAD) {
+              if (oy < 0) { releaseKey("arrowdown"); if (!G.current.keys["arrowup"])   pressKey("arrowup") }
+              else        { releaseKey("arrowup");   if (!G.current.keys["arrowdown"]) pressKey("arrowdown") }
+            } else { releaseKey("arrowup"); releaseKey("arrowdown") }
+          }
+
+          return (
+            <div style={{ position:"absolute", bottom:DPAD_B, left:"15%", transform:"translateX(-50%)",
+              width:JDIAM, height:JDIAM, touchAction:"none", zIndex:20 }}>
+              {/* Base */}
+              <div style={{ position:"absolute", inset:0, borderRadius:"50%",
+                background:"linear-gradient(145deg,#333 0%,#1C1C1C 100%)",
+                border:"1.5px solid rgba(255,255,255,0.16)",
+                boxShadow:"0 6px 20px rgba(0,0,0,0.75)" }}/>
+              {/* Anillo guía */}
+              <svg style={{ position:"absolute",inset:0,pointerEvents:"none" }} width={JDIAM} height={JDIAM}>
+                <circle cx={JBASE} cy={JBASE} r={JBASE*0.62}
+                  fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="1" strokeDasharray="5 5"/>
+                {/* Cruces de referencia */}
+                <line x1={JBASE} y1={JBASE-JBASE*0.55} x2={JBASE} y2={JBASE+JBASE*0.55} stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
+                <line x1={JBASE-JBASE*0.55} y1={JBASE} x2={JBASE+JBASE*0.55} y2={JBASE} stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
+              </svg>
+              {/* Thumb — sigue el dedo (posición relativa al centro de la base) */}
+              <div style={{
+                position:"absolute",
+                left: JBASE - JTHUMB + jstickThumb.x,
+                top:  JBASE - JTHUMB + jstickThumb.y,
+                width:JTHUMB*2, height:JTHUMB*2, borderRadius:"50%",
+                background:"radial-gradient(circle at 38% 32%, rgba(255,255,255,0.55), rgba(200,200,200,0.18))",
+                border:"2px solid rgba(255,255,255,0.40)",
+                boxShadow:"0 3px 10px rgba(0,0,0,0.55)",
+                pointerEvents:"none",
+                transition: jstickThumb.x === 0 && jstickThumb.y === 0 ? "left 0.12s,top 0.12s" : "none",
+              }}/>
+              {/* Capa interactiva — con setPointerCapture para seguir el dedo a donde vaya */}
+              <div
+                style={{ position:"absolute", inset:0, borderRadius:"50%",
+                  cursor:"pointer", touchAction:"none" }}
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  try { e.currentTarget.setPointerCapture(e.pointerId) } catch(_) {}
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  jstickBaseRef.current = { cx: rect.left + JBASE, cy: rect.top + JBASE }
+                  applyJoy(e.clientX - jstickBaseRef.current.cx, e.clientY - jstickBaseRef.current.cy)
+                }}
+                onPointerMove={(e) => {
+                  if (!(e.buttons & 1)) return
+                  applyJoy(e.clientX - jstickBaseRef.current.cx, e.clientY - jstickBaseRef.current.cy)
+                }}
+                onPointerUp={releaseJoy}
+                onPointerCancel={releaseJoy}
+              />
+            </div>
+          )
+        })()}
 
         {/* ══════════════════════════════════════════════════
             DERECHA — DIAMANTE A / B / X / Y estilo Xbox
@@ -8414,6 +8485,36 @@ export default function ProyectoLuly() {
                   </div>
                 )}
               </div>
+
+              {/* ── DEV — CELULAR (solo en dispositivos táctiles) ── */}
+              {isTouchDevice && (
+                <div style={{ padding: "14px 20px 10px", borderTop: "1px solid #1A2A1A" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                    <span style={{ fontSize:9, color:"#AA8800", letterSpacing:"0.3em" }}>DEV — CELULAR</span>
+                    <span style={{ fontSize:8, color:"#554400", letterSpacing:"0.1em" }}>(solo para pruebas)</span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <span style={{ fontSize:11, color:"#7A9A7A", flex:1 }}>Tipo de D-PAD</span>
+                    <div style={{ display:"flex", gap:6 }}>
+                      {(["cross","joystick"] as const).map(mode => (
+                        <button key={mode}
+                          onClick={() => {
+                            setDpadMode(mode)
+                            try { localStorage.setItem("luly_dev_dpad", mode) } catch(_) {}
+                          }}
+                          style={{
+                            padding:"4px 12px", fontFamily:"'Courier New',monospace", fontSize:10,
+                            background: dpadMode === mode ? "#1A2800" : "transparent",
+                            border:`1px solid ${dpadMode === mode ? "#AA8800" : "#2A4A2A"}`,
+                            color: dpadMode === mode ? "#D4C400" : "#4A6A4A",
+                            cursor:"pointer", borderRadius:4,
+                          }}
+                        >{mode === "cross" ? "D-CROSS" : "JOYSTICK"}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Footer */}
               <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center", gap: 12, borderTop: "1px solid #1A2A1A" }}>
