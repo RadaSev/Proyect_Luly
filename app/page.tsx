@@ -174,6 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
+const GAME_VERSION = "0.0.1"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1321,7 +1322,7 @@ function mkG_lazy(): G {
     tpAnim: null,
     staDisplay: "circle",
     staCircleAlpha: 0,
-    mobileZoom: "far",
+    mobileZoom: (typeof window !== "undefined" && window.innerWidth < 900) ? "close" : "far",
     overFade: 0,
     tBalls: [],
     tballAmmo: 0,
@@ -7990,8 +7991,8 @@ export default function ProyectoLuly() {
             </div>
 
             {/* Versión */}
-            <p style={{ position: "absolute", bottom: 14, right: 18, fontSize: 9, color: "#1E2E1E", zIndex: 2, fontFamily: "monospace" }}>
-              v2.0 — 4 mundos × 9×9 salas
+            <p style={{ position: "absolute", bottom: 14, left: 0, right: 0, textAlign: "center", fontSize: 10, color: "#ffffff", letterSpacing: "0.2em", zIndex: 2, fontFamily: "'Courier New',monospace" }}>
+              v{GAME_VERSION}
             </p>
           </div>
         )}
