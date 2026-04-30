@@ -106,6 +106,11 @@ type G = {
   tballUpgraded: boolean          // bastón entregado → rebote y munición mejorados
   rexBatonDeliveredSeen: boolean  // jugadora vio el diálogo post-bastón al menos una vez
   rexUltraDoneSeen: boolean       // jugadora vio el diálogo de ultra_done al menos una vez
+  // Boss-unlock: puerta de cada jefe se abre solo tras escuchar a Rex
+  p1BossRexSeen: boolean          // Rex explicó El Castigador → puerta P1 abierta
+  p2BossRexSeen: boolean          // Rex explicó El Herrero → puerta P2 abierta
+  ultraBossRexSeen: boolean       // Rex explicó El Torturado → puerta ultra abierta
+  rexPhoneNotif: { kind: "p1" | "p2" | "ultra"; timer: number } | null  // burbuja celular Luly
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
@@ -187,6 +192,9 @@ interface LulySave {
   tballUpgraded?: boolean
   rexBatonDeliveredSeen?: boolean
   rexUltraDoneSeen?: boolean
+  p1BossRexSeen?: boolean
+  p2BossRexSeen?: boolean
+  ultraBossRexSeen?: boolean
 }
 
 function saveGame(g: G): void {
@@ -208,6 +216,9 @@ function saveGame(g: G): void {
       tballUpgraded: g.tballUpgraded,
       rexBatonDeliveredSeen: g.rexBatonDeliveredSeen,
       rexUltraDoneSeen: g.rexUltraDoneSeen,
+      p1BossRexSeen: g.p1BossRexSeen,
+      p2BossRexSeen: g.p2BossRexSeen,
+      ultraBossRexSeen: g.ultraBossRexSeen,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -1326,6 +1337,10 @@ function mkG_lazy(): G {
     tballUpgraded: false,
     rexBatonDeliveredSeen: false,
     rexUltraDoneSeen: false,
+    p1BossRexSeen: false,
+    p2BossRexSeen: false,
+    ultraBossRexSeen: false,
+    rexPhoneNotif: null,
     gpadType: "keyboard",
     isMobile: false,
     mapView: "single",
@@ -1350,19 +1365,16 @@ function activePlats(g: G): WPlat[] {
     if (p.mode !== "d") return true
     if (p.sw === undefined) return true
     if (p.sw >= 400 && p.sw < 500) {
-      // puerta roja Jefe P2: sólida hasta que mueran todos los normales de Part2
-      const bossW = p.sw - 400
-      return !areRegularP2EnemiesDead(g, bossW)
+      // puerta roja Jefe P2: sólida hasta que Rex explique al Herrero
+      return !g.p2BossRexSeen
     }
     if (p.sw >= 300 && p.sw < 400) {
-      // puerta verde Jefe P1: sólida hasta que mueran todos los normales de Part1
-      const bossW = p.sw - 300
-      return !areRegularP1EnemiesDead(g, bossW)
+      // puerta verde Jefe P1: sólida hasta que Rex explique al Castigador
+      return !g.p1BossRexSeen
     }
     if (p.sw >= 200 && p.sw < 300) {
-      // puerta dorada ultra-boss: sólida hasta que mueran AMBOS jefes (P1 y P2)
-      const bossW = p.sw - 200
-      return !(isPart1BossDead(g, bossW) && isPart2BossDead(g, bossW))
+      // puerta dorada ultra-boss: sólida hasta que Rex explique al Torturado
+      return !g.ultraBossRexSeen
     }
     if (p.sw >= 100 && p.sw < 200) {
       // puerta cian: sólida hasta que muera el boss de la Part1
@@ -1536,6 +1548,17 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
       }
     }
   }
+  // ── Notificación de celular cuando el último enemigo de una sección muere ──
+  const ew = e.world ?? 0
+  if (!e.boss) {
+    if (areRegularP1EnemiesDead(g, ew) && !g.p1BossRexSeen && !g.rexPhoneNotif)
+      g.rexPhoneNotif = { kind: "p1", timer: 10.0 }
+    else if (areRegularP2EnemiesDead(g, ew) && !g.p2BossRexSeen && !g.rexPhoneNotif)
+      g.rexPhoneNotif = { kind: "p2", timer: 10.0 }
+  }
+  // Ultra: cuando AMBOS jefes están muertos (puede ser tras matar a p1 o a p2)
+  if (e.boss && isPart1BossDead(g, ew) && isPart2BossDead(g, ew) && !g.ultraBossRexSeen && !g.rexPhoneNotif)
+    g.rexPhoneNotif = { kind: "ultra", timer: 10.0 }
 }
 
 // Helper global para saber si un spawn está muerto (tolerante a adopciones)
@@ -2441,6 +2464,10 @@ function tickShake(g: G) {
     g.abilityNotif.timer -= STEP
     if (g.abilityNotif.timer <= 0) g.abilityNotif = null
   }
+  if (g.rexPhoneNotif && g.rexPhoneNotif.timer > 0) {
+    g.rexPhoneNotif.timer -= STEP
+    if (g.rexPhoneNotif.timer <= 0) g.rexPhoneNotif = null
+  }
   if (g.comboTimer > 0) {
     g.comboTimer -= STEP
     if (g.comboTimer <= 0) g.combo = 0
@@ -2949,6 +2976,10 @@ function applyLoad(g: G, s: LulySave): void {
   g.tballUpgraded          = s.tballUpgraded          ?? false
   g.rexBatonDeliveredSeen  = s.rexBatonDeliveredSeen  ?? false
   g.rexUltraDoneSeen       = s.rexUltraDoneSeen       ?? false
+  g.p1BossRexSeen          = s.p1BossRexSeen          ?? false
+  g.p2BossRexSeen          = s.p2BossRexSeen          ?? false
+  g.ultraBossRexSeen       = s.ultraBossRexSeen        ?? false
+  g.rexPhoneNotif          = null
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
     // Ubicar llave cerca de donde está la jaula (pickup secundario de emergencia)
@@ -3805,7 +3836,9 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const { cx, cy } = g
   const nx = VIEJO_DOG_POS.x - cx
   const ny = VIEJO_DOG_POS.y - cy
-  if (nx < -120 || nx > CW + 120 || ny < -180 || ny > CH + 20) { _rexTypingActive = false; _rexWasInRange = false; return }
+  // Culling basado en la casa (HRX=bx-151, HRW=552, HRH=368, HRY=by-326)
+  // Solo salir si la casa entera queda fuera de pantalla
+  if (nx + 401 < 0 || nx - 151 > CW || ny + 42 < 0 || ny - 326 > CH) { _rexTypingActive = false; _rexWasInRange = false; return }
 
   // bx/by = centro X / pies del NPC en pantalla
   const bx = nx, by = ny
@@ -3937,11 +3970,12 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const bobY = Math.sin(t * 2.8) * 4
     // Burbuja pequeña de llamado
     const p1Dead = isPart1BossDead(g, 0)
+    const p2Dead = isPart2BossDead(g, 0)
     const allP1Clear = areRegularP1EnemiesDead(g, 0)
     const callText = g.viejoDogState === "intro"
-      ? "¡Hola! ¡Acércate, Luly!"
+      ? (g.rexIntroLeft ? "¡Ve por ellos, búscala! 🗝" : "¡Hola! ¡Acércate, Luly!")
       : (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done")
-      ? "¡Ve por la pelota!"
+      ? (g.abilities.has("tball") ? "¡Ya la huelo, la tienes! 🎾" : "¡Ve por la pelota!")
       : g.viejoDogState === "surprised"
       ? "¡Qué sorpresa!"
       : g.viejoDogState === "key_held"
@@ -3949,17 +3983,17 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       : g.viejoDogState === "key_dropped"
       ? "¡Recoge la media llave!"
       : g.viejoDogState === "ball_held"
-      ? (p1Dead ? "¡Lo venciste!!" : !g.rexBallFirstSeen ? "¡Lo sabía, Luly!" : "¡Sigue adelante!")
+      ? (p1Dead ? "¡Lo venciste!!" : allP1Clear ? "¡Ve por ese Castigador!" : !g.rexBallFirstSeen ? "¡Veo que la traes! Es antigua, pero es la mejor 🎾" : "¡Sigue adelante!")
       : g.viejoDogState === "ball_guide"
-      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : p1Dead ? "¡Lo venciste!!" : allP1Clear ? "¡Ya están todos!" : "¡Aún falta el jefe!")
+      ? (g.rexBatonHeld ? "¡Si, ahí está mi bastón! 🪄" : p1Dead ? "¡Lo venciste!!" : allP1Clear ? "¡Ve por ese Castigador!" : "¡Aún falta el jefe!")
       : (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")
-      ? (g.rexBatonHeld ? "¡Tienes mi bastón! 🪄" : "¡Muy bien hecho!")
+      ? (g.rexBatonHeld ? "¡Si, ahí está mi bastón! 🪄" : p2Dead ? "¿Y mi bastón? ¡Búscalo!" : "¡Muy bien hecho!")
       : g.viejoDogState === "baton_delivered"
       ? "¡Puedo caminar mejor!"
       : g.viejoDogState === "p2_warning"
-      ? "¡Ese Herrero caerá en tus brasas!"
+      ? (g.rexBatonHeld ? "¡Si, ahí está mi bastón! 🪄" : p2Dead ? "¿Y mi bastón? ¡Búscalo!" : "¡Ese Herrero caerá en tus brasas!")
       : g.viejoDogState === "ultra_hint"
-      ? "¡Recarga antes de enfrentarlo!"
+      ? (g.cw.has(0) ? "¡Luly, nos liberaste! 🎉" : "¡Recarga antes de enfrentarlo!")
       : g.viejoDogState === "ultra_done"
       ? "¡Luly, lo hiciste! 🎉"
       : g.viejoDogState === "world2_ready"
@@ -3989,6 +4023,7 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const kills = Math.max(0, countP1KillsW0(g.dead) - g.questKillBaseline)
   const allP1Clear_dlg = areRegularP1EnemiesDead(g, 0)
   const p1Dead_dlg = isPart1BossDead(g, 0)
+  const p2Dead_dlg = isPart2BossDead(g, 0)
 
   // Cada estado devuelve { pages, colors, headers } — pages = array de páginas (array de líneas)
   type DlgDef = { pages: string[][]; colors: string[]; headers: string[] }
@@ -3996,8 +4031,8 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
   if (g.viejoDogState === "intro") {
     dlg = {
-      headers: ["◈ ¡BIENVENIDO, LULY! ◈", "◈ PRIMERA MISIÓN ◈"],
-      colors:  ["#E8D8C0",               "#FFDD88"],
+      headers: ["◈ ¡BIENVENIDA, LULY! ◈", "◈ MI PROBLEMA ◈", "◈ TU MISIÓN ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`],
+      colors:  ["#E8D8C0",                "#FFCC88",         "#FFDD44",        "#FFCC66"],
       pages: [
         [
           "Hola, soy Rex. Veo que",
@@ -4008,12 +4043,26 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           "haz la sección de arriba.",
         ],
         [
-          "Necesito tu ayuda. Mi",
-          "pelota está encerrada,",
+          "Mi pelota está encerrada,",
           "me la quitaron y rompieron",
           "mi llave. Yo tengo la",
           "primera parte, pero algún",
           "perro malo tiene la otra.",
+          "¡Necesito que me ayudes! 🗝",
+        ],
+        [
+          "Ve al piso de arriba y",
+          "derrota a esos perros.",
+          "Uno de ellos lleva la",
+          "otra mitad de mi llave.",
+          "¡Derrótalo y tráemela,",
+          "Luly! 🐾",
+        ],
+        [
+          "Recuerda: alguno de ellos",
+          "la lleva... no sé cuál.",
+          "¡Encuéntrala, Luly,",
+          "y tráemela! 🗝",
         ],
       ]
     }
@@ -4087,30 +4136,37 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         "Le llaman El Castigador.",
       ]]}
     } else {
-      // El Castigador cayó → revelar quest del bastón (2 páginas)
+      // El Castigador cayó — en tick esto transiciona a reward, pero fallback por si acaso
       dlg = {
-        headers: ["◈ SIGUE ADELANTE ◈", "◈ NUEVA MISIÓN ◈"],
-        colors:  ["#FFDD88",            "#C8A0FF"],
+        headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈"],
+        colors:  ["#CCFF88",           "#C8A0FF"],
         pages: [
           [
-            "Bien, tienes que seguir",
-            "derrotando enemigos para",
-            "poder enfrentarte al jefe",
-            "de esta sección...",
-            "Le llaman El Castigador.",
+            "¡Venciste al Castigador!",
+            "Eres muy fuerte, Luly.",
+            "Regresa a mí para que",
+            "te dé tu recompensa.",
           ],
           [
-            "Mejoraremos el rebote de",
-            "tu pelota, Luly. Tendrás",
-            "más pelotas para lanzar...",
-            "pero primero vence al",
-            "Herrero. Él tiene mi bastón.",
+            "Ahora mejoraremos tu",
+            "pelota. Pero primero:",
+            "vence al Herrero. Él",
+            "tiene mi bastón.",
             "Derrótalo y tráemelo,",
             "así podré caminar mejor.",
           ],
         ]
       }
     }
+  } else if ((g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" || g.viejoDogState === "p2_warning") && p2Dead_dlg && !g.rexBatonHeld) {
+    // El Herrero cayó pero Luly no trae el bastón → Rex pregunta por él
+    dlg = { headers: ["◈ ¡MI BASTÓN! ◈"], colors: ["#FFAA44"], pages: [[
+      "¡Oye! ¡Derrotaste al Herrero",
+      "y no traes mi bastón?",
+      "Lo soltó al caer, Luly.",
+      "¡Vuelve y búscalo!",
+      "¡No te vayas sin él! 🪄",
+    ]]}
   } else if (g.viejoDogState === "reward_lives") {
     dlg = {
       headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈"],
@@ -4154,8 +4210,8 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     }
   } else if (g.viejoDogState === "baton_delivered") {
     dlg = {
-      headers: ["◈ ¡GRACIAS, LULY! ◈", "◈ EL ÚLTIMO JEFE ◈"],
-      colors:  ["#C8A0FF",             "#FF8844"],
+      headers: ["◈ ¡GRACIAS, LULY! ◈", "◈ EL ÚLTIMO JEFE ◈", "◈ ÁNIMO, LULY ◈", "◈ TRÁELO A MIS PATAS ◈"],
+      colors:  ["#C8A0FF",             "#FF8844",            "#88AAFF",         "#CCDDFF"],
       pages: [
         [
           "¡Mi bastón! Ahora puedo",
@@ -4174,7 +4230,22 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           "hasta colapsar su mente.",
           "Ahora es parte de HUDOG.",
           "Tendrás el Dash. 💨",
-          "¡Vamos, rezaré por ti!",
+        ],
+        [
+          "No temas, recarga",
+          "todo antes de",
+          "enfrentarlo. Luly,",
+          "descansa si es",
+          "necesario. ¡Tú",
+          "puedes con él! 💪",
+        ],
+        [
+          "Has llegado hasta aquí.",
+          "Eso no es poco, Luly.",
+          "Todo lo que aprendiste",
+          "te trajo hasta este",
+          "momento. ¡Yo creo en",
+          "ti, ve y derrótalo! 🐾",
         ],
       ]
     }
@@ -4191,12 +4262,11 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ]]}
   } else if (g.viejoDogState === "ultra_hint") {
     dlg = { headers: ["◈ ÁNIMO, LULY ◈"], colors: ["#88AAFF"], pages: [[
-      "No temas, recarga",
-      "todo antes de",
-      "enfrentarlo. Luly,",
-      "descansa si es",
-      "necesario. ¡Tú",
-      "puedes con él! 💪",
+      "Recuerda: recarga todo",
+      "antes de entrar.",
+      "Descansa si es necesario.",
+      "¡Tú puedes, Luly,",
+      "yo creo en ti! 🐾",
     ]]}
   } else if (g.viejoDogState === "ultra_done") {
     dlg = { headers: ["◈ ¡LO HICISTE, LULY! ◈"], colors: ["#FFDD44"], pages: [[
@@ -4230,7 +4300,10 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
 
   // ── Clave de estado para el typewriter ───────────────────────────────────
-  const dlgKey = g.viejoDogState + (g.rexBallFirstSeen ? "_s" : "") + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
+  const dlgKey = g.viejoDogState
+    + (g.rexBallFirstSeen ? "_s" : "")
+    + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
+    + (p2Dead_dlg ? "_p2d" : "")
 
   // ── Re-entrada al rango: mostrar instantáneo si ya fue leído, sino reiniciar ──
   const nowInRange = dist < VIEJO_DOG_TALK_R
@@ -4246,27 +4319,32 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
   _rexWasInRange = nowInRange
 
-  // ── Tipografía animada (typewriter) ──────────────────────────────────────
+  // ── Tipografía animada (typewriter) — N páginas ──────────────────────────
+  // _rexDlgMs siempre mide el inicio de la PÁGINA ACTUAL (se resetea al avanzar)
   if (dlgKey !== _rexDlgKey) {
     _rexDlgKey = dlgKey; _rexDlgMs = Date.now(); _rexDlgPage = 0
   }
   const numPages = dlg.pages.length
+  // Página actual antes del posible avance
+  let curPage = Math.min(_rexDlgPage, numPages - 1)
   const elapsed = Date.now() - _rexDlgMs
-  const page0TotalChars = dlg.pages[0].join("").length
-  // Avance manual a página 1: espera botón E/B/○
-  const page0Done = _rexDlgPage === 0 && numPages > 1 && elapsed >= page0TotalChars * REX_TYPING_MS
-  _rexPageWaiting = page0Done
-  if (page0Done && g.keys["e"]) {
-    _rexReadPages[dlgKey] = 0   // página 0 ya vista → no volver a tipear
-    _rexDlgPage = 1
+  // ¿Página actual terminada de tipear Y existe página siguiente?
+  const curPageTotalChars = dlg.pages[curPage].join("").length
+  const curPageDone = elapsed >= curPageTotalChars * REX_TYPING_MS && curPage < numPages - 1
+  _rexPageWaiting = curPageDone
+  // Avance de página con E/B/○
+  if (curPageDone && g.keys["e"]) {
+    _rexReadPages[dlgKey] = curPage   // página actual ya vista → no retipear
+    curPage++
+    _rexDlgPage = curPage
     _rexDlgMs = Date.now()
     g.keys["e"] = false
   }
-  const curPage  = Math.min(_rexDlgPage, numPages - 1)
-  const elapsed2 = _rexDlgPage > 0 ? (Date.now() - _rexDlgMs) : elapsed
+  // Caracteres a mostrar (recalcula elapsed tras posible avance)
+  const elapsedCur = Date.now() - _rexDlgMs
   const charsShown = Math.min(
     dlg.pages[curPage].join("").length,
-    Math.floor(elapsed2 / REX_TYPING_MS)
+    Math.floor(elapsedCur / REX_TYPING_MS)
   )
   const dialogLines = dlg.pages[curPage]
 
@@ -4277,6 +4355,31 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   if (charsShown >= _curPageChars) {
     const prevRead = _rexReadPages[dlgKey] ?? -1
     if (curPage > prevRead) _rexReadPages[dlgKey] = curPage
+    // ── Boss-unlock: última página leída por primera vez → abrir puerta + shake ──
+    const isLastPage = curPage === numPages - 1
+    if (isLastPage) {
+      const isP1Unlock = !g.p1BossRexSeen
+        && (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide")
+        && allP1Clear_dlg && !p1Dead_dlg
+      const isP2Unlock = !g.p2BossRexSeen && g.viejoDogState === "p2_warning"
+      const isUltraUnlock = !g.ultraBossRexSeen && g.viejoDogState === "ultra_hint"
+      if (isP1Unlock) {
+        g.p1BossRexSeen = true
+        triggerShake(g, 14, 1.8)
+        g.abilityNotif = { text: "¡El cubículo del Castigador se ha abierto! 🟢", timer: 5.0 }
+        saveGame(g)
+      } else if (isP2Unlock) {
+        g.p2BossRexSeen = true
+        triggerShake(g, 14, 1.8)
+        g.abilityNotif = { text: "¡El cubículo del Herrero se ha abierto! 🔴", timer: 5.0 }
+        saveGame(g)
+      } else if (isUltraUnlock) {
+        g.ultraBossRexSeen = true
+        triggerShake(g, 18, 2.2)
+        g.abilityNotif = { text: "¡La sala del Torturado ha sido desbloqueada! ⚡", timer: 5.0 }
+        saveGame(g)
+      }
+    }
   }
   // Solo bloquear movimiento en diálogos de 2 páginas (los que requieren pulsar E)
   _rexTypingActive = nowInRange && numPages > 1 && !(curPage === numPages - 1 && charsShown >= _curPageChars)
@@ -5436,8 +5539,12 @@ function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
     }
   }
   const plRx = gx + curC * (rw + gap) + Math.round(rw / 2), plRy = gy + curR * (rh + gap) + Math.round(rh / 2)
-  ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(plRx, plRy, large ? 3.5 : 2.5, 0, Math.PI * 2); ctx.fill()
-  ctx.strokeStyle = "#000"; ctx.lineWidth = 1; ctx.stroke()
+  // Paw indicator: anillo pulsante + punto central
+  const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.006)
+  ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.45 * pulse})`; ctx.lineWidth = large ? 1.4 : 1
+  ctx.beginPath(); ctx.arc(plRx, plRy, large ? 5.5 : 3.8, 0, Math.PI * 2); ctx.stroke()
+  ctx.fillStyle = "#FFFFFF"; ctx.beginPath(); ctx.arc(plRx, plRy, large ? 3 : 2, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = "#000"; ctx.lineWidth = 0.8; ctx.stroke()
   ctx.fillStyle = th.accent + "DD"; ctx.font = `bold ${large ? 8 : 7}px 'Courier New',monospace`; ctx.textAlign = "center"
   ctx.fillText(WORLD_NAMES[curW].slice(0, 16), mx + mw / 2, my + mh - 3)
   if (!large) { ctx.fillStyle = "#444"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("[Z] zoom", mx + mw / 2, my + mh + 7) }
@@ -5459,7 +5566,8 @@ function _mapWorldExplored(w: number, g: G): boolean {
 function _drawMapWorldGrid(
   ctx: CanvasRenderingContext2D, g: G,
   w: number, curW: number, curC: number, curR: number,
-  gx: number, gy: number, rW: number, rH: number, gap: number
+  gx: number, gy: number, rW: number, rH: number, gap: number,
+  sprs: SprBank = {}
 ) {
   const th = THEMES[w], wCleared = g.cw.has(w)
   const kr = KENNEL_ROOMS[w]
@@ -5487,8 +5595,19 @@ function _drawMapWorldGrid(
       if (kr.c===c && kr.r===r) { ctx.fillStyle=g.checkpoint.w===w?"#FFD700":"#555"; ctx.font="10px 'Courier New',monospace"; ctx.textAlign="center"; ctx.fillText("★",rx+rW/2,ry+rH/2+4); ctx.textAlign="left" }
       const nCr = getCratesInRoom(w,c,r,g)
       if (nCr>0) { ctx.fillStyle="#FFEE44EE"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="right"; ctx.fillText(`■${nCr}`,rx+rW-2,ry+rH-2); ctx.textAlign="left" }
-      if (isCur) { ctx.strokeStyle=th.accent+"CC"; ctx.lineWidth=2; ctx.strokeRect(rx,ry,rW,rH) }
-      else { ctx.strokeStyle=wCleared?th.accent+"55":"rgba(255,255,255,0.08)"; ctx.lineWidth=0.5; ctx.strokeRect(rx,ry,rW,rH) }
+      if (isCur) {
+        ctx.strokeStyle=th.accent+"CC"; ctx.lineWidth=2; ctx.strokeRect(rx,ry,rW,rH)
+        // Ícono de Luly — esquina superior-izquierda, dentro del borde
+        const iconSz = Math.max(10, Math.min(Math.round(rH * 0.58), Math.round(rW * 0.22), 18))
+        const iconImg = sprs["luly_map_icon"]
+        if (iconImg) {
+          ctx.drawImage(iconImg, rx + 3, ry + 3, iconSz, iconSz)
+        } else {
+          // Fallback: punto blanco si aún no cargó
+          ctx.fillStyle = "rgba(255,255,255,0.85)"
+          ctx.beginPath(); ctx.arc(rx + 3 + iconSz / 2, ry + 3 + iconSz / 2, iconSz / 2, 0, Math.PI * 2); ctx.fill()
+        }
+      } else { ctx.strokeStyle=wCleared?th.accent+"55":"rgba(255,255,255,0.08)"; ctx.lineWidth=0.5; ctx.strokeRect(rx,ry,rW,rH) }
     }
     const doors = computeDoors(w,c,r)
     const nbR4=`${w}_${c+1}_${r}`, nbD4=`${w}_${c}_${r+1}`, nbL4=`${w}_${c-1}_${r}`, nbU4=`${w}_${c}_${r-1}`
@@ -5501,20 +5620,33 @@ function _drawMapWorldGrid(
       if (doors.U && r>0)    { ctx.fillStyle=g.explored.has(nbU4)?knownCol:unknownCol; ctx.fillRect(rx+Math.round((rW-dw2)/2),ry,dw2,doorW) }
     }
   }
-  // Ícono tball (W0)
+  // Ícono tball / media llave (W0)
   if (w===0) {
     const tbPk=g.pickups.find(pk=>pk.id==="tball_w0"), tbc=TBALL_SECRET_C, tbr2=TBALL_SECRET_R
     const tbRx=gx+tbc*(rW+gap), tbRy=gy+tbr2*(rH+gap)
     const questRevealed=g.viejoDogState==="cage_opened"||g.viejoDogState==="quest_done"||g.viejoDogState==="surprised"
     const cageHinted=g.viejoDogState==="key_dropped"||g.viejoDogState==="key_held"
     if (!tbPk?.active) {
+      // Pelota ya recogida
       ctx.fillStyle="#556655"; ctx.font="9px 'Courier New',monospace"; ctx.textAlign="center"; ctx.fillText("🎾✓",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
-    } else if (questRevealed||cageHinted) {
+    } else if (cageHinted) {
+      // Mostrar llave en la sala donde está el pickup real (no en la jaula)
+      const keyPk = g.pickups.find(pk=>pk.id==="tball_key"&&pk.active)
+      const keyC = keyPk ? Math.floor((keyPk.x % (NC * RW)) / RW) : tbc
+      const keyR = keyPk ? Math.floor(keyPk.y / RH) : tbr2
+      const kRx=gx+keyC*(rW+gap), kRy=gy+keyR*(rH+gap)
       const pulse=0.55+0.45*Math.sin(Date.now()*0.005)
-      ctx.fillStyle=cageHinted?`rgba(255,200,0,${pulse*0.35})`:`rgba(0,220,80,${pulse*0.35})`; ctx.fillRect(tbRx,tbRy,rW,rH)
-      ctx.strokeStyle=cageHinted?`rgba(255,220,0,${pulse*0.9})`:`rgba(0,255,80,${pulse*0.9})`; ctx.lineWidth=1.2; ctx.strokeRect(tbRx+1,tbRy+1,rW-2,rH-2)
-      ctx.fillStyle=cageHinted?"#FFE066":"#AAFFAA"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="center"
-      ctx.fillText(cageHinted?"🗝?":"🎾?",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
+      ctx.fillStyle=`rgba(255,200,0,${pulse*0.35})`; ctx.fillRect(kRx,kRy,rW,rH)
+      ctx.strokeStyle=`rgba(255,220,0,${pulse*0.9})`; ctx.lineWidth=1.2; ctx.strokeRect(kRx+1,kRy+1,rW-2,rH-2)
+      ctx.fillStyle="#FFE066"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="center"
+      ctx.fillText("🗝?",kRx+rW/2,kRy+rH/2+4); ctx.textAlign="left"
+    } else if (questRevealed) {
+      // Jaula revelada → mostrar en sala de la jaula
+      const pulse=0.55+0.45*Math.sin(Date.now()*0.005)
+      ctx.fillStyle=`rgba(0,220,80,${pulse*0.35})`; ctx.fillRect(tbRx,tbRy,rW,rH)
+      ctx.strokeStyle=`rgba(0,255,80,${pulse*0.9})`; ctx.lineWidth=1.2; ctx.strokeRect(tbRx+1,tbRy+1,rW-2,rH-2)
+      ctx.fillStyle="#AAFFAA"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="center"
+      ctx.fillText("🎾?",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
     }
   }
   // Checkpoints
@@ -5529,7 +5661,7 @@ function _drawMapWorldGrid(
   }
 }
 
-function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
+function drawFullMap(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
   const p = g.pl
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
@@ -5588,7 +5720,7 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
     ctx.textAlign = "left"
 
     // Grid del mundo
-    _drawMapWorldGrid(ctx, g, w, curW, curC, curR, gx, gy, rW, rH, gap)
+    _drawMapWorldGrid(ctx, g, w, curW, curC, curR, gx, gy, rW, rH, gap, sprs)
 
     // Estado del mundo (bottom-left del grid)
     ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "left"
@@ -5659,7 +5791,7 @@ function drawFullMap(ctx: CanvasRenderingContext2D, g: G) {
       ctx.textAlign = "left"
 
       // Grid
-      _drawMapWorldGrid(ctx, g, w, curW, curC, curR, gx, gy, rW, rH, gap)
+      _drawMapWorldGrid(ctx, g, w, curW, curC, curR, gx, gy, rW, rH, gap, sprs)
 
       // Estado + hint de clic
       ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"
@@ -5793,14 +5925,29 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
         ctx.strokeStyle = `rgba(0,255,80,${pulse})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
         ctx.fillStyle = "#CCFF88"; ctx.fillText("🎾 PODER OCULTO", rx + rW / 2, ry + 43)
       } else if (cageActive) {
-        ctx.fillStyle = `rgba(255,200,0,${pulse * 0.35})`; ctx.fillRect(rx, ry, rW, rH)
-        ctx.strokeStyle = `rgba(255,220,0,${pulse})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
-        ctx.fillStyle = "#FFE066"; ctx.fillText("🗝 JAULA+LLAVE", rx + rW / 2, ry + 43)
+        // Solo muestra la jaula (la llave se dibuja en su sala real abajo)
+        ctx.fillStyle = `rgba(255,200,0,${pulse * 0.2})`; ctx.fillRect(rx, ry, rW, rH)
+        ctx.fillStyle = "#AA9944"; ctx.fillText("⛓ JAULA", rx + rW / 2, ry + 43)
       }
-      // Sin marker si quest no revelada (modo dev puede mostrarlo al desarrollador)
+      // Sin marker si quest no revelada
       if (g.devMode && tbPk?.active && !questRev && !cageActive) {
         ctx.fillStyle = "rgba(0,100,50,0.35)"; ctx.fillRect(rx, ry, rW, rH)
         ctx.fillStyle = "#336633"; ctx.fillText("🎾 [JAULA]", rx + rW / 2, ry + 43)
+      }
+    }
+    // Ícono llave caída — muestra en el cubículo REAL donde está el pickup
+    if (w === 0 && (g.viejoDogState === "key_dropped" || g.viejoDogState === "key_held")) {
+      const keyPk = g.pickups.find(pk => pk.id === "tball_key" && pk.active)
+      if (keyPk) {
+        const kC = Math.floor((keyPk.x % (NC * RW)) / RW)
+        const kR = Math.floor(keyPk.y / RH)
+        if (c === kC && r === kR) {
+          const pulse2 = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
+          ctx.fillStyle = `rgba(255,200,0,${pulse2 * 0.45})`; ctx.fillRect(rx, ry, rW, rH)
+          ctx.strokeStyle = `rgba(255,220,0,${pulse2})`; ctx.lineWidth = 2.5; ctx.strokeRect(rx + 1, ry + 1, rW - 2, rH - 2)
+          ctx.fillStyle = "#FFE066"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+          ctx.fillText("🗝 MEDIA LLAVE", rx + rW / 2, ry + 43)
+        }
       }
     }
     ctx.textAlign = "left"
@@ -5879,8 +6026,8 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const t = Date.now() * 0.002
 
-  // Niebla sobre sala Jefe P1 (hasta que se abra la puerta — regulares muertos)
-  if (!areRegularP1EnemiesDead(g, curW)) {
+  // Niebla sobre sala Jefe P1 (hasta que Rex explique al Castigador)
+  if (!g.p1BossRexSeen) {
     const [bc, br] = WORLD_P1_BOSS[curW]
     const { x: brX, y: brY } = ro(curW, bc, br)
     const sx = brX - g.cx, sy = brY - g.cy
@@ -5893,14 +6040,14 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
         ctx.fillStyle = `rgba(0,200,100,${0.5 + 0.3 * Math.sin(t * 1.4)})`; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚠  JEFE GUARDIÁN  ⚠", rcX, rcY)
         ctx.fillStyle = "rgba(0,160,70,0.7)"; ctx.font = "9px 'Courier New',monospace"
-        ctx.fillText("Jefe de la Parte 1", rcX, rcY + 18); ctx.textAlign = "left"
+        const p1Sub = areRegularP1EnemiesDead(g, curW) ? "Ve a hablar con Rex primero" : "Derrota a todos los enemigos"
+        ctx.fillText(p1Sub, rcX, rcY + 18); ctx.textAlign = "left"
       }
       ctx.restore()
     }
   }
-  // Niebla sobre Ultra-Boss TROW (solo si ambos jefes anteriores aún viven — puerta cerrada)
-  const ultraLocked = !(isPart1BossDead(g, curW) && isPart2BossDead(g, curW))
-  if (ultraLocked) {
+  // Niebla sobre Ultra-Boss TROW (hasta que Rex explique al Torturado)
+  if (!g.ultraBossRexSeen) {
     const { x: brX, y: brY } = ro(curW, TRANSIT_BOSS_COL, TROW)
     const sx = brX - g.cx, sy = brY - g.cy
     if (sx < CW && sx + RW > 0 && sy < CH && sy + RH > 0) {
@@ -5912,13 +6059,14 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
         ctx.fillStyle = `rgba(255,180,0,${0.5 + 0.3 * Math.sin(t * 1.2)})`; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚡  ULTRA JEFE  ⚡", rcX, rcY)
         ctx.fillStyle = "rgba(200,140,0,0.7)"; ctx.font = "9px 'Courier New',monospace"
-        ctx.fillText("Derrota a los dos jefes para acceder", rcX, rcY + 18); ctx.textAlign = "left"
+        const uSub = (isPart1BossDead(g, curW) && isPart2BossDead(g, curW)) ? "Ve a hablar con Rex primero" : "Derrota a los dos jefes primero"
+        ctx.fillText(uSub, rcX, rcY + 18); ctx.textAlign = "left"
       }
       ctx.restore()
     }
   }
-  // Niebla sobre sala Jefe P2 (hasta que se abra la puerta — regulares muertos)
-  if (!areRegularP2EnemiesDead(g, curW)) {
+  // Niebla sobre sala Jefe P2 (hasta que Rex explique al Herrero)
+  if (!g.p2BossRexSeen) {
     const [bc, br] = WORLD_P2_BOSS[curW]
     const { x: brX, y: brY } = ro(curW, bc, br)
     const sx = brX - g.cx, sy = brY - g.cy
@@ -5931,7 +6079,8 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
         ctx.fillStyle = `rgba(180,0,0,${0.5 + 0.3 * Math.sin(t * 1.4)})`; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚠  JEFE FINAL  ⚠", rcX, rcY)
         ctx.fillStyle = "rgba(120,0,0,0.7)"; ctx.font = "9px 'Courier New',monospace"
-        ctx.fillText("Jefe de la Parte 2", rcX, rcY + 18); ctx.textAlign = "left"
+        const p2Sub = areRegularP2EnemiesDead(g, curW) ? "Ve a hablar con Rex primero" : "Derrota a todos los enemigos"
+        ctx.fillText(p2Sub, rcX, rcY + 18); ctx.textAlign = "left"
       }
       ctx.restore()
     }
@@ -5942,7 +6091,7 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
 function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w: number; c: number; r: number } | null = null) {
   ctx.clearRect(0, 0, CW, CH)
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
-  if (g.showMap) { drawFullMap(ctx, g); return }
+  if (g.showMap) { drawFullMap(ctx, g, sprs); return }
   // ── Zoom móvil + screen shake (solo afectan al mundo, no al HUD) ────
   const sc = g.mobileZoom === "close" ? 1.25 : 1.0
   const hasShake = g.shakeX !== 0 || g.shakeY !== 0
@@ -6215,6 +6364,43 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.restore()
   }
 
+  // ── Burbuja de celular de Luly (mensaje de Rex) ──────────────────────
+  if (g.rexPhoneNotif && g.rexPhoneNotif.timer > 0) {
+    const pn = g.rexPhoneNotif
+    const tLeft = pn.timer
+    const alpha = Math.min(1, tLeft * 2.5) * Math.min(1, (10.0 - tLeft) * 1.8)
+    const bossName = pn.kind === "p1" ? "Castigador" : pn.kind === "p2" ? "Herrero" : "Torturado"
+    const line1 = "📱 Rex: ¡Luly, ven a verme!"
+    const line2 = `Necesitas saber del ${bossName}`
+    ctx.save(); ctx.globalAlpha = Math.max(0, alpha)
+    ctx.font = "bold 10px 'Courier New',monospace"
+    const w1 = ctx.measureText(line1).width, w2 = ctx.measureText(line2).width
+    const bw = Math.max(w1, w2) + 18, bh = 36
+    // Posición sobre Luly
+    const plSx = g.pl.x - g.cx + PW / 2
+    const plSy = g.pl.y - g.cy
+    const sc = g.mobileZoom === "close" ? 1.25 : 1.0
+    const bx2 = Math.max(4, Math.min(CW / sc - bw - 4, plSx / sc - bw / 2))
+    const by2 = Math.max(4, plSy / sc - bh - 36)
+    // Fondo cian oscuro (teléfono)
+    ctx.fillStyle = "rgba(0,30,40,0.94)"
+    ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 6); ctx.fill()
+    ctx.strokeStyle = "#00CCDD88"; ctx.lineWidth = 1.2
+    ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 6); ctx.stroke()
+    // Cola apuntando hacia Luly
+    const tailX = Math.max(bx2 + 12, Math.min(bx2 + bw - 12, plSx / sc))
+    ctx.fillStyle = "rgba(0,30,40,0.94)"
+    ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX + 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 8); ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = "#00CCDD88"; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 8); ctx.lineTo(tailX + 5, by2 + bh); ctx.stroke()
+    // Texto
+    ctx.fillStyle = "#AAEEFF"; ctx.textAlign = "center"
+    ctx.fillText(line1, bx2 + bw / 2, by2 + 13)
+    ctx.fillStyle = "#66DDCC"
+    ctx.fillText(line2, bx2 + bw / 2, by2 + 27)
+    ctx.textAlign = "left"; ctx.restore()
+  }
+
   // ── Notificación de habilidad desbloqueada ────────────────────────────
   if (g.abilityNotif && g.abilityNotif.timer > 0) {
     const t = g.abilityNotif.timer
@@ -6233,7 +6419,9 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     if (notifCur) notifLines.push(notifCur)
     const lineH = 19
     const boxW = 420, boxH = Math.max(90, 50 + notifLines.length * lineH + 22)
-    const bx = CW / 2 - boxW / 2, by = CH / 2 - boxH / 2
+    const bx = CW / 2 - boxW / 2
+    // Posición vertical: en PC bien abajo (no tapa nada); en móvil un poco más arriba para no tapar controles táctiles
+    const by = g.isMobile ? Math.round(CH * 0.52) : CH - boxH - 32
     ctx.fillStyle = "rgba(0,0,0,0.92)"
     ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 12); ctx.fill()
     ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(bx, by, boxW, boxH)
@@ -6426,7 +6614,8 @@ export default function ProyectoLuly() {
   const [ui, setUi] = useState({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false })
   // Diferir la lectura de localStorage al cliente para evitar hydration mismatch
   const [hasSave, setHasSave] = useState(false)
-  useEffect(() => { setHasSave(loadSaveData() !== null) }, [])
+  const [saveChecked, setSaveChecked] = useState(false)  // true tras primer check de localStorage
+  useEffect(() => { setHasSave(loadSaveData() !== null); setSaveChecked(true) }, [])
   // "start" = menú inicio  |  "playing" = partida activa
   const [screen, setScreen] = useState<"start" | "playing">("start")
   const gameActiveRef = useRef(false)
@@ -6434,6 +6623,7 @@ export default function ProyectoLuly() {
   const [menuSel, setMenuSel] = useState(0)          // ítem seleccionado en menú inicio
   const [pauseSel, setPauseSel] = useState(0)        // ítem seleccionado en menú pausa
   const [showSettings, setShowSettings] = useState(false)  // overlay de configuración
+  const [deleteConfirm, setDeleteConfirm] = useState(false) // doble confirmación borrar partida
   const [gpadType, setGpadType] = useState<GpadType>("keyboard")  // tipo de mando detectado
   const menuSelRef = useRef(0)
   const pauseSelRef = useRef(0)
@@ -6493,6 +6683,7 @@ export default function ProyectoLuly() {
     L("rex_talk_right",         "/assets/NPCs/Rex_The_Old/talk_right.png")
     L("rex_mitad_llave_left",   "/assets/NPCs/Rex_The_Old/mitad_llave_left.png")
     L("rex_mitad_llave_right",  "/assets/NPCs/Rex_The_Old/mitad_llave_right.png")
+    L("luly_map_icon",  "/assets/Enviroment/Icon_Face_Luly_Map/Icon_Face.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -6934,7 +7125,7 @@ export default function ProyectoLuly() {
 
       // ── Menú de pausa ─────────────────────────────────────────────
       if (screen === "playing" && ui.paused && !ui.showDevMap && !ui.showMap) {
-        const COUNT = 3  // CONTINUAR | MENÚ PRINCIPAL | BORRAR GUARDADO
+        const COUNT = 2  // CONTINUAR | MENÚ PRINCIPAL
         if (navCd <= 0) {
           if (ly < -THRESH || btn(GP.UP)) {
             pauseSelRef.current = (pauseSelRef.current - 1 + COUNT) % COUNT
@@ -6948,7 +7139,6 @@ export default function ProyectoLuly() {
           const sel = pauseSelRef.current
           if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
           else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false }); setScreen("start"); gameActiveRef.current = false }
-          else if (sel === 2) { try { localStorage.removeItem(SAVE_KEY) } catch (_) {}; setHasSave(false) }
         }
         if (edgeDown(pad, GP.B)) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
       }
@@ -7723,6 +7913,11 @@ export default function ProyectoLuly() {
                 const salirIdx = idx++
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14, width: 280, alignItems: "stretch" }}>
+                    {!saveChecked ? (
+                      <div style={{ textAlign: "center", color: "#4A6A4A", fontFamily: "'Courier New',monospace", fontSize: 11, letterSpacing: "0.15em", padding: "18px 0" }}>
+                        cargando…
+                      </div>
+                    ) : (<>
                     {hasSave && (
                       <button
                         style={{ ...menuBtn("#D4C400"), marginBottom: 6, ...selStyle("#D4C400", contIdx), position: "relative" }}
@@ -7741,7 +7936,7 @@ export default function ProyectoLuly() {
                       onTouchEnd={e => { e.preventDefault(); handlePlay() }}
                     >
                       {isSel(jugarIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#D4C400" }}>▶</span>}
-                      ▶  JUGAR
+                      ▶  NUEVA PARTIDA
                     </button>
                     <button
                       style={{ ...menuBtn("#7A9A7A"), position: "relative", ...selStyle("#7A9A7A", cfgIdx) }}
@@ -7770,6 +7965,7 @@ export default function ProyectoLuly() {
                       {isSel(salirIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#88AA88" }}>▶</span>}
                       ✕  SALIR
                     </button>
+                    </>)}
                   </div>
                 )
               })()}
@@ -7970,7 +8166,6 @@ export default function ProyectoLuly() {
                   {[
                     { label: "▶ CONTINUAR",     col: th.accent,   bg: th.accent + "22", border: `1px solid ${th.accent}88` },
                     { label: "↩ MENÚ PRINCIPAL", col: "#888",     bg: "transparent",    border: "1px solid #444" },
-                    { label: "✕ borrar guardado",col: "#553333",  bg: "transparent",    border: "1px solid #330000", small: true },
                   ].map((item, i) => (
                     <button
                       key={i}
@@ -7978,14 +8173,13 @@ export default function ProyectoLuly() {
                       onClick={() => {
                         if (i === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
                         else if (i === 1) handleRestart()
-                        else { try { localStorage.removeItem(SAVE_KEY) } catch(_){} setHasSave(false) }
                       }}
                       style={{
-                        padding: item.small ? "8px 16px" : "8px 20px",
+                        padding: "8px 20px",
                         background: pauseSel === i ? (item.bg === "transparent" ? "rgba(255,255,255,0.06)" : item.bg) : item.bg,
                         border: pauseSel === i ? `1px solid ${item.col}` : item.border,
                         color: item.col, fontFamily: "'Courier New', monospace",
-                        fontSize: item.small ? 10 : 12, letterSpacing: "0.2em",
+                        fontSize: 12, letterSpacing: "0.2em",
                         cursor: "pointer", borderRadius: 6,
                         boxShadow: pauseSel === i ? `0 0 12px ${item.col}44` : "none",
                         position: "relative",
@@ -8108,10 +8302,54 @@ export default function ProyectoLuly() {
                 </div>
               </div>
 
+              {/* ── DATOS GUARDADOS ── */}
+              <div style={{ padding: "14px 20px 10px", borderTop: "1px solid #1A2A1A" }}>
+                <div style={{ fontSize: 10, color: "#4A6A4A", letterSpacing: "0.2em", marginBottom: 10 }}>DATOS GUARDADOS</div>
+                {!hasSave ? (
+                  <div style={{ fontSize: 11, color: "#3A5A3A", fontStyle: "italic" }}>Sin datos guardados.</div>
+                ) : !deleteConfirm ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 11, color: "#7A9A7A", flex: 1 }}>Partida guardada activa</span>
+                    <button
+                      onClick={() => setDeleteConfirm(true)}
+                      style={{
+                        padding: "4px 14px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                        background: "transparent", border: "1px solid #553333",
+                        color: "#AA5555", cursor: "pointer", borderRadius: 4,
+                      }}
+                    >✕ BORRAR PARTIDA</button>
+                  </div>
+                ) : (
+                  <div style={{ background: "#1A0A0A", border: "1px solid #553333", borderRadius: 6, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 11, color: "#FF7777", marginBottom: 8, letterSpacing: "0.05em" }}>
+                      ⚠ ¿Borrar la partida guardada? Esta acción no se puede deshacer.
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => { try { localStorage.removeItem(SAVE_KEY) } catch(_){} setHasSave(false); setDeleteConfirm(false) }}
+                        style={{
+                          padding: "5px 16px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                          background: "#3A0A0A", border: "1px solid #AA3333",
+                          color: "#FF5555", cursor: "pointer", borderRadius: 4,
+                        }}
+                      >SÍ, BORRAR</button>
+                      <button
+                        onClick={() => setDeleteConfirm(false)}
+                        style={{
+                          padding: "5px 16px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                          background: "transparent", border: "1px solid #2A4A2A",
+                          color: "#7A9A7A", cursor: "pointer", borderRadius: 4,
+                        }}
+                      >CANCELAR</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Footer */}
               <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "center", gap: 12, borderTop: "1px solid #1A2A1A" }}>
                 <CtrlHint action="cancel" label="cerrar" size={14} />
-                <button onClick={() => setShowSettings(false)} style={{ padding: "8px 24px", background: "#1A3A1A", border: "1px solid #3A6A3A", color: "#D4C400", fontFamily: "'Courier New',monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}>
+                <button onClick={() => { setShowSettings(false); setDeleteConfirm(false) }} style={{ padding: "8px 24px", background: "#1A3A1A", border: "1px solid #3A6A3A", color: "#D4C400", fontFamily: "'Courier New',monospace", fontSize: 12, letterSpacing: "0.2em", cursor: "pointer", borderRadius: 6 }}>
                   ✓  LISTO
                 </button>
               </div>
