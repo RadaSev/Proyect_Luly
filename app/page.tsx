@@ -174,7 +174,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.1.8"
+const GAME_VERSION = "0.1.9"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1671,7 +1671,7 @@ function breakCrate(g: G, c: Crate) {
   // else: solo fragmentos
 
   // Bonus: si el jugador tiene tball y le falta munición, 25 % de chance extra
-  if (g.abilities.has("tball") && g.tballAmmo < TB_AMMO_MAX && Math.random() < 0.25) {
+  if (g.abilities.has("tball") && g.tballAmmo < (g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT) && Math.random() < 0.25) {
     drop("tba")
   }
 }
@@ -2880,7 +2880,7 @@ function tickDrops(g: G) {
     if (p.x < d.x + 18 && p.x + p.w > d.x && p.y < d.y + 18 && p.y + p.h > d.y) {
       if (d.kind === "h") p.hp = Math.min(p.maxHp, p.hp + 1)
       else if (d.kind === "a") p.ammo = Math.min(15, p.ammo + 10)
-      else if (d.kind === "tba") g.tballAmmo = Math.min(TB_AMMO_MAX, g.tballAmmo + TB_AMMO_DROP)
+      else if (d.kind === "tba") g.tballAmmo = Math.min(g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT, g.tballAmmo + TB_AMMO_DROP)
       d.active = false
     }
   }
@@ -4909,6 +4909,7 @@ function tpOpenMenu(g: G) {
   const curW = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW))))
   const world = worlds.includes(curW) ? curW : worlds[0]
   g.tpMenu = { open: true, world, cpIdx: 0 }
+  g.paused = true
 }
 function tpNavWorld(g: G, dir: 1 | -1) {
   if (!g.tpMenu) return
@@ -4930,6 +4931,7 @@ function tpDoConfirm(g: G) {
   const dest = cps[g.tpMenu.cpIdx]
   if (!dest) return
   g.tpMenu = null
+  g.paused = false
   g.tpAnim = { timer: 0, phase: 0, destX: dest.x, destY: dest.y }
   spawnExplosion(g, g.pl.x + PW / 2, g.pl.y + PH / 2, ["#FFFFFF", "#AAFFAA", "#FFFF88"], 12, 3.5)
 }
@@ -5324,7 +5326,7 @@ function drawDevPanel(ctx: CanvasRenderingContext2D, g: G) {
 
   // Misma geometría que el minimap para alinearse perfectamente
   const large = !!g.keys["z"]
-  const rw = large ? 16 : 9, rh = large ? 11 : 6, gap = large ? 2 : 1
+  const rw = large ? 20 : 12, rh = large ? 14 : 8, gap = large ? 2 : 1
   const gridW = NC * (rw + gap) - gap, gridH = NR * (rh + gap) - gap
   const mpad = 8, mw = gridW + mpad * 2, mh = gridH + mpad * 2 + 14
   const mx = CW - mw - 6, my = CH - mh - 6
@@ -5497,7 +5499,7 @@ function drawMinimap(ctx: CanvasRenderingContext2D, g: G) {
   const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
   const th = THEMES[curW]
   const large = !!g.keys["z"]
-  const rw = large ? 16 : 9, rh = large ? 11 : 6, gap = large ? 2 : 1
+  const rw = large ? 20 : 12, rh = large ? 14 : 8, gap = large ? 2 : 1
   const gridW = NC * (rw + gap) - gap, gridH = NR * (rh + gap) - gap
   const pad = 8, mw = gridW + pad * 2, mh = gridH + pad * 2 + 14
   const mx = CW - mw - 6, my = CH - mh - 6
@@ -5589,8 +5591,19 @@ function _drawMapWorldGrid(
     const rx = gx + c * (rW + gap), ry = gy + r * (rH + gap)
     const roomKey = `${w}_${c}_${r}`, explored = g.explored.has(roomKey)
     const isCur = w === curW && c === curC && r === curR
-    const zBg = r < TROW ? "rgba(0,30,10,1)" : r === TROW ? "rgba(0,10,30,1)" : "rgba(30,0,0,1)"
+    const zBg = r < TROW ? "rgba(0,30,10,1)" : r === TROW ? "rgba(0,18,52,1)" : "rgba(30,0,0,1)"
     ctx.fillStyle = zBg; ctx.fillRect(rx, ry, rW, rH)
+    // TROW: diagonal stripe "SAFE ZONE" pattern (excepto ultra-boss que ya tiene su color)
+    if (r === TROW && !(c === TRANSIT_BOSS_COL)) {
+      ctx.save()
+      ctx.beginPath(); ctx.rect(rx, ry, rW, rH); ctx.clip()
+      ctx.strokeStyle = "rgba(60,120,255,0.09)"; ctx.lineWidth = 1
+      const step = Math.max(5, Math.round(rW * 0.28))
+      for (let d2 = -rH; d2 < rW + rH; d2 += step) {
+        ctx.beginPath(); ctx.moveTo(rx + d2, ry); ctx.lineTo(rx + d2 + rH, ry + rH); ctx.stroke()
+      }
+      ctx.restore()
+    }
     if (!explored) {
       ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(rx, ry, rW, rH)
       const nbL2 = c > 0 && g.explored.has(`${w}_${c-1}_${r}`) && computeDoors(w,c-1,r).R
@@ -5605,6 +5618,23 @@ function _drawMapWorldGrid(
       if (c===TRANSIT_BOSS_COL && r===TROW) { ctx.fillStyle="rgba(255,180,0,0.4)"; ctx.fillRect(rx,ry,rW,rH) }
       else if (c===p1c_m && r===p1r_m) { ctx.fillStyle="rgba(0,200,80,0.3)"; ctx.fillRect(rx,ry,rW,rH) }
       else if (c===p2c_m && r===p2r_m) { ctx.fillStyle=wCleared?"rgba(0,200,80,0.3)":"rgba(255,60,0,0.3)"; ctx.fillRect(rx,ry,rW,rH) }
+      // TROW non-boss explored: "SAFE ZONE" label
+      if (r===TROW && c!==TRANSIT_BOSS_COL && rW>=20) {
+        ctx.save(); ctx.beginPath(); ctx.rect(rx,ry,rW,rH); ctx.clip()
+        const szFnt = Math.max(6, Math.round(rW * 0.095))
+        ctx.font = `bold ${szFnt}px 'Courier New',monospace`; ctx.fillStyle = "rgba(80,160,255,0.30)"; ctx.textAlign="center"
+        ctx.fillText("SAFE", rx+rW/2, ry+rH/2+szFnt*0.36); ctx.restore(); ctx.textAlign="left"
+      }
+      // Skull sprites for unlocked boss rooms
+      const skullSz = Math.round(Math.min(rW, rH) * 0.70)
+      const skullX = rx + Math.round((rW - skullSz) / 2), skullY = ry + Math.round((rH - skullSz) / 2)
+      if (c===p1c_m && r===p1r_m && g.p1BossRexSeen) {
+        const sk = sprs["skull_p1"]; if (sk && sk.complete) ctx.drawImage(sk, skullX, skullY, skullSz, skullSz)
+      } else if (c===p2c_m && r===p2r_m && g.p2BossRexSeen) {
+        const sk = sprs["skull_p2"]; if (sk && sk.complete) ctx.drawImage(sk, skullX, skullY, skullSz, skullSz)
+      } else if (c===TRANSIT_BOSS_COL && r===TROW && g.ultraBossRexSeen) {
+        const sk = sprs["skull_ultra"]; if (sk && sk.complete) ctx.drawImage(sk, skullX, skullY, skullSz, skullSz)
+      }
       if (kr.c===c && kr.r===r) { ctx.fillStyle=g.checkpoint.w===w?"#FFD700":"#555"; ctx.font="10px 'Courier New',monospace"; ctx.textAlign="center"; ctx.fillText("★",rx+rW/2,ry+rH/2+4); ctx.textAlign="left" }
       const nCr = getCratesInRoom(w,c,r,g)
       if (nCr>0) { ctx.fillStyle="#FFEE44EE"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="right"; ctx.fillText(`■${nCr}`,rx+rW-2,ry+rH-2); ctx.textAlign="left" }
@@ -6592,7 +6622,7 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
       else if (lx > THRESH || btn(GP.RIGHT)) { tpNavWorld(g, 1);  _gpStickNavCd = 200 }
     }
     if (edgeDown(GP.A)) tpDoConfirm(g)
-    if (edgeDown(GP.B) || edgeDown(GP.START)) g.tpMenu = null
+    if (edgeDown(GP.B) || edgeDown(GP.START)) { g.tpMenu = null; g.paused = false }
     return
   }
 
@@ -6720,6 +6750,10 @@ export default function ProyectoLuly() {
     L("rex_mitad_llave_right",  "/assets/NPCs/Rex_The_Old/mitad_llave_right.png")
     L("luly_map_icon",  "/assets/Enviroment/Icon_Face_Luly_Map/Icon_Face.png")
     L("tennis_ball",   "/assets/Enviroment/Tennis_Ball/Tennis_Ball.png")
+    // Skulls para salas de jefes en el mapa
+    L("skull_p1",    "/assets/Enviroment/Skull/Skull_First_Boss.png")
+    L("skull_p2",    "/assets/Enviroment/Skull/Skull_Second_Boss.png")
+    L("skull_ultra", "/assets/Enviroment/Skull/Skull_Final_Boss.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -6850,7 +6884,7 @@ export default function ProyectoLuly() {
       }
       if (k === "f") handleToggleFS()
       if (k === "escape") {
-        if (g.tpMenu?.open) { g.tpMenu = null; return }
+        if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; return }
         if (g.showMap) { g.showMap = false; g.paused = false }
         if (g.showDevMap) { g.showDevMap = false; g.paused = false }
       }
@@ -6874,7 +6908,7 @@ export default function ProyectoLuly() {
         }
       }
       if (k === "t" && !g.tpAnim) {
-        if (g.tpMenu?.open) { g.tpMenu = null; return }
+        if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; return }
         tpOpenMenu(g)
       }
       // Navegación menú de teleporte — ↑↓ = CP, ←→ = mundo
@@ -7660,7 +7694,7 @@ export default function ProyectoLuly() {
                        width: 66, height: 32, fontSize: 10, gap: 3,
                        borderColor: "#D4C40066", zIndex: 25 }}
               {...makeTouch(() => {
-                if (g.tpMenu?.open) g.tpMenu = null
+                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false }
                 else tpOpenMenu(g)
               }, () => {})}
             >
@@ -8058,7 +8092,7 @@ export default function ProyectoLuly() {
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
               g.tpMenu?.open ? "CERRAR" : _rexPageWaiting ? "SIGUIENTE" : "GUARDAR",
               () => {
-                if (g.tpMenu?.open) { g.tpMenu = null }
+                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false }
                 else if (_rexPageWaiting) { pressKey("e"); setTimeout(() => releaseKey("e"), 120) }
                 else activateCheckpoint()
               }, () => {})}
