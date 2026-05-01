@@ -6450,7 +6450,8 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const HS = 28, HSP = 34, HY0 = panY + 14          // corazones
   const EY0 = HY0 + HS + 12, ESIZE = 22, ESTP = 26  // enemigos
   const BY0 = EY0 + ESIZE + 12, BSIZE = 18, BSTP = 11 // huesos
-  const CPLBL_Y = BY0 + BSIZE + 14                   // checkpoint mini-label
+  const BONES_PER_ROW = 11                            // cuántos caben en la 1ª fila
+  const CPLBL_Y = BY0 + BSIZE * 2 + 6 + 14           // checkpoint mini-label (2 filas de huesos)
   const panH = CPLBL_Y + 16 + 8
   ctx.fillStyle = "rgba(0,0,0,0.72)"
   ctx.beginPath(); ctx.roundRect(panX, panY, panW, panH, 10); ctx.fill()
@@ -6518,15 +6519,18 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.fillText("HUESOS", HX0, BY0 + 10)
   const boneSpr = sprs["hud_bone"]
   for (let i = 0; i < 15; i++) {
-    const bx = HX0 + BLBL_W + i * BSTP
+    const row = i < BONES_PER_ROW ? 0 : 1
+    const col = i < BONES_PER_ROW ? i : i - BONES_PER_ROW
+    const bx  = HX0 + BLBL_W + col * BSTP
+    const by  = BY0 + row * (BSIZE + 3)
     const has = i < p.ammo
     if (boneSpr && boneSpr.complete && boneSpr.naturalWidth > 0) {
       if (!has) { ctx.save(); ctx.globalAlpha = 0.14 }
-      ctx.drawImage(boneSpr, bx, BY0, BSIZE, BSIZE)
+      ctx.drawImage(boneSpr, bx, by, BSIZE, BSIZE)
       if (!has) ctx.restore()
     } else {
       ctx.fillStyle = has ? th.accent : "#222"
-      ctx.beginPath(); ctx.arc(bx + BSIZE/2, BY0 + BSIZE/2, 3, 0, Math.PI*2); ctx.fill()
+      ctx.beginPath(); ctx.arc(bx + BSIZE/2, by + BSIZE/2, 3, 0, Math.PI*2); ctx.fill()
     }
   }
 
