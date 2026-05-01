@@ -123,7 +123,7 @@ type G = {
   showRealMap: boolean
   realMapWorld: number   // mundo actualmente visible en el real map dev
   realMapScale: number   // multiplicador de tamaño para personajes/enemigos/cajas
-  realMapIconMode: number // 0=sprites juego, 1=iconos UI
+  realMapIconMode: number // 0=sprites juego, 1=iconos v1 (pixel), 2=iconos v2 (minimalist)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -5954,10 +5954,21 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.fillStyle = "#060606"; ctx.fillRect(0, 0, CW, CH)
   ctx.strokeStyle = "#1A1A1A"; ctx.lineWidth = 1.5; ctx.strokeRect(1, 1, CW - 2, CH - 2)
 
+  // ── Helper: dibuja con antialiasing suave (para iconos alta-res) ─
+  const drawSmooth = (spr: HTMLImageElement, x: number, y: number, dw: number, dh: number, alpha = 1) => {
+    ctx.save()
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality  = "high"
+    if (alpha < 1) ctx.globalAlpha = alpha
+    ctx.drawImage(spr, x, y, dw, dh)
+    ctx.restore()
+  }
+  const iconMode = g.realMapIconMode  // 0=sprites, 1=v1 pixel, 2=v2 minimalist
+
   // ── Header ────────────────────────────────────────────────────
   const SCALE_STEPS = [1.0, 1.5, 2.0, 3.0]
   const scaleLabel  = `${g.realMapScale}x`
-  const iconLabel   = g.realMapIconMode === 0 ? "SPRITES" : "ICONOS"
+  const iconLabel   = iconMode === 0 ? "SPRITES" : iconMode === 1 ? "ICONOS-v1" : "ICONOS-v2"
   ctx.fillStyle = "#111"; ctx.fillRect(0, 0, CW, HDR - 2)
   ctx.fillStyle = "#00FF44"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText(
@@ -6049,26 +6060,122 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Casa de Rex (solo W0, sala [VIEJO_DOG_C, VIEJO_DOG_R]) ──────────────
       if (w === 0 && c === VIEJO_DOG_C && r === VIEJO_DOG_R) {
-        const houseSpr = sprs["rex_house"]
-        const hWX = VIEJO_DOG_POS.x - 151
-        const hWY = VIEJO_DOG_POS.y - 326
-        // Casa usa escala base × sqrt(realMapScale) para no sobredimensionarla
+        const houseSprGame = sprs["rex_house"]
+        const houseSprV2   = sprs["icon_rex_house"]
+        const hWX    = VIEJO_DOG_POS.x - 151
+        const hWY    = VIEJO_DOG_POS.y - 326
         const hScMul = Math.sqrt(g.realMapScale)
-        const hMapX = cx + (hWX - x0) * scX
-        const hMapY = cy + (hWY - y0) * scY
-        const hMapW = Math.max(4, Math.round(552 * scX * hScMul))
-        const hMapH = Math.max(4, Math.round(368 * scY * hScMul))
-        if (houseSpr && houseSpr.complete && houseSpr.naturalWidth > 0) {
-          ctx.drawImage(houseSpr, hMapX, hMapY, hMapW, hMapH)
+        const hMapX  = cx + (hWX - x0) * scX
+        const hMapY  = cy + (hWY - y0) * scY
+        const hMapW  = Math.max(4, Math.round(552 * scX * hScMul))
+        const hMapH  = Math.max(4, Math.round(368 * scY * hScMul))
+        // v1 no tiene icono de casa → usa game sprite; v2 usa minimalist
+        const hSpr   = iconMode === 2 ? (houseSprV2 || houseSprGame) : houseSprGame
+        if (hSpr && hSpr.complete && hSpr.naturalWidth > 0) {
+          if (iconMode === 2) drawSmooth(hSpr, hMapX, hMapY, hMapW, hMapH)
+          else                ctx.drawImage(hSpr, hMapX, hMapY, hMapW, hMapH)
         } else {
           ctx.fillStyle = "rgba(120,80,40,0.5)"; ctx.fillRect(hMapX, hMapY, hMapW, hMapH)
           ctx.strokeStyle = "#A06020AA"; ctx.lineWidth = 1; ctx.strokeRect(hMapX, hMapY, hMapW, hMapH)
         }
       }
 
+      // ── Checkpoints y Kennels del cubículo ─────────────────────
+      {
+        const KENNEL_KEYS = ["kennel_ambar", "kennel_red", "kennel_blue", "kennel_violet"]
+        const KENNEL_DIM: { rw: number; rh: number; feet: number }[] = [
+          { rw: 130, rh: 130, feet: 117 },
+          { rw: 158, rh: 130, feet: 114 },
+          { rw: 130, rh: 130, feet: 116 },
+          { rw: 158, rh: 130, feet: 112 },
+        ]
+        const ctSpr = sprs["cucha_teleport"]
+
+        for (const cp of ALL_CPS) {
+          if (cp.w !== w || cp.c !== c || cp.r !== r) continue
+
+          const discovered = g.discoveredCPs.has(cp.id)
+          const isSpawn    = g.checkpoint.w === cp.w && Math.abs(g.checkpoint.x - cp.x) < 40
+          const isKennel   = KENNEL_ROOMS[cp.w].c === cp.c && KENNEL_ROOMS[cp.w].r === cp.r
+          const th2        = THEMES[cp.w]
+
+          // Anchor: sx_map = centro-X en el piso, sy_map = posición de los pies
+          const sx_map = cx + (cp.x + PW / 2 - x0) * scX
+          const sy_map = cy + (cp.y + PH      - y0) * scY
+
+          if (isKennel) {
+            const wi       = Math.max(0, Math.min(cp.w, 3))
+            const ksprGame = sprs[KENNEL_KEYS[wi]]
+            const ksprV2   = sprs["icon_kennel"]
+            // v1 no tiene icono kennel → usa game sprite; v2 usa minimalist
+            const kspr     = iconMode === 2 ? (ksprV2 || ksprGame) : ksprGame
+            const { rw: krw, rh: krh, feet } = KENNEL_DIM[wi]
+            const krw_m  = Math.round(krw  * scX * g.realMapScale)
+            const krh_m  = iconMode === 2 ? krw_m : Math.round(krh  * scY * g.realMapScale)
+            const feet_m = iconMode === 2 ? krw_m : Math.round(feet * scY * g.realMapScale)
+            const ksX    = sx_map - krw_m / 2
+            const ksY    = sy_map - feet_m
+            const kAlpha = discovered ? (isSpawn ? 1 : 0.85) : 0.35
+            if (kspr && kspr.complete && kspr.naturalWidth > 0) {
+              if (iconMode === 2) {
+                if (isSpawn) { ctx.save(); ctx.shadowColor = th2.accent; ctx.shadowBlur = 7 }
+                drawSmooth(kspr, ksX, ksY, krw_m, krh_m, kAlpha)
+                if (isSpawn) ctx.restore()
+              } else {
+                ctx.save()
+                ctx.globalAlpha = kAlpha
+                if (isSpawn) { ctx.shadowColor = th2.accent; ctx.shadowBlur = 6 }
+                ctx.drawImage(kspr, ksX, ksY, krw_m, krh_m)
+                ctx.restore()
+              }
+            } else {
+              ctx.save(); ctx.globalAlpha = kAlpha
+              ctx.fillStyle = isSpawn ? th2.accent + "CC" : "#443300CC"
+              ctx.fillRect(ksX, ksY, krw_m, krh_m); ctx.restore()
+            }
+          } else {
+            const ctSprV2   = sprs["icon_cucha"]
+            // v1 no tiene icono cucha → usa game sprite; v2 usa minimalist
+            const ctDraw    = iconMode === 2 ? (ctSprV2 || ctSpr) : ctSpr
+            const ct_rw     = Math.round(135 * scX * g.realMapScale)
+            const ct_rh     = iconMode === 2 ? ct_rw : Math.round(64 * scY * g.realMapScale)
+            const ct_sx     = sx_map - ct_rw / 2
+            const ct_sy     = sy_map - ct_rh
+            const ctAlpha   = discovered ? (isSpawn ? 1 : 0.80) : 0.30
+            if (ctDraw && ctDraw.complete && ctDraw.naturalWidth > 0) {
+              if (iconMode === 2) {
+                if (isSpawn) { ctx.save(); ctx.shadowColor = th2.accent; ctx.shadowBlur = 5 }
+                drawSmooth(ctDraw, ct_sx, ct_sy, ct_rw, ct_rh, ctAlpha)
+                if (isSpawn) ctx.restore()
+              } else {
+                ctx.save()
+                ctx.globalAlpha = ctAlpha
+                if (isSpawn) { ctx.shadowColor = th2.accent; ctx.shadowBlur = 5 }
+                ctx.drawImage(ctDraw, ct_sx, ct_sy, ct_rw, ct_rh)
+                ctx.restore()
+              }
+            } else {
+              ctx.save(); ctx.globalAlpha = ctAlpha
+              ctx.fillStyle = isSpawn ? th2.accent + "AA" : "#002244AA"
+              ctx.fillRect(ct_sx, ct_sy, ct_rw, ct_rh); ctx.restore()
+            }
+          }
+
+          // ★ pequeño sobre el checkpoint activo
+          if (isSpawn) {
+            ctx.fillStyle = th2.accent
+            ctx.font = `bold ${Math.max(6, Math.round(8 * g.realMapScale))}px 'Courier New',monospace`
+            ctx.textAlign = "center"
+            ctx.fillText("★", sx_map, sy_map - Math.round(8 * g.realMapScale))
+            ctx.textAlign = "left"
+          }
+        }
+      }
+
       // ── Cajas de suministros activas en este cubículo ───────────
       {
-        const boxSpr = sprs["box"]
+        const boxSprGame = sprs["box"]
+        const boxSprV2   = sprs["icon_box"]
         for (const cr of g.crates) {
           if (!cr.active) continue
           const crWorld = Math.max(0, Math.min(NW - 1, Math.floor(cr.x / (NC * RW))))
@@ -6077,13 +6184,15 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           if (cr.y < y0 || cr.y >= y0 + RH) continue
           const crW    = Math.max(4, Math.round(cr.w * scX * g.realMapScale))
           const crH    = Math.max(4, Math.round(cr.h * scY * g.realMapScale))
-          // Anclar al bottom-center: escala crece hacia arriba
           const crCX   = cx + (cr.x + cr.w / 2 - x0) * scX
           const crBotY = cy + (cr.y + cr.h      - y0) * scY
           const crMapX = crCX   - crW / 2
           const crMapY = crBotY - crH
-          if (boxSpr && boxSpr.complete && boxSpr.naturalWidth > 0) {
-            ctx.drawImage(boxSpr, crMapX, crMapY, crW, crH)
+          // v1 no tiene icono caja → usa game sprite; v2 usa minimalist
+          const bSpr   = iconMode === 2 ? (boxSprV2 || boxSprGame) : boxSprGame
+          if (bSpr && bSpr.complete && bSpr.naturalWidth > 0) {
+            if (iconMode === 2) drawSmooth(bSpr, crMapX, crMapY, crW, crH)
+            else                ctx.drawImage(bSpr, crMapX, crMapY, crW, crH)
           } else {
             ctx.fillStyle = th.accent + "CC"; ctx.fillRect(crMapX, crMapY, crW, crH)
             ctx.fillStyle = th.wall; ctx.fillRect(crMapX + 1, crMapY + 1, crW - 2, crH - 2)
@@ -6094,8 +6203,11 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       // ── Enemigos activos en este cubículo ────────────────────────
       {
         const enSprGame = sprs["enemy_idle"]
-        const enSprIcon = sprs["icon_enemy"]
-        const enSpr = g.realMapIconMode === 1 ? enSprIcon : enSprGame
+        const enSprV1   = sprs["icon_enemy_v1"]
+        const enSprV2   = sprs["icon_enemy_v2"]
+        const enSpr     = iconMode === 1 ? (enSprV1 || enSprGame)
+                        : iconMode === 2 ? (enSprV2 || enSprGame)
+                        : enSprGame
         for (const e of g.enemies) {
           if (!e.active || e.dying) continue
           if (e.world !== w) continue
@@ -6109,10 +6221,12 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           const eMapX = eCX   - eDW / 2
           const eMapY = eBotY - eDH
           if (enSpr && enSpr.complete && enSpr.naturalWidth > 0) {
-            ctx.save()
-            if (g.realMapIconMode === 1) {
+            if (iconMode === 2) {
+              drawSmooth(enSpr, eMapX, eMapY, eDW, eDH)
+            } else if (iconMode === 1) {
               ctx.drawImage(enSpr, eMapX, eMapY, eDW, eDH)
             } else {
+              ctx.save()
               const fw = Math.round(enSpr.width / 4), fh = Math.round(enSpr.height / 4)
               if (e.dir < 0) {
                 ctx.translate(eMapX + eDW, eMapY); ctx.scale(-1, 1)
@@ -6120,8 +6234,8 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
               } else {
                 ctx.drawImage(enSpr, 0, 0, fw, fh, eMapX, eMapY, eDW, eDH)
               }
+              ctx.restore()
             }
-            ctx.restore()
           } else {
             ctx.fillStyle = e.boss ? "#FF4444CC" : "#FF8800CC"
             ctx.fillRect(eMapX, eMapY, eDW, eDH)
@@ -6132,8 +6246,11 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       // ── Rex NPC (solo W0, sala [VIEJO_DOG_C, VIEJO_DOG_R]) ───────────────────
       if (w === 0 && c === VIEJO_DOG_C && r === VIEJO_DOG_R) {
         const rexSprGame = sprs["rex_idle"]
-        const rexSprIcon = sprs["icon_rex"]
-        const rexSpr = g.realMapIconMode === 1 ? rexSprIcon : rexSprGame
+        const rexSprV1   = sprs["icon_rex_v1"]
+        const rexSprV2   = sprs["icon_rex_v2"]
+        const rexSpr     = iconMode === 1 ? (rexSprV1 || rexSprGame)
+                         : iconMode === 2 ? (rexSprV2 || rexSprGame)
+                         : rexSprGame
         const rDW    = Math.max(2, Math.round(43 * scX * g.realMapScale))
         const rDH    = Math.max(3, Math.round(65 * scY * g.realMapScale))
         // Anclar al bottom-center: VIEJO_DOG_POS.y es la posición de los pies
@@ -6142,7 +6259,9 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const rMapX  = rexCX - rDW / 2
         const rMapY  = rBotY - rDH
         if (rexSpr && rexSpr.complete && rexSpr.naturalWidth > 0) {
-          if (g.realMapIconMode === 1) {
+          if (iconMode === 2) {
+            drawSmooth(rexSpr, rMapX, rMapY, rDW, rDH)
+          } else if (iconMode === 1) {
             ctx.drawImage(rexSpr, rMapX, rMapY, rDW, rDH)
           } else {
             const fw = Math.round(rexSpr.width / 4), fh = Math.round(rexSpr.height / 4)
@@ -6156,9 +6275,12 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Sprite de Luly frame-0 en la sala actual ────────────────
       if (isPlayerRoom) {
-        const sprGame = sprs["player_idle"]
-        const sprIcon = sprs["icon_luly"]
-        const sprIdle = g.realMapIconMode === 1 ? sprIcon : sprGame
+        const sprGame  = sprs["player_idle"]
+        const sprV1    = sprs["icon_luly_v1"]
+        const sprV2    = sprs["icon_luly_v2"]
+        const sprIdle  = iconMode === 1 ? (sprV1 || sprGame)
+                       : iconMode === 2 ? (sprV2 || sprGame)
+                       : sprGame
         const dw = Math.max(2, Math.round(PW * scX * g.realMapScale))
         const dh = Math.max(3, Math.round(PH * scY * g.realMapScale))
         // Anclar al bottom-center: los pies de Luly están en p.y + PH
@@ -6167,10 +6289,12 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const plMapX = plCX   - dw / 2
         const plMapY = plBotY - dh
         if (sprIdle && sprIdle.complete && sprIdle.naturalWidth > 0) {
-          ctx.save()
-          if (g.realMapIconMode === 1) {
+          if (iconMode === 2) {
+            drawSmooth(sprIdle, plMapX, plMapY, dw, dh)
+          } else if (iconMode === 1) {
             ctx.drawImage(sprIdle, plMapX, plMapY, dw, dh)
           } else {
+            ctx.save()
             const fw = Math.round(sprIdle.width / 4), fh = Math.round(sprIdle.height / 4)
             if (p.facing === -1) {
               ctx.translate(plMapX + dw, plMapY)
@@ -6179,8 +6303,8 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
             } else {
               ctx.drawImage(sprIdle, 0, 0, fw, fh, plMapX, plMapY, dw, dh)
             }
+            ctx.restore()
           }
-          ctx.restore()
         } else {
           ctx.fillStyle = "#FF66FF"
           ctx.fillRect(plMapX, plMapY, Math.max(2, Math.round(PW * scX)), Math.max(3, Math.round(PH * scY)))
@@ -6203,7 +6327,7 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.fillStyle = "#111"; ctx.fillRect(0, CH - 14, CW, 14)
   ctx.fillStyle = "#444"; ctx.font = "7px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText(
-    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  escala:${g.realMapScale}x  gfx:${g.realMapIconMode === 0 ? "SPRITES" : "ICONOS"}  ·  [Y] cerrar`,
+    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  escala:${g.realMapScale}x  gfx:${iconLabel}  ·  [Y] cerrar`,
     CW / 2, CH - 3
   )
   ctx.textAlign = "left"
@@ -7096,9 +7220,18 @@ export default function ProyectoLuly() {
     L("hud_croqueta",    "/assets/Enviroment/Interface/Croqueta_ptos/Croqueta.png")
     L("drop_bone",       "/assets/Enviroment/Interface/Bone/Bone_X.png")
     // ── Real Map Dev — iconos UI alternativos ──────────────────────────────
-    L("icon_luly",  "/assets/Enviroment/Interface/Luly_icon/Luly_Icon.png")
-    L("icon_rex",   "/assets/Enviroment/Interface/World_1/Rex.png")
-    L("icon_enemy", "/assets/Enviroment/Interface/World_1/First_Section/Enemy_icon.png")
+    // ── Real Map Dev — iconos v1 (pixel art original) ─────────────────────────
+    L("icon_luly_v1",   "/assets/Enviroment/Interface/Luly_icon/Luly_Icon.png")
+    L("icon_rex_v1",    "/assets/Enviroment/Interface/World_1/Rex.png")
+    L("icon_enemy_v1",  "/assets/Enviroment/Interface/World_1/First_Section/Enemy_icon.png")
+    // ── Real Map Dev — iconos v2 minimalist alta resolución ───────────────────
+    L("icon_luly_v2",   "/assets/Enviroment/Icon_Face_Luly_Map/Icon_Face.png")
+    L("icon_rex_v2",    "/assets/Enviroment/Interface/Minimalist/World_1/Rex.png")
+    L("icon_rex_house", "/assets/Enviroment/Interface/Minimalist/World_1/Rex_House.png")
+    L("icon_enemy_v2",  "/assets/Enviroment/Interface/Minimalist/World_1/First_Section/Enemy.png")
+    L("icon_box",       "/assets/Enviroment/Interface/Minimalist/Box.png")
+    L("icon_kennel",    "/assets/Enviroment/Interface/Minimalist/Kennel.png")
+    L("icon_cucha",     "/assets/Enviroment/Interface/Minimalist/Cucha_Teleport.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -7197,7 +7330,7 @@ export default function ProyectoLuly() {
           g.realMapScale = SCALE_STEPS[(idx + 1) % SCALE_STEPS.length]
           return
         }
-        if (k === "v") { g.realMapIconMode = (g.realMapIconMode + 1) % 2; return }
+        if (k === "v") { g.realMapIconMode = (g.realMapIconMode + 1) % 3; return }
         if (k === "y" || k === "escape")     { g.showRealMap = false; return }
         return  // bloquear resto de teclas mientras el mapa real está abierto
       }
