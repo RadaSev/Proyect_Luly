@@ -51,7 +51,7 @@ type Enemy = {
 type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
-type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" | "tba" }
+type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" | "tba" | "c" }
 type TBall  = { x: number; y: number; vx: number; vy: number; active: boolean; bounces: number; life: number }
 type Pickup = { id: string; kind: "tball" | "tball_key" | "baton"; x: number; y: number; active: boolean; floatPhase: number; spawnTimer?: number }
 type Crate = { id: number; x: number; y: number; w: number; h: number; active: boolean }
@@ -178,7 +178,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.3"
+const GAME_VERSION = "0.2.4"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -2887,6 +2887,7 @@ function tickDrops(g: G) {
       if (d.kind === "h") p.hp = Math.min(p.maxHp, p.hp + 1)
       else if (d.kind === "a") p.ammo = Math.min(15, p.ammo + 10)
       else if (d.kind === "tba") g.tballAmmo = Math.min(g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT, g.tballAmmo + TB_AMMO_DROP)
+      else if (d.kind === "c") g.score += 50
       d.active = false
     }
   }
@@ -3080,6 +3081,8 @@ function spawnBossCPReward(g: G, cp: CPDef) {
     g.drops.push({ x: cx + (Math.random() - 0.5) * 80, y: cy - 20, vx: (Math.random() - 0.5) * 2.5, vy: -3 - Math.random() * 1.5, active: true, life: 22, kind: "h" })
   for (let i = 0; i < 2; i++)
     g.drops.push({ x: cx + (Math.random() - 0.5) * 60, y: cy - 20, vx: (Math.random() - 0.5) * 2, vy: -3 - Math.random() * 1.5, active: true, life: 22, kind: "a" })
+  for (let i = 0; i < 3; i++)
+    g.drops.push({ x: cx + (Math.random() - 0.5) * 70, y: cy - 20, vx: (Math.random() - 0.5) * 2.2, vy: -3.5 - Math.random() * 1.2, active: true, life: 22, kind: "c" })
   triggerShake(g, 8, 0.3)
   spawnExplosion(g, cx, cy, ["#FFD700", "#FFAA00", "#FFFFFF", "#00FF88"], 20, 6)
 }
@@ -5291,30 +5294,63 @@ function drawCrates(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
   }
 }
 
-function drawDrops(ctx: CanvasRenderingContext2D, g: G) {
+function drawDrops(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
+  const heartSpr    = sprs["hud_heart"]
+  const boneSpr     = sprs["drop_bone"]
+  const tballSpr    = sprs["tennis_ball"]
+  const croquetaSpr = sprs["hud_croqueta"]
+  const t = Date.now() * 0.004
+  const bob = Math.sin(t) * 0.08
+
   for (const d of g.drops) {
     if (!d.active) continue
     const sx = d.x - g.cx, sy = d.y - g.cy
+    const sc = 0.92 + bob  // suave flotación
+
     if (d.kind === "h") {
-      const t = Date.now() * 0.004; ctx.save(); ctx.translate(sx + 9, sy + 9); ctx.scale(.9 + Math.sin(t) * .1, .9 + Math.sin(t) * .1)
-      ctx.fillStyle = "#FF1744"; ctx.beginPath(); ctx.moveTo(0, 8); ctx.bezierCurveTo(0, 5, -9, -2, -9, 1); ctx.bezierCurveTo(-9, -4, 0, -8, 0, -3); ctx.bezierCurveTo(0, -8, 9, -4, 9, 1); ctx.bezierCurveTo(9, -2, 0, 5, 0, 8); ctx.fill(); ctx.restore()
+      const SZ = 22
+      ctx.save(); ctx.translate(sx + SZ/2, sy + SZ/2); ctx.scale(sc, sc)
+      if (heartSpr && heartSpr.complete && heartSpr.naturalWidth > 0) {
+        ctx.drawImage(heartSpr, -SZ/2, -SZ/2, SZ, SZ)
+      } else {
+        ctx.fillStyle = "#FF1744"
+        ctx.beginPath(); ctx.moveTo(0,8); ctx.bezierCurveTo(0,5,-9,-2,-9,1); ctx.bezierCurveTo(-9,-4,0,-8,0,-3); ctx.bezierCurveTo(0,-8,9,-4,9,1); ctx.bezierCurveTo(9,-2,0,5,0,8); ctx.fill()
+      }
+      ctx.restore()
     } else if (d.kind === "a") {
-      const t = Date.now() * .003; ctx.save(); ctx.translate(sx + 10, sy + 10); ctx.rotate(t)
-      ctx.fillStyle = "#F5DEB3"; ctx.fillRect(-10, -2, 20, 4); ctx.fillRect(-2, -10, 4, 20); ctx.restore()
-      ctx.fillStyle = "#FFF"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText("+10", sx + 10, sy - 2); ctx.textAlign = "left"
+      const SZ = 20
+      ctx.save(); ctx.translate(sx + SZ/2, sy + SZ/2); ctx.scale(sc, sc)
+      if (boneSpr && boneSpr.complete && boneSpr.naturalWidth > 0) {
+        ctx.drawImage(boneSpr, -SZ/2, -SZ/2, SZ, SZ)
+      } else {
+        ctx.fillStyle = "#F5DEB3"; ctx.fillRect(-9,-2,18,4); ctx.fillRect(-2,-9,4,18)
+      }
+      ctx.restore()
+      ctx.fillStyle = "#FFF"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText("+10", sx + SZ/2, sy - 2); ctx.textAlign = "left"
     } else if (d.kind === "tba") {
-      // Mini pelota de tenis con label +3
-      const t2 = Date.now() * 0.004; ctx.save(); ctx.translate(sx + 9, sy + 9)
-      ctx.scale(0.88 + Math.sin(t2) * 0.08, 0.88 + Math.sin(t2) * 0.08)
-      const bg = ctx.createRadialGradient(-2, -2, 1, 0, 0, 10)
-      bg.addColorStop(0, "#DDFF44"); bg.addColorStop(0.6, "#88CC00"); bg.addColorStop(1, "#446600")
-      ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill()
-      ctx.strokeStyle = "#CCEE00"; ctx.lineWidth = 1.2
-      ctx.beginPath(); ctx.arc(0, 0, 10, -0.7, 0.7); ctx.stroke()
-      ctx.beginPath(); ctx.arc(0, 0, 10, Math.PI - 0.7, Math.PI + 0.7); ctx.stroke()
+      const SZ = 22
+      ctx.save(); ctx.translate(sx + SZ/2, sy + SZ/2); ctx.scale(sc, sc)
+      if (tballSpr && tballSpr.complete && tballSpr.naturalWidth > 0) {
+        ctx.drawImage(tballSpr, -SZ/2, -SZ/2, SZ, SZ)
+      } else {
+        const bg = ctx.createRadialGradient(-2,-2,1,0,0,10); bg.addColorStop(0,"#DDFF44"); bg.addColorStop(0.6,"#88CC00"); bg.addColorStop(1,"#446600")
+        ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill()
+      }
       ctx.restore()
       ctx.fillStyle = "#CCFF44"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-      ctx.fillText(`+${TB_AMMO_DROP}🎾`, sx + 9, sy - 2); ctx.textAlign = "left"
+      ctx.fillText(`+${TB_AMMO_DROP}`, sx + SZ/2, sy - 2); ctx.textAlign = "left"
+    } else if (d.kind === "c") {
+      const SZ = 20
+      ctx.save(); ctx.translate(sx + SZ/2, sy + SZ/2); ctx.scale(sc, sc)
+      if (croquetaSpr && croquetaSpr.complete && croquetaSpr.naturalWidth > 0) {
+        ctx.drawImage(croquetaSpr, -SZ/2, -SZ/2, SZ, SZ)
+      } else {
+        ctx.fillStyle = "#FFD700"; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill()
+      }
+      ctx.restore()
+      ctx.fillStyle = "#FFD700"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText("+50", sx + SZ/2, sy - 2); ctx.textAlign = "left"
     }
   }
 }
@@ -6414,7 +6450,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
-  drawDrops(ctx, g); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
+  drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
@@ -7021,8 +7057,9 @@ export default function ProyectoLuly() {
     L("hud_heart",       "/assets/Enviroment/Interface/Heart/Heart.png")
     L("hud_bone",        "/assets/Enviroment/Interface/Bone/Bone.png")
     L("hud_enemy_live",  "/assets/Enviroment/Interface/Enemy/Enemy_Live.png")
-    L("hud_enemy_dead",  "/assets/Enviroment/Interface/Enemy/enemy_Death.png")
+    L("hud_enemy_dead",  "/assets/Enviroment/Interface/Enemy/Enemy_Death.png")
     L("hud_croqueta",    "/assets/Enviroment/Interface/Croqueta_ptos/Croqueta.png")
+    L("drop_bone",       "/assets/Enviroment/Interface/Bone/Bone_X.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -8056,7 +8093,7 @@ export default function ProyectoLuly() {
                 {/* Ícono de pelota */}
                 {/* Imagen real del asset */}
                 <img
-                  src="/assets/Enviroment/Tennis_Ball/Tennis_Ball.png"
+                  src={asset("/assets/Enviroment/Tennis_Ball/Tennis_Ball.png")}
                   width={Math.round(tballSz * 0.60)}
                   height={Math.round(tballSz * 0.60)}
                   style={{
