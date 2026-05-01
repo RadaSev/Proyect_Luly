@@ -178,7 +178,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.2"
+const GAME_VERSION = "0.2.3"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -6431,125 +6431,179 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
     ctx.fillStyle = `rgba(0,0,0,${g.overFade * 0.82})`
     ctx.fillRect(0, 0, CW, CH)
   }
-  drawMinimap(ctx, g); drawDevPanel(ctx, g); drawHUD(ctx, g); drawTPMenu(ctx, g); drawWorldTransition(ctx, g)
+  drawMinimap(ctx, g); drawDevPanel(ctx, g); drawHUD(ctx, g, sprs); drawTPMenu(ctx, g); drawWorldTransition(ctx, g)
 }
 
 // ══════════════════════════════════════════════════════════════
 //  HUD
 // ══════════════════════════════════════════════════════════════
-function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
+function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const p = g.pl
   const curW = Math.max(0, Math.min(Math.floor(p.x / (NC * RW)), NW - 1))
   const curC = Math.max(0, Math.min(Math.floor((p.x % (NC * RW)) / RW), NC - 1))
   const curR = Math.max(0, Math.min(Math.floor(p.y / RH), NR - 1))
-  const th = THEMES[curW], panW = 130, panX = 8
-  ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.beginPath(); ctx.roundRect(panX, 8, panW, 148, 8); ctx.fill()
-  ctx.strokeStyle = th.accent + "33"; ctx.lineWidth = 1; ctx.strokeRect(panX, 8, panW, 148)
-  const hs = 18, hsp = 22, hy = 20
+  const th = THEMES[curW]
+
+  // ── Panel izquierdo ───────────────────────────────────────────────────────
+  const panX = 6, panY = 6, panW = 192
+  // Dimensiones de cada fila
+  const HS = 28, HSP = 34, HY0 = panY + 14          // corazones
+  const EY0 = HY0 + HS + 12, ESIZE = 22, ESTP = 26  // enemigos
+  const BY0 = EY0 + ESIZE + 12, BSIZE = 18, BSTP = 11 // huesos
+  const CPLBL_Y = BY0 + BSIZE + 14                   // checkpoint mini-label
+  const panH = CPLBL_Y + 16 + 8
+  ctx.fillStyle = "rgba(0,0,0,0.72)"
+  ctx.beginPath(); ctx.roundRect(panX, panY, panW, panH, 10); ctx.fill()
+  ctx.strokeStyle = th.accent + "44"; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.roundRect(panX, panY, panW, panH, 10); ctx.stroke()
+
+  // ── Corazones ─────────────────────────────────────────────────────────────
+  const HX0 = panX + 12
+  const heartSpr = sprs["hud_heart"]
   for (let i = 0; i < p.maxHp; i++) {
-    const hx = panX + 10 + i * hsp; ctx.fillStyle = i < p.hp ? "#FF1744" : "#333"
-    ctx.beginPath(); ctx.moveTo(hx + hs / 2, hy + hs * .8); ctx.bezierCurveTo(hx + hs / 2, hy + hs * .6, hx, hy + hs * .3, hx, hy + hs * .5); ctx.bezierCurveTo(hx, hy + hs * .2, hx + hs * .3, hy, hx + hs / 2, hy + hs * .3); ctx.bezierCurveTo(hx + hs * .7, hy, hx + hs, hy + hs * .2, hx + hs, hy + hs * .5); ctx.bezierCurveTo(hx + hs, hy + hs * .3, hx + hs / 2, hy + hs * .6, hx + hs / 2, hy + hs * .8); ctx.fill()
-  }
-  ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("ENEMIGOS SALA", panX + 10, hy + hs + 16)
-  const roomSpawns = getEnemySpawns(curW, curC, curR)
-  const eCy = hy + hs + 26, eR = 6, eSp = 16
-  for (let i = 0; i < Math.min(roomSpawns.length, 7); i++) {
-    const ex = panX + 10 + i * eSp + eR, dead2 = g.dead.has(`${rid(curW, curC, curR)}_${i}`)
-    ctx.fillStyle = dead2 ? "#1A1A1A" : "#CC2222"; ctx.beginPath(); ctx.arc(ex, eCy, eR, 0, Math.PI * 2); ctx.fill()
-    if (dead2) { ctx.strokeStyle = "#FF4444"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(ex - 3, eCy - 3); ctx.lineTo(ex + 3, eCy + 3); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ex + 3, eCy - 3); ctx.lineTo(ex - 3, eCy + 3); ctx.stroke() }
-  }
-  if (roomSpawns.length > 7) { ctx.fillStyle = "#888"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText(`+${roomSpawns.length - 7}`, panX + 10 + 7 * eSp + eR + 2, eCy + 4) }
-  if (roomSpawns.length === 0) { ctx.fillStyle = "#00FF88"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.fillText("✓ LIMPIA", panX + 10, eCy + 4) }
-  const ammoY = eCy + eR + 14
-  ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("MUNICIÓN", panX + 10, ammoY)
-  const bW = 7, bH = 7, bSp = 8, bY = ammoY + 8
-  for (let i = 0; i < 15; i++) {
-    const bx = panX + 10 + i * bSp, has = i < p.ammo; ctx.fillStyle = has ? th.accent : "#222"
-    ctx.beginPath(); ctx.arc(bx + 1, bY + 1, 2, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(bx + bW - 1, bY + bH - 1, 2, 0, Math.PI * 2); ctx.fill()
-    if (has) { ctx.fillStyle = th.accent; ctx.fillRect(bx + 1, bY + 2, bW - 2, bH - 4); ctx.fillRect(bx + 2, bY + 1, bW - 4, bH - 2) }
-  }
-  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(CW - 92, 8, 84, 22, 4); ctx.fill()
-  ctx.fillStyle = th.accent; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "right"; ctx.fillText(`${g.score}`, CW - 12, 23); ctx.textAlign = "left"
-  ctx.fillStyle = "#888"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText("PTS", CW - 86, 23)
-  // ── STAMINA: BAR (legacy) o CIRCLE (junto al personaje) ──────────────────
-  const stRatio = p.stamina / p.maxStamina
-  if (g.staDisplay === "bar") {
-    const stW = 84, stH = 10, stX = CW - 92, stY = 34
-    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 3); ctx.fill()
-    if (p.exhausted) {
-      if (Math.floor(Date.now() / 250) % 2 === 0) { ctx.fillStyle = "#FF220044"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, stW - 2, stH - 2, 2); ctx.fill() }
-      ctx.strokeStyle = "#FF3300BB"; ctx.lineWidth = 1.5; ctx.strokeRect(stX, stY, stW, stH)
-      const cdRatio = p.staminaCooldown / 5.0
-      ctx.fillStyle = "#FF330055"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * cdRatio), stH - 2, 2); ctx.fill()
-      ctx.fillStyle = "#FF6600DD"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, stX + stW / 2, stY + 8); ctx.textAlign = "left"
+    const hx = HX0 + i * HSP
+    if (heartSpr && heartSpr.complete && heartSpr.naturalWidth > 0) {
+      if (i >= p.hp) { ctx.save(); ctx.globalAlpha = 0.18 }
+      ctx.drawImage(heartSpr, hx, HY0, HS, HS)
+      if (i >= p.hp) ctx.restore()
     } else {
-      const stCol = stRatio > 0.55 ? "#44EE44" : stRatio > 0.25 ? "#EEcc00" : "#FF4400"
-      ctx.fillStyle = stCol; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), stH - 2, 2); ctx.fill()
-      ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.roundRect(stX + 1, stY + 1, Math.max(0, (stW - 2) * stRatio), Math.round(stH / 2) - 1, 1); ctx.fill()
-    }
-    ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "9px 'Courier New',monospace"
-    ctx.textAlign = "right"; ctx.fillText(p.exhausted ? "AGOTADO" : "STA", stX - 2, stY + 8); ctx.textAlign = "left"
-  } else if (g.staCircleAlpha > 0.01) {
-    // Círculo de stamina junto al personaje (screen-space)
-    ctx.save()
-    ctx.globalAlpha = g.staCircleAlpha
-    const _sc = g.mobileZoom === "close" ? 1.35 : 1.0
-    const scx = (p.x - g.cx + PW / 2) * _sc      // centro X en pantalla (ajustado al zoom)
-    const scy = (p.y - g.cy - 20) * _sc           // justo encima del personaje
-    const rad = 13, lw = 3.5
-    // Fondo del círculo
-    ctx.beginPath(); ctx.arc(scx, scy, rad, 0, Math.PI * 2)
-    ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fill()
-    // Arco de relleno (de arriba = -π/2, sentido horario)
-    const startA = -Math.PI / 2
-    if (p.exhausted) {
-      // Parpadeo rojo + countdown
-      const blink = Math.floor(Date.now() / 280) % 2 === 0
-      ctx.strokeStyle = blink ? "#FF2200" : "#FF6600"
-      ctx.lineWidth = lw
-      const cdRatio = Math.max(0, p.staminaCooldown / 4.5)
-      ctx.beginPath(); ctx.arc(scx, scy, rad, startA, startA + cdRatio * Math.PI * 2)
-      ctx.stroke()
-      ctx.fillStyle = blink ? "#FF4400DD" : "#FF6600BB"
-      ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"
-      ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`, scx, scy)
-      ctx.textBaseline = "alphabetic"
-    } else {
-      const arcCol = stRatio > 0.55 ? "#44EE44" : stRatio > 0.25 ? "#EECC00" : "#FF4400"
-      ctx.strokeStyle = arcCol; ctx.lineWidth = lw; ctx.lineCap = "round"
-      ctx.beginPath(); ctx.arc(scx, scy, rad, startA, startA + stRatio * Math.PI * 2)
-      ctx.stroke()
-    }
-    // Borde exterior sutil
-    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.arc(scx, scy, rad, 0, Math.PI * 2); ctx.stroke()
-    ctx.restore()
-    ctx.textAlign = "left"
-  }
-  // ── JUMP / PLAT indicators (siempre visibles) ─────────────────────────────
-  {
-    const _stX = CW - 92, _stY = 34, _stW = 84
-    const djY = _stY + 14, sq = 8, sqGap = 5, totalSq = 2 * (sq + sqGap) - sqGap
-    const djLabelX = _stX - 2, djStartX = _stX + (_stW - totalSq) / 2
-    ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.font = "9px 'Courier New',monospace"
-    ctx.textAlign = "right"; ctx.fillText("JUMP", djLabelX, djY + 7); ctx.textAlign = "left"
-    const j1 = p.onGround || (!p.jh)
-    ctx.fillStyle = j1 ? th.accent : th.accent + "44"
-    ctx.beginPath(); ctx.roundRect(djStartX, djY, sq, sq, 2); ctx.fill()
-    ctx.fillStyle = p.djumpAvail ? "#00DDFF" : "#FFFFFF22"
-    ctx.beginPath(); ctx.roundRect(djStartX + sq + sqGap, djY, sq, sq, 2); ctx.fill()
-    const pfY = _stY + 14 + 12, pfLabelX = _stX - 2
-    const onPlat = p.onGround && activePlats(g).some(pl =>
-      pl.mode === "t" && p.x + p.w > pl.x && p.x < pl.x + pl.w && Math.abs((p.y + p.h) - pl.y) <= 8
-    )
-    if (onPlat) {
-      ctx.fillStyle = th.accent + "BB"; ctx.font = "9px 'Courier New',monospace"; ctx.textAlign = "right"
-      ctx.fillText("S+S↓ bajar", pfLabelX, pfY + 6); ctx.textAlign = "left"
+      // Fallback procedural
+      ctx.fillStyle = i < p.hp ? "#FF1744" : "#333"
+      ctx.beginPath()
+      ctx.moveTo(hx+HS/2,HY0+HS*.8); ctx.bezierCurveTo(hx+HS/2,HY0+HS*.6,hx,HY0+HS*.3,hx,HY0+HS*.5)
+      ctx.bezierCurveTo(hx,HY0+HS*.2,hx+HS*.3,HY0,hx+HS/2,HY0+HS*.3)
+      ctx.bezierCurveTo(hx+HS*.7,HY0,hx+HS,HY0+HS*.2,hx+HS,HY0+HS*.5)
+      ctx.bezierCurveTo(hx+HS,HY0+HS*.3,hx+HS/2,HY0+HS*.6,hx+HS/2,HY0+HS*.8); ctx.fill()
     }
   }
 
-  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.beginPath(); ctx.roundRect(panX, 184, panW, 20, 4); ctx.fill()
-  ctx.fillStyle = th.accent + "99"; ctx.font = "9px 'Courier New',monospace"; ctx.fillText(`★ W${g.checkpoint.w + 1} ${WORLD_NAMES[g.checkpoint.w].slice(0, 12)}`, panX + 6, 197)
+  // ── Enemigos en sala ──────────────────────────────────────────────────────
+  const ELBL_W = 26
+  ctx.fillStyle = th.accent + "88"; ctx.font = "bold 8px 'Courier New',monospace"
+  ctx.fillText("SALA", HX0, EY0 + 10)
+  const roomSpawns = getEnemySpawns(curW, curC, curR)
+  const eliveSpr = sprs["hud_enemy_live"], edeadSpr = sprs["hud_enemy_dead"]
+  if (roomSpawns.length === 0) {
+    ctx.fillStyle = "#00FF88"; ctx.font = "bold 9px 'Courier New',monospace"
+    ctx.fillText("✓ LIMPIA", HX0 + ELBL_W, EY0 + 16)
+  } else {
+    for (let i = 0; i < Math.min(roomSpawns.length, 6); i++) {
+      const ex = HX0 + ELBL_W + i * ESTP
+      const dead2 = g.dead.has(`${rid(curW, curC, curR)}_${i}`)
+      const spr = dead2 ? edeadSpr : eliveSpr
+      if (spr && spr.complete && spr.naturalWidth > 0) {
+        if (dead2) { ctx.save(); ctx.globalAlpha = 0.42 }
+        ctx.drawImage(spr, ex, EY0, ESIZE, ESIZE)
+        if (dead2) ctx.restore()
+      } else {
+        const ecx = ex + ESIZE/2, ecy = EY0 + ESIZE/2, er = ESIZE/2 - 2
+        ctx.fillStyle = dead2 ? "#1A1A1A" : "#CC2222"
+        ctx.beginPath(); ctx.arc(ecx, ecy, er, 0, Math.PI*2); ctx.fill()
+        if (dead2) {
+          ctx.strokeStyle = "#FF4444"; ctx.lineWidth = 1.5
+          ctx.beginPath(); ctx.moveTo(ecx-3,ecy-3); ctx.lineTo(ecx+3,ecy+3); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(ecx+3,ecy-3); ctx.lineTo(ecx-3,ecy+3); ctx.stroke()
+        }
+      }
+    }
+    if (roomSpawns.length > 6) {
+      ctx.fillStyle = "#888"; ctx.font = "bold 8px 'Courier New',monospace"
+      ctx.fillText(`+${roomSpawns.length-6}`, HX0 + ELBL_W + 6*ESTP + 2, EY0 + 15)
+    }
+  }
+
+  // ── Huesos / Munición ─────────────────────────────────────────────────────
+  const BLBL_W = 44
+  ctx.fillStyle = th.accent + "88"; ctx.font = "bold 8px 'Courier New',monospace"
+  ctx.fillText("HUESOS", HX0, BY0 + 10)
+  const boneSpr = sprs["hud_bone"]
+  for (let i = 0; i < 15; i++) {
+    const bx = HX0 + BLBL_W + i * BSTP
+    const has = i < p.ammo
+    if (boneSpr && boneSpr.complete && boneSpr.naturalWidth > 0) {
+      if (!has) { ctx.save(); ctx.globalAlpha = 0.14 }
+      ctx.drawImage(boneSpr, bx, BY0, BSIZE, BSIZE)
+      if (!has) ctx.restore()
+    } else {
+      ctx.fillStyle = has ? th.accent : "#222"
+      ctx.beginPath(); ctx.arc(bx + BSIZE/2, BY0 + BSIZE/2, 3, 0, Math.PI*2); ctx.fill()
+    }
+  }
+
+  // ── Checkpoint mini-label ─────────────────────────────────────────────────
+  ctx.fillStyle = "rgba(0,0,0,0.45)"
+  ctx.beginPath(); ctx.roundRect(panX + 6, CPLBL_Y - 2, panW - 12, 16, 3); ctx.fill()
+  ctx.fillStyle = th.accent + "88"; ctx.font = "8px 'Courier New',monospace"
+  ctx.fillText(`★ W${g.checkpoint.w+1} ${WORLD_NAMES[g.checkpoint.w].slice(0,16)}`, panX + 10, CPLBL_Y + 10)
+
+  // ── Score (esquina top-right) con icono Croqueta ──────────────────────────
+  const scBoxX = CW - 112, scBoxY = panY, scBoxW = 106, scBoxH = 36
+  ctx.fillStyle = "rgba(0,0,0,0.72)"
+  ctx.beginPath(); ctx.roundRect(scBoxX, scBoxY, scBoxW, scBoxH, 8); ctx.fill()
+  ctx.strokeStyle = th.accent + "44"; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.roundRect(scBoxX, scBoxY, scBoxW, scBoxH, 8); ctx.stroke()
+  const croquetaSpr = sprs["hud_croqueta"]
+  if (croquetaSpr && croquetaSpr.complete && croquetaSpr.naturalWidth > 0) {
+    ctx.drawImage(croquetaSpr, scBoxX + 7, scBoxY + 6, 24, 24)
+  } else {
+    ctx.fillStyle = th.accent + "88"; ctx.font = "bold 9px 'Courier New',monospace"
+    ctx.fillText("PTS", scBoxX + 7, scBoxY + 22)
+  }
+  ctx.fillStyle = th.accent; ctx.font = "bold 14px 'Courier New',monospace"
+  ctx.textAlign = "right"; ctx.fillText(`${g.score}`, scBoxX + scBoxW - 8, scBoxY + 25); ctx.textAlign = "left"
+
+  // ── Stamina: barra clásica o círculo junto al personaje ───────────────────
+  const stRatio = p.stamina / p.maxStamina
+  if (g.staDisplay === "bar") {
+    const stW = 84, stH = 10, stX = CW - 112, stY = scBoxY + scBoxH + 4
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 3); ctx.fill()
+    if (p.exhausted) {
+      if (Math.floor(Date.now()/250)%2===0) { ctx.fillStyle="#FF220044"; ctx.beginPath(); ctx.roundRect(stX+1,stY+1,stW-2,stH-2,2); ctx.fill() }
+      ctx.strokeStyle="#FF3300BB"; ctx.lineWidth=1.5; ctx.strokeRect(stX,stY,stW,stH)
+      const cdRatio = p.staminaCooldown/5.0
+      ctx.fillStyle="#FF330055"; ctx.beginPath(); ctx.roundRect(stX+1,stY+1,Math.max(0,(stW-2)*cdRatio),stH-2,2); ctx.fill()
+      ctx.fillStyle="#FF6600DD"; ctx.font="9px 'Courier New',monospace"; ctx.textAlign="center"
+      ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`,stX+stW/2,stY+8); ctx.textAlign="left"
+    } else {
+      const stCol=stRatio>0.55?"#44EE44":stRatio>0.25?"#EEcc00":"#FF4400"
+      ctx.fillStyle=stCol; ctx.beginPath(); ctx.roundRect(stX+1,stY+1,Math.max(0,(stW-2)*stRatio),stH-2,2); ctx.fill()
+      ctx.fillStyle="rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.roundRect(stX+1,stY+1,Math.max(0,(stW-2)*stRatio),Math.round(stH/2)-1,1); ctx.fill()
+    }
+    ctx.fillStyle="rgba(255,255,255,0.4)"; ctx.font="9px 'Courier New',monospace"
+    ctx.textAlign="right"; ctx.fillText(p.exhausted?"AGOTADO":"STA",stX-2,stY+8); ctx.textAlign="left"
+  } else if (g.staCircleAlpha > 0.01) {
+    ctx.save(); ctx.globalAlpha = g.staCircleAlpha
+    const _sc = g.mobileZoom==="close"?1.35:1.0
+    const scx=(p.x-g.cx+PW/2)*_sc, scy=(p.y-g.cy-20)*_sc, rad=13, lw=3.5
+    ctx.beginPath(); ctx.arc(scx,scy,rad,0,Math.PI*2); ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fill()
+    const startA=-Math.PI/2
+    if (p.exhausted) {
+      const blink=Math.floor(Date.now()/280)%2===0
+      ctx.strokeStyle=blink?"#FF2200":"#FF6600"; ctx.lineWidth=lw
+      ctx.beginPath(); ctx.arc(scx,scy,rad,startA,startA+Math.max(0,p.staminaCooldown/4.5)*Math.PI*2); ctx.stroke()
+      ctx.fillStyle=blink?"#FF4400DD":"#FF6600BB"; ctx.font="bold 9px 'Courier New',monospace"
+      ctx.textAlign="center"; ctx.textBaseline="middle"
+      ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`,scx,scy); ctx.textBaseline="alphabetic"
+    } else {
+      const arcCol=stRatio>0.55?"#44EE44":stRatio>0.25?"#EECC00":"#FF4400"
+      ctx.strokeStyle=arcCol; ctx.lineWidth=lw; ctx.lineCap="round"
+      ctx.beginPath(); ctx.arc(scx,scy,rad,startA,startA+stRatio*Math.PI*2); ctx.stroke()
+    }
+    ctx.strokeStyle="rgba(255,255,255,0.12)"; ctx.lineWidth=1
+    ctx.beginPath(); ctx.arc(scx,scy,rad,0,Math.PI*2); ctx.stroke()
+    ctx.restore(); ctx.textAlign="left"
+  }
+
+  // ── Dev badge ─────────────────────────────────────────────────────────────
+  if (g.devMode) {
+    ctx.fillStyle="rgba(0,80,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW-90,46,84,16,3); ctx.fill()
+    ctx.strokeStyle="#00FF44"; ctx.lineWidth=1; ctx.strokeRect(CW-90,46,84,16)
+    ctx.fillStyle="#00FF44"; ctx.font="bold 9px 'Courier New',monospace"; ctx.textAlign="center"
+    const devFlags=(g.godMode?"GOD ":"")+(g.infiniteAmmo?"AMM ":"")+(g.noEnemies?"NOENM ":"")+(g.ohko?"OHKO":"")
+    ctx.fillText(`DEV${devFlags.trim()?"|"+devFlags.trim():""}`,CW-48,57); ctx.textAlign="left"
+  }
+
+  // ── kennelMsg (checkpoint / gfx toast) ───────────────────────────────────
   if (g.kennelMsg > 0) {
     const alpha = Math.min(1, g.kennelMsg) * Math.min(1, g.kennelMsg / 0.5)
     const isGfxMsg = !g.explored.has("__gfxmsg__") // distinguir tipo de mensaje
@@ -6566,15 +6620,6 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, cpY, 272, 40)
     ctx.fillStyle = msgColor; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(msgText, CW / 2, cpY + 26); ctx.textAlign = "left"; ctx.restore()
-  }
-  if (g.devMode) {
-    // Badge debajo de los indicadores JUMP/PLAT (que terminan en ~y≈70)
-    ctx.fillStyle = "rgba(0,80,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW - 90, 76, 84, 16, 3); ctx.fill()
-    ctx.strokeStyle = "#00FF44"; ctx.lineWidth = 1; ctx.strokeRect(CW - 90, 76, 84, 16)
-    ctx.fillStyle = "#00FF44"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-    const devFlags = (g.godMode ? "GOD " : "") + (g.infiniteAmmo ? "AMM " : "") + (g.noEnemies ? "NOENM " : "") + (g.ohko ? "OHKO" : "")
-    ctx.fillText(`DEV${devFlags ? " | " + devFlags.trim() : ""}`, CW - 48, 87)
-    ctx.textAlign = "left"
   }
   // ── Barra de boss — solo visible cuando el jugador está EN la sala del boss ──
   const bossRoomType = isBossRoom(curW, curC, curR)
@@ -6616,67 +6661,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     ctx.textAlign = "left"
   }
 
-  // ── Indicadores de habilidades desbloqueadas ─────────────────────────
-  {
-    const mob  = g.isMobile
-    const aY   = mob ? 160 : 206
-    const aX   = panX + 8
-    const aGap = mob ? 52 : 36
-    const bW   = mob ? 44 : 30
-    const bH   = mob ? 32 : 22
-    const fIcon = mob ? "bold 14px 'Courier New',monospace" : "bold 9px 'Courier New',monospace"
-    const fLbl  = mob ? "10px 'Courier New',monospace" : "9px 'Courier New',monospace"
-    ctx.fillStyle = th.accent + "55"; ctx.font = mob ? "10px 'Courier New',monospace" : "9px 'Courier New',monospace"
-    ctx.fillText("HABILIDADES", aX, aY)
-    const icons: [string, string, boolean][] = [
-      ["DASH", "⚡", g.abilities.has("dash")],
-      ["W.JMP", "↑↑", g.abilities.has("walljump")],
-      ["HP+1", "❤+", g.abilities.has("hpup")],
-    ]
-    icons.forEach(([label, icon, unlocked], i) => {
-      const ix = aX + i * aGap
-      ctx.fillStyle = unlocked ? "rgba(0,0,0,0.7)" : "rgba(0,0,0,0.4)"
-      ctx.beginPath(); ctx.roundRect(ix, aY + 4, bW, bH, 3); ctx.fill()
-      ctx.strokeStyle = unlocked ? th.accent : "#333"; ctx.lineWidth = 1; ctx.strokeRect(ix, aY + 4, bW, bH)
-      ctx.fillStyle = unlocked ? th.accent : "#444"; ctx.font = fIcon; ctx.textAlign = "center"
-      ctx.fillText(icon, ix + bW / 2, aY + 4 + bH * 0.54)
-      ctx.fillStyle = unlocked ? "#FFFFFF99" : "#33333399"; ctx.font = fLbl
-      ctx.fillText(label, ix + bW / 2, aY + 4 + bH - 3); ctx.textAlign = "left"
-    })
-  }
-
-  // ── Selector de poder activo — en móvil se oculta (la UI del gamepad ya lo muestra) ──
-  if (!g.isMobile) {
-    const POWER_LIST: { id: string; icon: string; label: string; key: string }[] = [
-      { id: "tball", icon: "🎾", label: "T.BALL", key: "V" },
-    ]
-    const hasPowers = POWER_LIST.some(pw => g.abilities.has(pw.id))
-    if (hasPowers) {
-      const pyStart = 236, pGap = 34
-      ctx.fillStyle = th.accent + "55"; ctx.font = "9px 'Courier New',monospace"
-      ctx.fillText("PODER  [V]", panX + 8, pyStart)
-      POWER_LIST.filter(pw => g.abilities.has(pw.id)).forEach((pw, i) => {
-        const px2 = panX + 8 + i * pGap
-        const isActive = g.activePower === pw.id
-        const ammo = pw.id === "tball" ? g.tballAmmo : 0
-        const noAmmo = ammo <= 0
-        ctx.fillStyle = isActive ? (noAmmo ? "rgba(80,0,0,0.35)" : "rgba(50,200,50,0.25)") : "rgba(0,0,0,0.5)"
-        ctx.beginPath(); ctx.roundRect(px2, pyStart + 4, 30, 26, 3); ctx.fill()
-        ctx.strokeStyle = isActive ? (noAmmo ? "#FF4444" : "#44FF44") : "#555"
-        ctx.lineWidth = isActive ? 1.5 : 1; ctx.strokeRect(px2, pyStart + 4, 30, 26)
-        ctx.font = "13px sans-serif"; ctx.textAlign = "center"
-        ctx.fillText(pw.icon, px2 + 15, pyStart + 17)
-        ctx.fillStyle = noAmmo ? "#FF4444" : (isActive ? "#CCFF44" : "#888")
-        ctx.font = "bold 8px 'Courier New',monospace"
-        ctx.fillText(`×${ammo}`, px2 + 15, pyStart + 28); ctx.textAlign = "left"
-        if (isActive && !noAmmo) {
-          const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.006)
-          ctx.strokeStyle = `rgba(68,255,68,${0.3 + 0.3 * pulse})`; ctx.lineWidth = 2
-          ctx.strokeRect(px2 - 1, pyStart + 3, 32, 28)
-        }
-      })
-    }
-  }
+  // (Habilidades y poder activo eliminados del HUD — ver menú de pausa)
 
   // ── Contador de combo ─────────────────────────────────────────────────
   if (g.combo >= 2 && g.comboTimer > 0) {
@@ -6748,8 +6733,8 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G) {
     const lineH = 19
     const boxW = 420, boxH = Math.max(90, 50 + notifLines.length * lineH + 22)
     const bx = CW / 2 - boxW / 2
-    // Posición vertical: en PC bien abajo (no tapa nada); en móvil un poco más arriba para no tapar controles táctiles
-    const by = g.isMobile ? Math.round(CH * 0.52) : CH - boxH - 32
+    // Posición vertical: en PC bien abajo; en móvil también abajo, encima del mensaje de checkpoint
+    const by = g.isMobile ? CH - boxH - 106 : CH - boxH - 32
     ctx.fillStyle = "rgba(0,0,0,0.92)"
     ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 12); ctx.fill()
     ctx.strokeStyle = th.accent; ctx.lineWidth = 2; ctx.strokeRect(bx, by, boxW, boxH)
@@ -6960,7 +6945,9 @@ export default function ProyectoLuly() {
   const [jstickThumb, setJstickThumb] = useState({ x: 0, y: 0 })
   const jstickBaseRef = useRef({ cx: 0, cy: 0 })  // centro del joystick en coords de pantalla
   // Detección de doble-flick lateral para correr (análogo al doble-tap de teclado)
-  const joyTapRef = useRef({ left: 0, right: 0, wasLeft: false, wasRight: false })
+  const joyTapRef    = useRef({ left: 0, right: 0, wasLeft: false, wasRight: false })
+  // Debounce para navegación del menú TP con joystick (evita scroll muy rápido)
+  const tpJoyNavRef  = useRef({ wasH: 0 as -1|0|1, wasV: 0 as -1|0|1, lastH: 0, lastV: 0 })
   const [gpadType, setGpadType] = useState<GpadType>("keyboard")  // tipo de mando detectado
   const menuSelRef = useRef(0)
   const pauseSelRef = useRef(0)
@@ -7026,6 +7013,12 @@ export default function ProyectoLuly() {
     L("skull_p1",    "/assets/Enviroment/Skull/Skull_First_Boss.png")
     L("skull_p2",    "/assets/Enviroment/Skull/Skull_Second_Boss.png")
     L("skull_ultra", "/assets/Enviroment/Skull/Skull_Final_Boss.png")
+    // ── HUD interface sprites ──────────────────────────────────────────────────
+    L("hud_heart",       "/assets/Enviroment/Interface/Heart/Heart.png")
+    L("hud_bone",        "/assets/Enviroment/Interface/Bone/Bone.png")
+    L("hud_enemy_live",  "/assets/Enviroment/Interface/Enemy/Enemy_Live.png")
+    L("hud_enemy_dead",  "/assets/Enviroment/Interface/Enemy/enemy_Death.png")
+    L("hud_croqueta",    "/assets/Enviroment/Interface/Croqueta_ptos/Croqueta.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -8094,8 +8087,90 @@ export default function ProyectoLuly() {
         ══════════════════════════════════════════════════ */}
         {/* ══ D-PAD IZQUIERDO — modo según dpadMode (DEV-CELULAR) ══ */}
 
-        {/* ── MODO CROSS (default) ── */}
-        {dpadMode === "cross" && (<>
+        {/* ── MODO CROSS (default): joystick cuando TP abierto, D-PAD normal ── */}
+        {dpadMode === "cross" && (ui.tpMenuOpen ? (() => {
+          // Joystick de navegación TP (mismo visual que joystick normal, tono cian)
+          const JBASE_C  = Math.round(Math.max(52, Math.min(72, vh * 0.155)))
+          const JTHUMB_C = Math.round(JBASE_C * 0.40)
+          const JDIAM_C  = JBASE_C * 2
+          const DEAD_C   = JBASE_C * 0.18
+          const applyTPJoy = (rawOx: number, rawOy: number) => {
+            const dist = Math.sqrt(rawOx*rawOx + rawOy*rawOy)
+            const scale = dist > JBASE_C ? JBASE_C/dist : 1
+            const ox = rawOx*scale, oy = rawOy*scale
+            setJstickThumb({ x: ox, y: oy })
+            const NAV_CD = 320, nowMs = performance.now()
+            const hZone = Math.abs(ox) > DEAD_C ? (ox > 0 ? 1 : -1) : 0
+            const vZone = Math.abs(oy) > DEAD_C ? (oy > 0 ? 1 : -1) : 0
+            if (hZone !== tpJoyNavRef.current.wasH) {
+              tpJoyNavRef.current.wasH = hZone as -1|0|1
+              if (hZone !== 0 && nowMs - tpJoyNavRef.current.lastH > NAV_CD) {
+                navTPWorld(hZone as 1|-1); tpJoyNavRef.current.lastH = nowMs
+              }
+            }
+            if (vZone !== tpJoyNavRef.current.wasV) {
+              tpJoyNavRef.current.wasV = vZone as -1|0|1
+              if (vZone !== 0 && nowMs - tpJoyNavRef.current.lastV > NAV_CD) {
+                navTP(vZone as 1|-1); tpJoyNavRef.current.lastV = nowMs
+              }
+            }
+          }
+          const releaseTPJoy = () => {
+            setJstickThumb({ x: 0, y: 0 })
+            tpJoyNavRef.current.wasH = 0; tpJoyNavRef.current.wasV = 0
+          }
+          return (
+            <div style={{ position:"absolute", bottom:DPAD_B, left:"15%", transform:"translateX(-50%)",
+              width:JDIAM_C, height:JDIAM_C, touchAction:"none", zIndex:20 }}>
+              <div style={{ position:"absolute", inset:0, borderRadius:"50%",
+                background:"linear-gradient(145deg,#1A3A3A 0%,#0C1C1C 100%)",
+                border:"1.5px solid rgba(80,220,220,0.40)",
+                boxShadow:"0 6px 20px rgba(0,0,0,0.75)" }}/>
+              <svg style={{ position:"absolute",inset:0,pointerEvents:"none" }} width={JDIAM_C} height={JDIAM_C}>
+                <circle cx={JBASE_C} cy={JBASE_C} r={JBASE_C*0.62}
+                  fill="none" stroke="rgba(80,220,220,0.14)" strokeWidth="1" strokeDasharray="5 5"/>
+                <line x1={JBASE_C} y1={JBASE_C*0.38} x2={JBASE_C} y2={JBASE_C*1.62}
+                  stroke="rgba(80,220,220,0.12)" strokeWidth="1"/>
+                <line x1={JBASE_C*0.38} y1={JBASE_C} x2={JBASE_C*1.62} y2={JBASE_C}
+                  stroke="rgba(80,220,220,0.12)" strokeWidth="1"/>
+                <text x={JBASE_C} y={JBASE_C*0.38} textAnchor="middle"
+                  fill="rgba(80,220,220,0.45)" fontSize="9" fontFamily="Courier New,monospace">TP</text>
+              </svg>
+              <div style={{
+                position:"absolute",
+                left: JBASE_C - JTHUMB_C + jstickThumb.x,
+                top:  JBASE_C - JTHUMB_C + jstickThumb.y,
+                width:JTHUMB_C*2, height:JTHUMB_C*2, borderRadius:"50%",
+                background:"radial-gradient(circle at 38% 32%, rgba(80,220,220,0.65), rgba(0,90,100,0.35))",
+                border:"2px solid rgba(80,220,220,0.55)",
+                boxShadow:"0 3px 10px rgba(0,0,0,0.55)", pointerEvents:"none",
+                transition: jstickThumb.x===0&&jstickThumb.y===0 ? "left 0.12s,top 0.12s" : "none",
+              }}/>
+              <div style={{ position:"absolute",inset:0,borderRadius:"50%",cursor:"pointer",touchAction:"none" }}
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  jstickBaseRef.current = { cx: rect.left+JBASE_C, cy: rect.top+JBASE_C }
+                  applyTPJoy(e.clientX-jstickBaseRef.current.cx, e.clientY-jstickBaseRef.current.cy)
+                  const pid = e.pointerId
+                  const onMove = (ev: PointerEvent) => {
+                    if (ev.pointerId!==pid) return
+                    applyTPJoy(ev.clientX-jstickBaseRef.current.cx, ev.clientY-jstickBaseRef.current.cy)
+                  }
+                  const onEnd = (ev: PointerEvent) => {
+                    if (ev.pointerId!==pid) return; releaseTPJoy()
+                    window.removeEventListener("pointermove",onMove)
+                    window.removeEventListener("pointerup",onEnd)
+                    window.removeEventListener("pointercancel",onEnd)
+                  }
+                  window.addEventListener("pointermove",onMove)
+                  window.addEventListener("pointerup",onEnd)
+                  window.addEventListener("pointercancel",onEnd)
+                }}
+              />
+            </div>
+          )
+        })() : (<>
         <div style={{
           position: "absolute",
           bottom: DPAD_B,
@@ -8191,7 +8266,7 @@ export default function ProyectoLuly() {
         <div style={{ position:"absolute", bottom:Math.max(4,DPAD_B-14), left:"15%", transform:"translateX(-50%)",
           fontSize:7, color:"rgba(255,255,255,0.2)", letterSpacing:"0.15em",
           fontFamily:"'Courier New',monospace", pointerEvents:"none", zIndex:20 }}>2× ← / → = RUN</div>
-        </>)}
+        </>))}
 
         {/* ── MODO JOYSTICK (DEV) ── */}
         {dpadMode === "joystick" && (() => {
@@ -8206,12 +8281,34 @@ export default function ProyectoLuly() {
             setJstickThumb({ x: 0, y: 0 })
             joyTapRef.current.wasLeft  = false
             joyTapRef.current.wasRight = false
+            tpJoyNavRef.current.wasH = 0; tpJoyNavRef.current.wasV = 0
           }
           const applyJoy = (rawOx: number, rawOy: number) => {
             const dist = Math.sqrt(rawOx * rawOx + rawOy * rawOy)
             const scale = dist > JBASE ? JBASE / dist : 1
             const ox = rawOx * scale, oy = rawOy * scale
             setJstickThumb({ x: ox, y: oy })
+
+            // ── Modo TP: el joystick navega el menú, no mueve al personaje ──────
+            if (ui.tpMenuOpen) {
+              const NAV_CD = 320, nowMs = performance.now()
+              const hZone = Math.abs(ox) > DEAD ? (ox > 0 ? 1 : -1) : 0
+              const vZone = Math.abs(oy) > DEAD ? (oy > 0 ? 1 : -1) : 0
+              if (hZone !== tpJoyNavRef.current.wasH) {
+                tpJoyNavRef.current.wasH = hZone as -1|0|1
+                if (hZone !== 0 && nowMs - tpJoyNavRef.current.lastH > NAV_CD) {
+                  navTPWorld(hZone as 1|-1); tpJoyNavRef.current.lastH = nowMs
+                }
+              }
+              if (vZone !== tpJoyNavRef.current.wasV) {
+                tpJoyNavRef.current.wasV = vZone as -1|0|1
+                if (vZone !== 0 && nowMs - tpJoyNavRef.current.lastV > NAV_CD) {
+                  navTP(vZone as 1|-1); tpJoyNavRef.current.lastV = nowMs
+                }
+              }
+              return
+            }
+
             const TAP_WIN = 300
             if (Math.abs(ox) > DEAD) {
               if (ox < 0) {
@@ -8244,66 +8341,16 @@ export default function ProyectoLuly() {
             }
           }
 
-          // ── Si el menú TP está abierto → D-cross de navegación TP ────────────
-          if (ui.tpMenuOpen) {
-            const crossBg = `polygon(${ARM}px 0,${ARM+HUB}px 0,${ARM+HUB}px ${ARM}px,${TOTAL}px ${ARM}px,${TOTAL}px ${ARM+HUB}px,${ARM+HUB}px ${ARM+HUB}px,${ARM+HUB}px ${TOTAL}px,${ARM}px ${TOTAL}px,${ARM}px ${ARM+HUB}px,0 ${ARM+HUB}px,0 ${ARM}px,${ARM}px ${ARM}px)`
-            return (
-              <div style={{ position:"absolute", bottom:DPAD_B, left:"15%", transform:"translateX(-50%)",
-                width:TOTAL, height:TOTAL, touchAction:"none", zIndex:20 }}>
-                {/* Fondo cruz — tono cian para indicar modo TP */}
-                <div style={{ position:"absolute", inset:0,
-                  background:"linear-gradient(145deg,#1A3A3A 0%,#0C1C1C 100%)",
-                  clipPath: crossBg, boxShadow:"0 6px 20px rgba(0,0,0,0.75)" }}/>
-                <svg style={{ position:"absolute",inset:0,overflow:"visible",pointerEvents:"none" }} width={TOTAL} height={TOTAL}>
-                  <path d={`M${ARM} 0 H${ARM+HUB} V${ARM} H${TOTAL} V${ARM+HUB} H${ARM+HUB} V${TOTAL} H${ARM} V${ARM+HUB} H0 V${ARM} H${ARM} Z`}
-                    fill="none" stroke="rgba(80,220,220,0.30)" strokeWidth="1.5"/>
-                </svg>
-                <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
-                  background:"#0D2222", border:"1px solid rgba(80,220,220,0.15)", pointerEvents:"none"}}/>
-                {/* Label TP en el hub */}
-                <div style={{ position:"absolute",left:ARM,top:ARM,width:HUB,height:HUB,
-                  display:"flex",alignItems:"center",justifyContent:"center",
-                  fontSize:9, color:"rgba(80,220,220,0.55)", fontFamily:"'Courier New',monospace",
-                  pointerEvents:"none", letterSpacing:"0.1em" }}>TP</div>
-                {/* Overlay — solo tap, navega el menú TP */}
-                <div style={{ position:"absolute",left:0,top:0,width:TOTAL,height:TOTAL,
-                  cursor:"pointer",userSelect:"none",touchAction:"none",zIndex:12 }}
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const x = e.clientX - rect.left, y = e.clientY - rect.top
-                    const inH = y >= ARM && y <= ARM + HUB
-                    const inV = x >= ARM && x <= ARM + HUB
-                    if (!inH && !inV) return
-                    if (inH) { x < TOTAL / 2 ? navTPWorld(-1) : navTPWorld(1) }
-                    else     { y < TOTAL / 2 ? navTP(-1)      : navTP(1) }
-                  }}
-                />
-                {/* Flechas decorativas en tono cian */}
-                <div style={{ position:"absolute",left:ARM,top:0,width:HUB,height:ARM,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
-                  <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 2 L16 12 L2 12 Z" fill="rgba(80,220,220,0.60)"/></svg>
-                </div>
-                <div style={{ position:"absolute",left:ARM,top:ARM+HUB,width:HUB,height:ARM,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
-                  <svg width="18" height="14" viewBox="0 0 18 14"><path d="M9 12 L16 2 L2 2 Z" fill="rgba(80,220,220,0.60)"/></svg>
-                </div>
-                <div style={{ position:"absolute",left:0,top:ARM,width:ARM,height:HUB,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
-                  <svg width="14" height="18" viewBox="0 0 14 18"><path d="M2 9 L12 2 L12 16 Z" fill="rgba(80,220,220,0.60)"/></svg>
-                </div>
-                <div style={{ position:"absolute",left:ARM+HUB,top:ARM,width:ARM,height:HUB,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none" }}>
-                  <svg width="14" height="18" viewBox="0 0 14 18"><path d="M12 9 L2 2 L2 16 Z" fill="rgba(80,220,220,0.60)"/></svg>
-                </div>
-              </div>
-            )
-          }
-
-          // ── Menú TP cerrado → joystick normal ─────────────────────────────
+          // ── Joystick — normal o modo TP (tinte cian) ──────────────────────────
           return (
             <div style={{ position:"absolute", bottom:DPAD_B, left:"15%", transform:"translateX(-50%)",
               width:JDIAM, height:JDIAM, touchAction:"none", zIndex:20 }}>
               {/* Base */}
               <div style={{ position:"absolute", inset:0, borderRadius:"50%",
-                background:"linear-gradient(145deg,#333 0%,#1C1C1C 100%)",
-                border:"1.5px solid rgba(255,255,255,0.16)",
+                background: ui.tpMenuOpen
+                  ? "linear-gradient(145deg,#1A3A3A 0%,#0C2020 100%)"
+                  : "linear-gradient(145deg,#333 0%,#1C1C1C 100%)",
+                border: ui.tpMenuOpen ? "1.5px solid rgba(80,220,220,0.35)" : "1.5px solid rgba(255,255,255,0.16)",
                 boxShadow:"0 6px 20px rgba(0,0,0,0.75)" }}/>
               {/* Anillo guía */}
               <svg style={{ position:"absolute",inset:0,pointerEvents:"none" }} width={JDIAM} height={JDIAM}>
@@ -8313,14 +8360,20 @@ export default function ProyectoLuly() {
                 <line x1={JBASE} y1={JBASE-JBASE*0.55} x2={JBASE} y2={JBASE+JBASE*0.55} stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
                 <line x1={JBASE-JBASE*0.55} y1={JBASE} x2={JBASE+JBASE*0.55} y2={JBASE} stroke="rgba(255,255,255,0.06)" strokeWidth="1"/>
               </svg>
+              {/* Label TP cuando el menú está abierto */}
+              {ui.tpMenuOpen && <div style={{ position:"absolute",inset:0,display:"flex",alignItems:"center",
+                justifyContent:"center",fontSize:9,color:"rgba(80,220,220,0.55)",
+                fontFamily:"'Courier New',monospace",pointerEvents:"none",letterSpacing:"0.1em" }}>TP</div>}
               {/* Thumb — sigue el dedo (posición relativa al centro de la base) */}
               <div style={{
                 position:"absolute",
                 left: JBASE - JTHUMB + jstickThumb.x,
                 top:  JBASE - JTHUMB + jstickThumb.y,
                 width:JTHUMB*2, height:JTHUMB*2, borderRadius:"50%",
-                background:"radial-gradient(circle at 38% 32%, rgba(255,255,255,0.55), rgba(200,200,200,0.18))",
-                border:"2px solid rgba(255,255,255,0.40)",
+                background: ui.tpMenuOpen
+                  ? "radial-gradient(circle at 38% 32%, rgba(80,220,220,0.70), rgba(0,100,100,0.30))"
+                  : "radial-gradient(circle at 38% 32%, rgba(255,255,255,0.55), rgba(200,200,200,0.18))",
+                border: ui.tpMenuOpen ? "2px solid rgba(80,220,220,0.55)" : "2px solid rgba(255,255,255,0.40)",
                 boxShadow:"0 3px 10px rgba(0,0,0,0.55)",
                 pointerEvents:"none",
                 transition: jstickThumb.x === 0 && jstickThumb.y === 0 ? "left 0.12s,top 0.12s" : "none",
