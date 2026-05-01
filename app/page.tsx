@@ -178,7 +178,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.0"
+const GAME_VERSION = "0.2.1"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -5974,6 +5974,23 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         }
       }
 
+      // ── Casa de Rex (solo W0, sala [VIEJO_DOG_C, VIEJO_DOG_R]) ──────────────
+      if (w === 0 && c === VIEJO_DOG_C && r === VIEJO_DOG_R) {
+        const houseSpr = sprs["rex_house"]
+        const hWX = VIEJO_DOG_POS.x - 151
+        const hWY = VIEJO_DOG_POS.y - 326
+        const hMapX = cx + (hWX - x0) * scX
+        const hMapY = cy + (hWY - y0) * scY
+        const hMapW = Math.max(4, Math.round(552 * scX))
+        const hMapH = Math.max(4, Math.round(368 * scY))
+        if (houseSpr && houseSpr.complete && houseSpr.naturalWidth > 0) {
+          ctx.drawImage(houseSpr, hMapX, hMapY, hMapW, hMapH)
+        } else {
+          ctx.fillStyle = "rgba(120,80,40,0.5)"; ctx.fillRect(hMapX, hMapY, hMapW, hMapH)
+          ctx.strokeStyle = "#A06020AA"; ctx.lineWidth = 1; ctx.strokeRect(hMapX, hMapY, hMapW, hMapH)
+        }
+      }
+
       // ── Cajas de suministros activas en este cubículo ───────────
       {
         const boxSpr  = sprs["box"]
@@ -5994,6 +6011,55 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
             ctx.fillStyle = th.accent + "CC"; ctx.fillRect(crMapX, crMapY, crW, crH)
             ctx.fillStyle = th.wall; ctx.fillRect(crMapX + 1, crMapY + 1, crW - 2, crH - 2)
           }
+        }
+      }
+
+      // ── Enemigos activos en este cubículo ────────────────────────
+      {
+        const enSpr = sprs["enemy_idle"]
+        for (const e of g.enemies) {
+          if (!e.active || e.dying) continue
+          if (e.world !== w) continue
+          if (e.x + e.w <= x0 || e.x >= x0 + RW) continue
+          if (e.y + e.h <= y0 || e.y >= y0 + RH) continue
+          const eMapX = cx + (e.x - x0) * scX
+          const eMapY = cy + (e.y - y0) * scY
+          const eDW = Math.max(2, Math.round(e.w * scX * 1.1))
+          const eDH = Math.max(3, Math.round(e.h * scY * 1.1))
+          if (enSpr && enSpr.complete && enSpr.naturalWidth > 0) {
+            const fw = Math.round(enSpr.width / 4), fh = Math.round(enSpr.height / 4)
+            ctx.save()
+            if (e.dir < 0) {
+              ctx.translate(eMapX + eDW, eMapY); ctx.scale(-1, 1)
+              ctx.drawImage(enSpr, 0, 0, fw, fh, 0, 0, eDW, eDH)
+            } else {
+              ctx.drawImage(enSpr, 0, 0, fw, fh, eMapX, eMapY, eDW, eDH)
+            }
+            ctx.restore()
+          } else {
+            // Fallback: rectángulo naranja (normal) o rojo (boss)
+            ctx.fillStyle = e.boss ? "#FF4444CC" : "#FF8800CC"
+            ctx.fillRect(eMapX, eMapY, eDW, eDH)
+          }
+        }
+      }
+
+      // ── Rex NPC (solo W0, sala [VIEJO_DOG_C, VIEJO_DOG_R]) ───────────────────
+      if (w === 0 && c === VIEJO_DOG_C && r === VIEJO_DOG_R) {
+        const rexSpr = sprs["rex_idle"]
+        // Rex se centra horizontalmente en VIEJO_DOG_POS.x; top = pos.y - ryOff(53)
+        const rDW = Math.max(2, Math.round(43 * scX * 1.1))
+        const rDH = Math.max(3, Math.round(65 * scY * 1.1))
+        const rexCX = cx + (VIEJO_DOG_POS.x - x0) * scX          // centro en X
+        const rMapX = rexCX - rDW / 2                              // borde izquierdo
+        const rMapY = cy + ((VIEJO_DOG_POS.y - 53) - y0) * scY    // borde superior
+        if (rexSpr && rexSpr.complete && rexSpr.naturalWidth > 0) {
+          const fw = Math.round(rexSpr.width / 4), fh = Math.round(rexSpr.height / 4)
+          ctx.drawImage(rexSpr, 0, 0, fw, fh, rMapX, rMapY, rDW, rDH)
+        } else {
+          // Fallback: silueta dorada
+          ctx.fillStyle = "#D4A04ACC"
+          ctx.fillRect(rMapX, rMapY, rDW, rDH)
         }
       }
 
