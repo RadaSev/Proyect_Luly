@@ -8727,15 +8727,15 @@ export default function ProyectoLuly() {
             <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.58)", zIndex: 0 }} />
 
             {/* Línea decorativa superior */}
-            <div style={{ position: "absolute", top: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#D4C40055,#D4C400AA,#D4C40055,transparent)", zIndex: 1 }} />
-            <div style={{ position: "absolute", bottom: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#D4C40055,#D4C400AA,#D4C40055,transparent)", zIndex: 1 }} />
+            {/* <div style={{ position: "absolute", top: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#D4C40055,#D4C400AA,#D4C40055,transparent)", zIndex: 1 }} />
+            <div style={{ position: "absolute", bottom: 38, left: "8%", right: "8%", height: 1, background: "linear-gradient(90deg,transparent,#D4C40055,#D4C400AA,#D4C40055,transparent)", zIndex: 1 }} /> */}
 
             {/* Contenido centrado */}
             <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
 
               {/* Etiqueta superior */}
               <p style={{ color: "#3A5A3A", fontSize: 11, letterSpacing: "0.35em", marginBottom: 12 }}>
-                // COMPLEJO CANINO — SECTOR 0 //
+                {/* // COMPLEJO CANINO — SECTOR 0 // */}
               </p>
 
               {/* Título principal */}
@@ -8745,13 +8745,24 @@ export default function ProyectoLuly() {
                 textShadow: "0 0 28px #D4C400CC, 0 0 60px #3A8A0066, 0 2px 0 #000",
                 lineHeight: 1.05,
               }}>
-                PROYECTO LULY
+                {/* PROYECTO LULY */}
               </h1>
 
               {/* Subtítulo */}
               <p style={{ color: "#4A7A4A", fontSize: 13, letterSpacing: "0.22em", margin: "10px 0 44px", fontStyle: "italic" }}>
-                liberación canina — metroidvania
+                {/* liberación canina — metroidvania */}
               </p>
+
+              {/* Separador */}
+              <h1 style={{
+                fontSize: 58, fontWeight: "900", letterSpacing: "0.08em", margin: 0,
+                color: "#EEFFEE",
+                textShadow: "0 0 28px #D4C400CC, 0 0 60px #3A8A0066, 0 2px 0 #000",
+                lineHeight: 1.05,
+                height: 50
+              }}>
+                {/* PROYECTO LULY */}
+              </h1>
 
               {/* Botones */}
               {(() => {
