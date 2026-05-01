@@ -178,7 +178,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.1"
+const GAME_VERSION = "0.2.2"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -5951,27 +5951,54 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         continue
       }
 
-      // ── Plataformas del cubículo ────────────────────────────────
+      // ── Plataformas del cubículo — sprites 1:1 ──────────────────
+      // Transform mundo→celda: permite reutilizar exactamente las
+      // funciones de sprite del juego real (drawFloorSprite, etc.)
+      // con coordenadas de mundo como si fueran de pantalla.
+      // Las tiles "t" (atravesables) se dibujan con coords de pantalla
+      // directamente porque drawTraversableTile usa tamaños fijos en px.
       for (const pl of allPlats) {
-        if (pl.mode === "d") continue                         // puertas: no dibujar
-        if (pl.x + pl.w <= x0 || pl.x >= x0 + RW) continue  // fuera en X
-        if (pl.y + pl.h <= y0 || pl.y >= y0 + RH) continue  // fuera en Y
-        const rx = cx + (pl.x - x0) * scX
-        const ry = cy + (pl.y - y0) * scY
-        const rw = pl.w * scX
-        const rh = Math.max(1, pl.h * scY)
+        if (pl.mode === "d") continue
+        if (pl.x + pl.w <= x0 || pl.x >= x0 + RW) continue
+        if (pl.y + pl.h <= y0 || pl.y >= y0 + RH) continue
+
+        const tRow = Math.floor(pl.y / RH)
+        const zone: "p1" | "trow" | "p2" = tRow < TROW ? "p1" : tRow === TROW ? "trow" : "p2"
+
         if (pl.mode === "t") {
-          // Plataforma de paso: línea delgada con color del mundo
-          ctx.fillStyle = th.accent + "88"
-          ctx.fillRect(rx, ry, rw, Math.max(1, Math.ceil(rh * 0.25)))
-        } else {
-          // Sólido: paredes y suelos
-          const isThin = pl.h <= WT + 4  // suelo o techo fino
-          ctx.fillStyle = isThin ? th.platC + "EE" : th.wall + "DD"
-          ctx.fillRect(rx, ry, rw, rh)
-          // Borde highlight para fachada superior
-          if (isThin) { ctx.fillStyle = th.platHi + "88"; ctx.fillRect(rx, ry, rw, 1) }
+          // Traversable: drawTraversableTile funciona bien con px de pantalla
+          const rx = cx + (pl.x - x0) * scX
+          const ry = cy + (pl.y - y0) * scY
+          const rw = pl.w * scX
+          const rh = Math.max(1, pl.h * scY)
+          drawTraversableTile(ctx, rx, ry, rw, rh, w, g.gfx, zone)
+          continue
         }
+
+        // Sólido: transform mundo→celda, luego reusar funciones reales de sprite
+        ctx.save()
+        ctx.beginPath(); ctx.rect(cx, cy, cellW, cellH); ctx.clip()
+        ctx.translate(cx - x0 * scX, cy - y0 * scY)
+        ctx.scale(scX, scY)
+
+        const yIR  = pl.y % RH
+        const hash = ((pl.x * 7 + pl.y * 13) >>> 0) % 16
+        const isFloor = pl.h === WT  && Math.abs(yIR - (RH - WT)) < 4
+        const isCeil  = pl.h === WT  && yIR < 4
+        const isPlat  = pl.h === STAIR_H && yIR >= WT + 4 && yIR <= RH - WT - STAIR_H - 4 && pl.w >= 36
+        const isWall  = pl.w === WT  && pl.h > STAIR_H
+
+        if (isFloor || isCeil) {
+          drawFloorSprite(ctx, pl.x, pl.y, pl.w, pl.h, pl.x, sprs, isCeil)
+        } else if (isPlat) {
+          drawPlatformSprite(ctx, pl.x, pl.y, pl.w, pl.h, pl.x, sprs)
+        } else if (isWall) {
+          drawWallSprite(ctx, pl.x, pl.y, pl.w, pl.h, pl.y, sprs, (pl.x + pl.w) % RW === 0)
+        } else {
+          drawSolidTile(ctx, pl.x, pl.y, pl.w, pl.h, w, hash, g.gfx, pl.x, pl.y, zone)
+          drawInternalWallSprite(ctx, pl.x, pl.y, pl.w, pl.h, pl.x, pl.y, sprs)
+        }
+        ctx.restore()
       }
 
       // ── Casa de Rex (solo W0, sala [VIEJO_DOG_C, VIEJO_DOG_R]) ──────────────
