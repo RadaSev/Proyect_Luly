@@ -122,6 +122,8 @@ type G = {
   // ── DEV: mapa realista miniaturizado (solo dev/PC) ──
   showRealMap: boolean
   realMapWorld: number   // mundo actualmente visible en el real map dev
+  realMapScale: number   // multiplicador de tamaño para personajes/enemigos/cajas
+  realMapIconMode: number // 0=sprites juego, 1=iconos UI
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -178,7 +180,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.4"
+const GAME_VERSION = "0.2.5"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1352,6 +1354,8 @@ function mkG_lazy(): G {
     mapViewWorld: 0,
     showRealMap: false,
     realMapWorld: 0,
+    realMapScale: 1.5,
+    realMapIconMode: 0,
   } as G
 }
 
@@ -5951,9 +5955,15 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.strokeStyle = "#1A1A1A"; ctx.lineWidth = 1.5; ctx.strokeRect(1, 1, CW - 2, CH - 2)
 
   // ── Header ────────────────────────────────────────────────────
+  const SCALE_STEPS = [1.0, 1.5, 2.0, 3.0]
+  const scaleLabel  = `${g.realMapScale}x`
+  const iconLabel   = g.realMapIconMode === 0 ? "SPRITES" : "ICONOS"
   ctx.fillStyle = "#111"; ctx.fillRect(0, 0, CW, HDR - 2)
-  ctx.fillStyle = "#00FF44"; ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "center"
-  ctx.fillText(`⚙ REAL MAP DEV  ·  W${w+1}: ${WORLD_NAMES[w]}  ·  [← →] mundo  [Y / Esc] cerrar`, CW / 2, 17)
+  ctx.fillStyle = "#00FF44"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
+  ctx.fillText(
+    `⚙ REAL MAP DEV  ·  W${w+1}: ${WORLD_NAMES[w]}  ·  [←→] mundo  [S] escala:${scaleLabel}  [V] gfx:${iconLabel}  [Y/Esc] cerrar`,
+    CW / 2, 17
+  )
   ctx.textAlign = "left"
 
   // ── Precargar plataformas del mundo ───────────────────────────
@@ -6042,10 +6052,12 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const houseSpr = sprs["rex_house"]
         const hWX = VIEJO_DOG_POS.x - 151
         const hWY = VIEJO_DOG_POS.y - 326
+        // Casa usa escala base × sqrt(realMapScale) para no sobredimensionarla
+        const hScMul = Math.sqrt(g.realMapScale)
         const hMapX = cx + (hWX - x0) * scX
         const hMapY = cy + (hWY - y0) * scY
-        const hMapW = Math.max(4, Math.round(552 * scX))
-        const hMapH = Math.max(4, Math.round(368 * scY))
+        const hMapW = Math.max(4, Math.round(552 * scX * hScMul))
+        const hMapH = Math.max(4, Math.round(368 * scY * hScMul))
         if (houseSpr && houseSpr.complete && houseSpr.naturalWidth > 0) {
           ctx.drawImage(houseSpr, hMapX, hMapY, hMapW, hMapH)
         } else {
@@ -6056,21 +6068,23 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Cajas de suministros activas en este cubículo ───────────
       {
-        const boxSpr  = sprs["box"]
-        const crW = Math.max(4, Math.round(44 * scX * 1.5))
-        const crH = Math.max(4, Math.round(44 * scY * 1.5))
+        const boxSpr = sprs["box"]
         for (const cr of g.crates) {
           if (!cr.active) continue
           const crWorld = Math.max(0, Math.min(NW - 1, Math.floor(cr.x / (NC * RW))))
           if (crWorld !== w) continue
           if (cr.x < x0 || cr.x >= x0 + RW) continue
           if (cr.y < y0 || cr.y >= y0 + RH) continue
-          const crMapX = cx + (cr.x - x0) * scX
-          const crMapY = cy + (cr.y - y0) * scY
+          const crW    = Math.max(4, Math.round(cr.w * scX * g.realMapScale))
+          const crH    = Math.max(4, Math.round(cr.h * scY * g.realMapScale))
+          // Anclar al bottom-center: escala crece hacia arriba
+          const crCX   = cx + (cr.x + cr.w / 2 - x0) * scX
+          const crBotY = cy + (cr.y + cr.h      - y0) * scY
+          const crMapX = crCX   - crW / 2
+          const crMapY = crBotY - crH
           if (boxSpr && boxSpr.complete && boxSpr.naturalWidth > 0) {
             ctx.drawImage(boxSpr, crMapX, crMapY, crW, crH)
           } else {
-            // Fallback: cuadrado con acento del mundo
             ctx.fillStyle = th.accent + "CC"; ctx.fillRect(crMapX, crMapY, crW, crH)
             ctx.fillStyle = th.wall; ctx.fillRect(crMapX + 1, crMapY + 1, crW - 2, crH - 2)
           }
@@ -6079,28 +6093,36 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Enemigos activos en este cubículo ────────────────────────
       {
-        const enSpr = sprs["enemy_idle"]
+        const enSprGame = sprs["enemy_idle"]
+        const enSprIcon = sprs["icon_enemy"]
+        const enSpr = g.realMapIconMode === 1 ? enSprIcon : enSprGame
         for (const e of g.enemies) {
           if (!e.active || e.dying) continue
           if (e.world !== w) continue
           if (e.x + e.w <= x0 || e.x >= x0 + RW) continue
           if (e.y + e.h <= y0 || e.y >= y0 + RH) continue
-          const eMapX = cx + (e.x - x0) * scX
-          const eMapY = cy + (e.y - y0) * scY
-          const eDW = Math.max(2, Math.round(e.w * scX * 1.1))
-          const eDH = Math.max(3, Math.round(e.h * scY * 1.1))
+          const eDW   = Math.max(2, Math.round(e.w * scX * g.realMapScale))
+          const eDH   = Math.max(3, Math.round(e.h * scY * g.realMapScale))
+          // Anclar al bottom-center
+          const eCX   = cx + (e.x + e.w / 2 - x0) * scX
+          const eBotY = cy + (e.y + e.h      - y0) * scY
+          const eMapX = eCX   - eDW / 2
+          const eMapY = eBotY - eDH
           if (enSpr && enSpr.complete && enSpr.naturalWidth > 0) {
-            const fw = Math.round(enSpr.width / 4), fh = Math.round(enSpr.height / 4)
             ctx.save()
-            if (e.dir < 0) {
-              ctx.translate(eMapX + eDW, eMapY); ctx.scale(-1, 1)
-              ctx.drawImage(enSpr, 0, 0, fw, fh, 0, 0, eDW, eDH)
+            if (g.realMapIconMode === 1) {
+              ctx.drawImage(enSpr, eMapX, eMapY, eDW, eDH)
             } else {
-              ctx.drawImage(enSpr, 0, 0, fw, fh, eMapX, eMapY, eDW, eDH)
+              const fw = Math.round(enSpr.width / 4), fh = Math.round(enSpr.height / 4)
+              if (e.dir < 0) {
+                ctx.translate(eMapX + eDW, eMapY); ctx.scale(-1, 1)
+                ctx.drawImage(enSpr, 0, 0, fw, fh, 0, 0, eDW, eDH)
+              } else {
+                ctx.drawImage(enSpr, 0, 0, fw, fh, eMapX, eMapY, eDW, eDH)
+              }
             }
             ctx.restore()
           } else {
-            // Fallback: rectángulo naranja (normal) o rojo (boss)
             ctx.fillStyle = e.boss ? "#FF4444CC" : "#FF8800CC"
             ctx.fillRect(eMapX, eMapY, eDW, eDH)
           }
@@ -6109,18 +6131,24 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Rex NPC (solo W0, sala [VIEJO_DOG_C, VIEJO_DOG_R]) ───────────────────
       if (w === 0 && c === VIEJO_DOG_C && r === VIEJO_DOG_R) {
-        const rexSpr = sprs["rex_idle"]
-        // Rex se centra horizontalmente en VIEJO_DOG_POS.x; top = pos.y - ryOff(53)
-        const rDW = Math.max(2, Math.round(43 * scX * 1.1))
-        const rDH = Math.max(3, Math.round(65 * scY * 1.1))
-        const rexCX = cx + (VIEJO_DOG_POS.x - x0) * scX          // centro en X
-        const rMapX = rexCX - rDW / 2                              // borde izquierdo
-        const rMapY = cy + ((VIEJO_DOG_POS.y - 53) - y0) * scY    // borde superior
+        const rexSprGame = sprs["rex_idle"]
+        const rexSprIcon = sprs["icon_rex"]
+        const rexSpr = g.realMapIconMode === 1 ? rexSprIcon : rexSprGame
+        const rDW    = Math.max(2, Math.round(43 * scX * g.realMapScale))
+        const rDH    = Math.max(3, Math.round(65 * scY * g.realMapScale))
+        // Anclar al bottom-center: VIEJO_DOG_POS.y es la posición de los pies
+        const rexCX  = cx + (VIEJO_DOG_POS.x      - x0) * scX
+        const rBotY  = cy + (VIEJO_DOG_POS.y       - y0) * scY
+        const rMapX  = rexCX - rDW / 2
+        const rMapY  = rBotY - rDH
         if (rexSpr && rexSpr.complete && rexSpr.naturalWidth > 0) {
-          const fw = Math.round(rexSpr.width / 4), fh = Math.round(rexSpr.height / 4)
-          ctx.drawImage(rexSpr, 0, 0, fw, fh, rMapX, rMapY, rDW, rDH)
+          if (g.realMapIconMode === 1) {
+            ctx.drawImage(rexSpr, rMapX, rMapY, rDW, rDH)
+          } else {
+            const fw = Math.round(rexSpr.width / 4), fh = Math.round(rexSpr.height / 4)
+            ctx.drawImage(rexSpr, 0, 0, fw, fh, rMapX, rMapY, rDW, rDH)
+          }
         } else {
-          // Fallback: silueta dorada
           ctx.fillStyle = "#D4A04ACC"
           ctx.fillRect(rMapX, rMapY, rDW, rDH)
         }
@@ -6128,25 +6156,32 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Sprite de Luly frame-0 en la sala actual ────────────────
       if (isPlayerRoom) {
-        const plRelX = p.x - x0, plRelY = p.y - y0
-        const plMapX = cx + plRelX * scX
-        const plMapY = cy + plRelY * scY
-        const sprIdle = sprs["player_idle"]
-        const dw = Math.max(2, Math.round(PW * scX * 1.1))
-        const dh = Math.max(3, Math.round(PH * scY * 1.1))
+        const sprGame = sprs["player_idle"]
+        const sprIcon = sprs["icon_luly"]
+        const sprIdle = g.realMapIconMode === 1 ? sprIcon : sprGame
+        const dw = Math.max(2, Math.round(PW * scX * g.realMapScale))
+        const dh = Math.max(3, Math.round(PH * scY * g.realMapScale))
+        // Anclar al bottom-center: los pies de Luly están en p.y + PH
+        const plCX   = cx + (p.x + PW / 2 - x0) * scX
+        const plBotY = cy + (p.y + PH      - y0) * scY
+        const plMapX = plCX   - dw / 2
+        const plMapY = plBotY - dh
         if (sprIdle && sprIdle.complete && sprIdle.naturalWidth > 0) {
-          const fw = Math.round(sprIdle.width / 4), fh = Math.round(sprIdle.height / 4)
           ctx.save()
-          if (p.facing === -1) {
-            ctx.translate(plMapX + dw, plMapY)
-            ctx.scale(-1, 1)
-            ctx.drawImage(sprIdle, 0, 0, fw, fh, 0, 0, dw, dh)
+          if (g.realMapIconMode === 1) {
+            ctx.drawImage(sprIdle, plMapX, plMapY, dw, dh)
           } else {
-            ctx.drawImage(sprIdle, 0, 0, fw, fh, plMapX, plMapY, dw, dh)
+            const fw = Math.round(sprIdle.width / 4), fh = Math.round(sprIdle.height / 4)
+            if (p.facing === -1) {
+              ctx.translate(plMapX + dw, plMapY)
+              ctx.scale(-1, 1)
+              ctx.drawImage(sprIdle, 0, 0, fw, fh, 0, 0, dw, dh)
+            } else {
+              ctx.drawImage(sprIdle, 0, 0, fw, fh, plMapX, plMapY, dw, dh)
+            }
           }
           ctx.restore()
         } else {
-          // Fallback: punto fucsia
           ctx.fillStyle = "#FF66FF"
           ctx.fillRect(plMapX, plMapY, Math.max(2, Math.round(PW * scX)), Math.max(3, Math.round(PH * scY)))
         }
@@ -6168,7 +6203,7 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.fillStyle = "#111"; ctx.fillRect(0, CH - 14, CW, 14)
   ctx.fillStyle = "#444"; ctx.font = "7px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText(
-    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  [Y] cerrar`,
+    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  escala:${g.realMapScale}x  gfx:${g.realMapIconMode === 0 ? "SPRITES" : "ICONOS"}  ·  [Y] cerrar`,
     CW / 2, CH - 3
   )
   ctx.textAlign = "left"
@@ -7060,6 +7095,10 @@ export default function ProyectoLuly() {
     L("hud_enemy_dead",  "/assets/Enviroment/Interface/Enemy/Enemy_Death.png")
     L("hud_croqueta",    "/assets/Enviroment/Interface/Croqueta_ptos/Croqueta.png")
     L("drop_bone",       "/assets/Enviroment/Interface/Bone/Bone_X.png")
+    // ── Real Map Dev — iconos UI alternativos ──────────────────────────────
+    L("icon_luly",  "/assets/Enviroment/Interface/Luly_icon/Luly_Icon.png")
+    L("icon_rex",   "/assets/Enviroment/Interface/World_1/Rex.png")
+    L("icon_enemy", "/assets/Enviroment/Interface/World_1/First_Section/Enemy_icon.png")
     BG_PATHS.forEach((path, wi) => { if (!path) return; const img = new Image(); img.src = path; img.onload = () => { BG_IMGS[wi] = img }; img.onerror = () => { BG_IMGS[wi] = null } })
   }, [])
 
@@ -7150,8 +7189,15 @@ export default function ProyectoLuly() {
 
       // ── RealMap DEV abierto: navegación de mundo con ←→, cerrar con N/Esc ─
       if (g.showRealMap && g.devMode) {
+        const SCALE_STEPS = [1.0, 1.5, 2.0, 3.0]
         if (k === "arrowleft"  || k === "a") { g.realMapWorld = (g.realMapWorld - 1 + NW) % NW; return }
         if (k === "arrowright" || k === "d") { g.realMapWorld = (g.realMapWorld + 1) % NW; return }
+        if (k === "s") {
+          const idx = SCALE_STEPS.indexOf(g.realMapScale)
+          g.realMapScale = SCALE_STEPS[(idx + 1) % SCALE_STEPS.length]
+          return
+        }
+        if (k === "v") { g.realMapIconMode = (g.realMapIconMode + 1) % 2; return }
         if (k === "y" || k === "escape")     { g.showRealMap = false; return }
         return  // bloquear resto de teclas mientras el mapa real está abierto
       }
