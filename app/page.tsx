@@ -7192,10 +7192,10 @@ export default function ProyectoLuly() {
     L("kennel_violet",    "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
     L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
-    L("floor_w1_base",          "/assets/Enviroment/Floor/F-1.png")
-    L("platform_sprite",        "/assets/Enviroment/Platforms/P-2.png")
-    L("wall_sprite",            "/assets/Enviroment/Walls/W-3.png")
-    L("internal_wall_sprite",   "/assets/Enviroment/Walls/W-2.png")
+    L("floor_w1_base",          "/assets/Enviroment/World_1/Floor/F-1.png")
+    L("platform_sprite",        "/assets/Enviroment/World_1/Platforms/P-2.png")
+    L("wall_sprite",            "/assets/Enviroment/World_1/Walls/W-3.png")
+    L("internal_wall_sprite",   "/assets/Enviroment/World_1/Walls/W-2.png")
     L("rex_house",              "/assets/Enviroment/Rex_House/Rex_House.png")
     L("cell_close",             "/assets/Enviroment/Cell/Cell_Close.png")
     L("cell_open",              "/assets/Enviroment/Cell/Cell_Open.png")
