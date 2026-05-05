@@ -92,7 +92,7 @@ export default function RealMapDev({ visible, drawFn, onSwipe }: RealMapDevProps
         ref={cvRef}
         width={MAP_W}
         height={MAP_H}
-        style={{ width: "100%", height: "100%", imageRendering: "pixelated", touchAction: "none" }}
+        style={{ width: "100%", height: "100%", imageRendering: "auto", touchAction: "none" }}
       />
     </div>
   )

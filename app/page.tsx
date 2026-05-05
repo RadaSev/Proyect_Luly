@@ -5958,18 +5958,37 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const gridY  = HDR + MARG / 2
   const scX    = cellW / RW
   const scY    = cellH / RH
+  // scSpr: escala uniforme para sprites (preserva aspect ratio del sprite original)
+  // Usando scX como base porque el cuarto es más ancho que alto; scY sobre-estira verticalmente
+  const scSpr  = scX
 
   // ── Fondo ─────────────────────────────────────────────────────
   ctx.fillStyle = "#060606"; ctx.fillRect(0, 0, CW, CH)
   ctx.strokeStyle = "#1A1A1A"; ctx.lineWidth = 1.5; ctx.strokeRect(1, 1, CW - 2, CH - 2)
 
-  // ── Helper: dibuja con antialiasing suave (para iconos alta-res) ─
+  // ── Antialiasing global para todos los sprites ────────────────
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality  = "high"
+
+  // ── Helper: dibuja con antialiasing suave + alpha opcional ─────
   const drawSmooth = (spr: HTMLImageElement, x: number, y: number, dw: number, dh: number, alpha = 1) => {
     ctx.save()
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality  = "high"
     if (alpha < 1) ctx.globalAlpha = alpha
     ctx.drawImage(spr, x, y, dw, dh)
+    ctx.restore()
+  }
+  // Helper: dibuja un frame de spritesheet (primera fila, columna frameIdx)
+  const drawFrame = (spr: HTMLImageElement, x: number, y: number, dw: number, dh: number, cols = 4, frameIdx = 0, flipX = false, alpha = 1) => {
+    const fw = Math.floor(spr.naturalWidth  / cols)
+    const fh = Math.floor(spr.naturalHeight / 4)   // asume 4 filas; usa row 0
+    ctx.save()
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality  = "high"
+    if (alpha < 1) ctx.globalAlpha = alpha
+    if (flipX) { ctx.translate(x + dw, y); ctx.scale(-1, 1); ctx.drawImage(spr, frameIdx * fw, 0, fw, fh, 0, 0, dw, dh) }
+    else        ctx.drawImage(spr, frameIdx * fw, 0, fw, fh, x, y, dw, dh)
     ctx.restore()
   }
   const iconMode = g.realMapIconMode  // 0=sprites, 1=v1 pixel, 2=v2 minimalist
@@ -6045,6 +6064,8 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
         // Sólido: transform mundo→celda, luego reusar funciones reales de sprite
         ctx.save()
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality  = "high"
         ctx.beginPath(); ctx.rect(cx, cy, cellW, cellH); ctx.clip()
         ctx.translate(cx - x0 * scX, cy - y0 * scY)
         ctx.scale(scX, scY)
@@ -6078,13 +6099,12 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const hScMul = Math.sqrt(g.realMapScale)
         const hMapX  = cx + (hWX - x0) * scX
         const hMapY  = cy + (hWY - y0) * scY
-        const hMapW  = Math.max(4, Math.round(552 * scX * hScMul))
-        const hMapH  = Math.max(4, Math.round(368 * scY * hScMul))
+        const hMapW  = Math.max(4, Math.round(552 * scSpr * hScMul))
+        const hMapH  = Math.max(4, Math.round(368 * scSpr * hScMul))
         // v1 no tiene icono de casa → usa game sprite; v2 usa minimalist
         const hSpr   = iconMode === 2 ? (houseSprV2 || houseSprGame) : houseSprGame
         if (hSpr && hSpr.complete && hSpr.naturalWidth > 0) {
-          if (iconMode === 2) drawSmooth(hSpr, hMapX, hMapY, hMapW, hMapH)
-          else                ctx.drawImage(hSpr, hMapX, hMapY, hMapW, hMapH)
+          drawSmooth(hSpr, hMapX, hMapY, hMapW, hMapH)
         } else {
           ctx.fillStyle = "rgba(120,80,40,0.5)"; ctx.fillRect(hMapX, hMapY, hMapW, hMapH)
           ctx.strokeStyle = "#A06020AA"; ctx.lineWidth = 1; ctx.strokeRect(hMapX, hMapY, hMapW, hMapH)
@@ -6121,24 +6141,16 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
             // v1 no tiene icono kennel → usa game sprite; v2 usa minimalist
             const kspr     = iconMode === 2 ? (ksprV2 || ksprGame) : ksprGame
             const { rw: krw, rh: krh, feet } = KENNEL_DIM[wi]
-            const krw_m  = Math.round(krw  * scX * g.realMapScale)
-            const krh_m  = iconMode === 2 ? krw_m : Math.round(krh  * scY * g.realMapScale)
-            const feet_m = iconMode === 2 ? krw_m : Math.round(feet * scY * g.realMapScale)
+            const krw_m  = Math.round(krw  * scSpr * g.realMapScale)
+            const krh_m  = Math.round(krh  * scSpr * g.realMapScale)
+            const feet_m = Math.round(feet * scSpr * g.realMapScale)
             const ksX    = sx_map - krw_m / 2
             const ksY    = sy_map - feet_m
             const kAlpha = discovered ? (isSpawn ? 1 : 0.85) : 0.35
             if (kspr && kspr.complete && kspr.naturalWidth > 0) {
-              if (iconMode === 2) {
-                if (isSpawn) { ctx.save(); ctx.shadowColor = th2.accent; ctx.shadowBlur = 7 }
-                drawSmooth(kspr, ksX, ksY, krw_m, krh_m, kAlpha)
-                if (isSpawn) ctx.restore()
-              } else {
-                ctx.save()
-                ctx.globalAlpha = kAlpha
-                if (isSpawn) { ctx.shadowColor = th2.accent; ctx.shadowBlur = 6 }
-                ctx.drawImage(kspr, ksX, ksY, krw_m, krh_m)
-                ctx.restore()
-              }
+              if (isSpawn) { ctx.save(); ctx.shadowColor = th2.accent; ctx.shadowBlur = 7 }
+              drawSmooth(kspr, ksX, ksY, krw_m, krh_m, kAlpha)
+              if (isSpawn) ctx.restore()
             } else {
               ctx.save(); ctx.globalAlpha = kAlpha
               ctx.fillStyle = isSpawn ? th2.accent + "CC" : "#443300CC"
@@ -6148,23 +6160,15 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
             const ctSprV2   = sprs["icon_cucha"]
             // v1 no tiene icono cucha → usa game sprite; v2 usa minimalist
             const ctDraw    = iconMode === 2 ? (ctSprV2 || ctSpr) : ctSpr
-            const ct_rw     = Math.round(135 * scX * g.realMapScale)
-            const ct_rh     = iconMode === 2 ? ct_rw : Math.round(64 * scY * g.realMapScale)
+            const ct_rw     = Math.round(135 * scSpr * g.realMapScale)
+            const ct_rh     = Math.round(64  * scSpr * g.realMapScale)
             const ct_sx     = sx_map - ct_rw / 2
             const ct_sy     = sy_map - ct_rh
             const ctAlpha   = discovered ? (isSpawn ? 1 : 0.80) : 0.30
             if (ctDraw && ctDraw.complete && ctDraw.naturalWidth > 0) {
-              if (iconMode === 2) {
-                if (isSpawn) { ctx.save(); ctx.shadowColor = th2.accent; ctx.shadowBlur = 5 }
-                drawSmooth(ctDraw, ct_sx, ct_sy, ct_rw, ct_rh, ctAlpha)
-                if (isSpawn) ctx.restore()
-              } else {
-                ctx.save()
-                ctx.globalAlpha = ctAlpha
-                if (isSpawn) { ctx.shadowColor = th2.accent; ctx.shadowBlur = 5 }
-                ctx.drawImage(ctDraw, ct_sx, ct_sy, ct_rw, ct_rh)
-                ctx.restore()
-              }
+              if (isSpawn) { ctx.save(); ctx.shadowColor = th2.accent; ctx.shadowBlur = 5 }
+              drawSmooth(ctDraw, ct_sx, ct_sy, ct_rw, ct_rh, ctAlpha)
+              if (isSpawn) ctx.restore()
             } else {
               ctx.save(); ctx.globalAlpha = ctAlpha
               ctx.fillStyle = isSpawn ? th2.accent + "AA" : "#002244AA"
@@ -6193,17 +6197,16 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           if (crWorld !== w) continue
           if (cr.x < x0 || cr.x >= x0 + RW) continue
           if (cr.y < y0 || cr.y >= y0 + RH) continue
-          const crW    = Math.max(4, Math.round(cr.w * scX * g.realMapScale))
-          const crH    = Math.max(4, Math.round(cr.h * scY * g.realMapScale))
+          const crW    = Math.max(4, Math.round(cr.w * scSpr * g.realMapScale))
+          const crH    = Math.max(4, Math.round(cr.h * scSpr * g.realMapScale))
           const crCX   = cx + (cr.x + cr.w / 2 - x0) * scX
           const crBotY = cy + (cr.y + cr.h      - y0) * scY
           const crMapX = crCX   - crW / 2
           const crMapY = crBotY - crH
-          // v1 no tiene icono caja → usa game sprite; v2 usa minimalist
+          // todos los modos usan drawSmooth para mejor calidad
           const bSpr   = iconMode === 2 ? (boxSprV2 || boxSprGame) : boxSprGame
           if (bSpr && bSpr.complete && bSpr.naturalWidth > 0) {
-            if (iconMode === 2) drawSmooth(bSpr, crMapX, crMapY, crW, crH)
-            else                ctx.drawImage(bSpr, crMapX, crMapY, crW, crH)
+            drawSmooth(bSpr, crMapX, crMapY, crW, crH)
           } else {
             ctx.fillStyle = th.accent + "CC"; ctx.fillRect(crMapX, crMapY, crW, crH)
             ctx.fillStyle = th.wall; ctx.fillRect(crMapX + 1, crMapY + 1, crW - 2, crH - 2)
@@ -6224,28 +6227,18 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           if (e.world !== w) continue
           if (e.x + e.w <= x0 || e.x >= x0 + RW) continue
           if (e.y + e.h <= y0 || e.y >= y0 + RH) continue
-          const eDW   = Math.max(2, Math.round(e.w * scX * g.realMapScale))
-          const eDH   = Math.max(3, Math.round(e.h * scY * g.realMapScale))
+          const eDW   = Math.max(2, Math.round(e.w * scSpr * g.realMapScale))
+          const eDH   = Math.max(3, Math.round(e.h * scSpr * g.realMapScale))
           // Anclar al bottom-center
           const eCX   = cx + (e.x + e.w / 2 - x0) * scX
           const eBotY = cy + (e.y + e.h      - y0) * scY
           const eMapX = eCX   - eDW / 2
           const eMapY = eBotY - eDH
           if (enSpr && enSpr.complete && enSpr.naturalWidth > 0) {
-            if (iconMode === 2) {
-              drawSmooth(enSpr, eMapX, eMapY, eDW, eDH)
-            } else if (iconMode === 1) {
-              ctx.drawImage(enSpr, eMapX, eMapY, eDW, eDH)
+            if (iconMode === 0) {
+              drawFrame(enSpr, eMapX, eMapY, eDW, eDH, 4, 0, e.dir < 0)
             } else {
-              ctx.save()
-              const fw = Math.round(enSpr.width / 4), fh = Math.round(enSpr.height / 4)
-              if (e.dir < 0) {
-                ctx.translate(eMapX + eDW, eMapY); ctx.scale(-1, 1)
-                ctx.drawImage(enSpr, 0, 0, fw, fh, 0, 0, eDW, eDH)
-              } else {
-                ctx.drawImage(enSpr, 0, 0, fw, fh, eMapX, eMapY, eDW, eDH)
-              }
-              ctx.restore()
+              drawSmooth(enSpr, eMapX, eMapY, eDW, eDH)
             }
           } else {
             ctx.fillStyle = e.boss ? "#FF4444CC" : "#FF8800CC"
@@ -6262,22 +6255,16 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const rexSpr     = iconMode === 1 ? (rexSprV1 || rexSprGame)
                          : iconMode === 2 ? (rexSprV2 || rexSprGame)
                          : rexSprGame
-        const rDW    = Math.max(2, Math.round(43 * scX * g.realMapScale))
-        const rDH    = Math.max(3, Math.round(65 * scY * g.realMapScale))
+        const rDW    = Math.max(2, Math.round(43 * scSpr * g.realMapScale))
+        const rDH    = Math.max(3, Math.round(65 * scSpr * g.realMapScale))
         // Anclar al bottom-center: VIEJO_DOG_POS.y es la posición de los pies
-        const rexCX  = cx + (VIEJO_DOG_POS.x      - x0) * scX
-        const rBotY  = cy + (VIEJO_DOG_POS.y       - y0) * scY
+        const rexCX  = cx + (VIEJO_DOG_POS.x - x0) * scX
+        const rBotY  = cy + (VIEJO_DOG_POS.y - y0) * scY
         const rMapX  = rexCX - rDW / 2
         const rMapY  = rBotY - rDH
         if (rexSpr && rexSpr.complete && rexSpr.naturalWidth > 0) {
-          if (iconMode === 2) {
-            drawSmooth(rexSpr, rMapX, rMapY, rDW, rDH)
-          } else if (iconMode === 1) {
-            ctx.drawImage(rexSpr, rMapX, rMapY, rDW, rDH)
-          } else {
-            const fw = Math.round(rexSpr.width / 4), fh = Math.round(rexSpr.height / 4)
-            ctx.drawImage(rexSpr, 0, 0, fw, fh, rMapX, rMapY, rDW, rDH)
-          }
+          if (iconMode === 0) drawFrame(rexSpr, rMapX, rMapY, rDW, rDH, 4, 0, false)
+          else                drawSmooth(rexSpr, rMapX, rMapY, rDW, rDH)
         } else {
           ctx.fillStyle = "#D4A04ACC"
           ctx.fillRect(rMapX, rMapY, rDW, rDH)
@@ -6292,33 +6279,19 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const sprIdle  = iconMode === 1 ? (sprV1 || sprGame)
                        : iconMode === 2 ? (sprV2 || sprGame)
                        : sprGame
-        const dw = Math.max(2, Math.round(PW * scX * g.realMapScale))
-        const dh = Math.max(3, Math.round(PH * scY * g.realMapScale))
+        const dw = Math.max(2, Math.round(PW * scSpr * g.realMapScale))
+        const dh = Math.max(3, Math.round(PH * scSpr * g.realMapScale))
         // Anclar al bottom-center: los pies de Luly están en p.y + PH
         const plCX   = cx + (p.x + PW / 2 - x0) * scX
         const plBotY = cy + (p.y + PH      - y0) * scY
         const plMapX = plCX   - dw / 2
         const plMapY = plBotY - dh
         if (sprIdle && sprIdle.complete && sprIdle.naturalWidth > 0) {
-          if (iconMode === 2) {
-            drawSmooth(sprIdle, plMapX, plMapY, dw, dh)
-          } else if (iconMode === 1) {
-            ctx.drawImage(sprIdle, plMapX, plMapY, dw, dh)
-          } else {
-            ctx.save()
-            const fw = Math.round(sprIdle.width / 4), fh = Math.round(sprIdle.height / 4)
-            if (p.facing === -1) {
-              ctx.translate(plMapX + dw, plMapY)
-              ctx.scale(-1, 1)
-              ctx.drawImage(sprIdle, 0, 0, fw, fh, 0, 0, dw, dh)
-            } else {
-              ctx.drawImage(sprIdle, 0, 0, fw, fh, plMapX, plMapY, dw, dh)
-            }
-            ctx.restore()
-          }
+          if (iconMode === 0) drawFrame(sprIdle, plMapX, plMapY, dw, dh, 4, 0, p.facing === -1)
+          else                drawSmooth(sprIdle, plMapX, plMapY, dw, dh)
         } else {
           ctx.fillStyle = "#FF66FF"
-          ctx.fillRect(plMapX, plMapY, Math.max(2, Math.round(PW * scX)), Math.max(3, Math.round(PH * scY)))
+          ctx.fillRect(plMapX, plMapY, Math.max(2, Math.round(PW * scSpr)), Math.max(3, Math.round(PH * scSpr)))
         }
         // Borde sala activa
         ctx.strokeStyle = "#00FF4499"; ctx.lineWidth = 1.5
