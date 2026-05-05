@@ -1721,12 +1721,12 @@ function tickPlayer(g: G) {
   else if (!wantCrouch && p.crouching) { p.crouching = false }
   if (left && !right) {
     p.vx = -spd; p.facing = -1
-    p.pa = run ? "run" : (p.exhausted ? "slow_walk_left" : "walk")
+    p.pa = run ? "run_left" : (p.exhausted ? "slow_walk_left" : "walk_left")
   } else if (right && !left) {
     p.vx = spd; p.facing = 1
     p.pa = run ? "run" : (p.exhausted ? "slow_walk" : "walk")
   }
-  else { p.vx = 0; if (p.onGround) p.pa = "idle" }
+  else { p.vx = 0; if (p.onGround) p.pa = p.facing === 1 ? "idle" : "idle_left" }
 
   // ── DASH ────────────────────────────────────────────────────────────
   p.dashCd = Math.max(0, p.dashCd - STEP)
@@ -1772,12 +1772,13 @@ function tickPlayer(g: G) {
   if (standingOnOneWay) {
     p.y += 8; p.onGround = false; p.crouching = false; p.h = PH
   } else if (jk && !p.jh && !p.crouching) {
+    const jumpAnim = p.facing === 1 ? "jump" : "jump_left"
     if (p.onGround) {
-      p.vy = JV; p.onGround = false; p.jh = true; p.djump = true; p.djumpAvail = true; p.pa = "jump"
+      p.vy = JV; p.onGround = false; p.jh = true; p.djump = true; p.djumpAvail = true; p.pa = jumpAnim
     } else if (!p.djump) {
-      p.vy = JV; p.jh = true; p.djump = true; p.pa = "jump"
+      p.vy = JV; p.jh = true; p.djump = true; p.pa = jumpAnim
     } else if (p.djumpAvail) {
-      p.vy = JV * 0.88; p.jh = true; p.djumpAvail = false; p.pa = "jump"
+      p.vy = JV * 0.88; p.jh = true; p.djumpAvail = false; p.pa = jumpAnim
     }
   }
 
@@ -1798,14 +1799,14 @@ function tickPlayer(g: G) {
   } else if (p.onGround || p.dash || (!left && !right)) {
     p.wallSliding = false; p.wallDir = 0
   }
-  if (p.wallSliding) p.pa = "jump"
+  if (p.wallSliding) p.pa = p.facing === 1 ? "jump" : "jump_left"
   // Wall jump
   if (p.wallSliding && jk && !p.jh && g.abilities.has("walljump")) {
     p.vy = JV * 0.92; p.vx = -p.wallDir * (RUN + 2)
     p.facing = (-p.wallDir) as 1 | -1
     p.jh = true; p.djumpAvail = true
     p.wallSliding = false; p.wallDir = 0; p.wallJumpCd = 0.22
-    p.pa = "jump"
+    p.pa = p.facing === 1 ? "jump" : "jump_left"
     spawnExplosion(g, p.x + p.w / 2, p.y + p.h / 2, ["#FFFFFF", "#88AAFF", "#4466FF"], 8, 3, false)
   }
 
@@ -3953,8 +3954,8 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const HRX = bx - 151
     const HRY = by - 326   // contenido apoyado en el suelo (by + 10 = suelo en pantalla)
     if (RH_house && RH_house.complete && RH_house.naturalWidth > 0) {
-      // Animación 36fps — spritesheet 6×6 = 36 frames, frame=384×384px
-      const RH_FPF   = 1000 / 36           // ≈27.78 ms/frame
+      // Animación 12fps — spritesheet 6×6 = 36 frames, frame=384×384px
+      const RH_FPF   = 1000 / 12           // ≈83 ms/frame — velocidad natural
       const rhFrame  = Math.floor(Date.now() / RH_FPF) % 36
       const rhFW     = RH_house.naturalWidth  / 6
       const rhFH     = RH_house.naturalHeight / 6
@@ -4854,8 +4855,8 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
       const CT_RY = sy - 63   // contenido flota 6 px sobre el suelo
       const ctSpr = sprs["cucha_teleport"]
       if (ctSpr && ctSpr.complete && ctSpr.naturalWidth > 0) {
-        // Animación 36fps — spritesheet 6×6 = 36 frames, frame=384×384px
-        const CT_FPF  = 1000 / 36
+        // Animación 12fps — spritesheet 6×6 = 36 frames, frame=384×384px
+        const CT_FPF  = 1000 / 12           // ≈83 ms/frame — velocidad natural
         const ctFrame = Math.floor(Date.now() / CT_FPF) % 36
         const ctFW    = ctSpr.naturalWidth  / 6
         const ctFH    = ctSpr.naturalHeight / 6
@@ -5147,24 +5148,30 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     //   rxOff   = rx = sx + rxOff  → sprite centrado sobre el centro del hitbox
     // dash_* se mantienen en PW×PH (animación muy breve, frame inusual).
     type LulyDim = { rw: number; rh: number; ryOff: number; rxOff: number }
+    // Dimensiones calculadas a partir de PIL sobre cada spritesheet 5×5 (256px/frame)
+    // Objetivo: contenido del personaje = 68px en pantalla, pies anclados a sy+PH=sy+72
     const LULY_DIM: Record<string, LulyDim> = {
-      idle:           { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },
-      walk:           { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },
-      slow_walk:      { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },  // mismas proporciones que walk
-      slow_walk_left: { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },  // sprite ya es izquierda
-      run:            { rw: 80, rh:  83, ryOff:  -9, rxOff: -16 },
-      jump:           { rw: 66, rh: 118, ryOff: -29, rxOff:  -9 },
-      attack:         { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },  // fallback=idle
-      dash_right:     { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
-      dash_left:      { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      idle:           { rw:  50, rh:  69, ryOff:   4, rxOff:  -1 },
+      idle_left:      { rw:  50, rh:  69, ryOff:   4, rxOff:  -1 },
+      walk:           { rw:  84, rh:  71, ryOff:   3, rxOff: -18 },
+      walk_left:      { rw:  84, rh:  71, ryOff:   3, rxOff: -18 },
+      slow_walk:      { rw:  66, rh:  76, ryOff:  -3, rxOff: -11 },
+      slow_walk_left: { rw:  66, rh:  76, ryOff:  -3, rxOff:  -7 },
+      run:            { rw:  69, rh:  70, ryOff:   3, rxOff: -10 },
+      run_left:       { rw:  69, rh:  70, ryOff:   3, rxOff: -10 },
+      jump:           { rw:  59, rh: 105, ryOff: -17, rxOff:  -9 },
+      jump_left:      { rw:  59, rh: 105, ryOff: -17, rxOff:  -3 },
+      attack:         { rw:  50, rh:  69, ryOff:   4, rxOff:  -1 },  // fallback=idle
+      dash_right:     { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      dash_left:      { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
     }
     const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
     const rw = dim.rw, rh = dim.rh
     const rx = sx + dim.rxOff
     const ry = sy + dim.ryOff
 
-    // slow_walk_left ya tiene el sprite en dirección izquierda: NO reflejar
-    const ownLeftSprite = p.pa === "slow_walk_left"
+    // Los sprites *_left ya están en la dirección correcta: NO reflejar
+    const ownLeftSprite = p.pa.endsWith("_left")
 
     if (p.facing === -1 && !ownLeftSprite) {
       ctx.save(); ctx.translate(rx + rw, ry); ctx.scale(-1, 1)
@@ -5300,12 +5307,12 @@ function drawBones(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 function drawCrates(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
-  // Sprite: sheet 1536×1024, contenido 834×775 medido con PIL
-  // Escalado para que el contenido ≈ 44×41 px (igual que el hitbox 44×44)
-  // Escala 1.3× respecto a la medición PIL original (contenido ≈ 57×54 px)
-  const BOX_RW = 105, BOX_RH = 70
-  const BOX_RX_OFF = -32            // centra el contenido (57 px) sobre el hitbox (44 px)
-  const BOX_RY_OFF = -19            // ancla la base del contenido al pie del hitbox
+  // Sprite: sheet 1950×2395, frame 390×479, contenido 384×365 (PIL)
+  // Escalado target_h=42px (< Luly 68px), scale=0.1151
+  // rw=45, rh=55; content bottom anclado al pie del hitbox (sy+44)
+  const BOX_RW = 45, BOX_RH = 55
+  const BOX_RX_OFF = 0             // contenido ocupa casi todo el ancho del frame
+  const BOX_RY_OFF = -4            // content bottom = sy+44 (sy - ryOff + scaled_padBot≈7 + 42 = sy+45 ≈ sy+44)
   const boxSpr = sprs["box"]
 
   for (const c of g.crates) {
@@ -7190,15 +7197,19 @@ export default function ProyectoLuly() {
 
   useEffect(() => {
     const L = (k: string, s: string) => { const img = new Image(); img.src = asset(s); img.onload = () => { sprs.current[k] = img }; img.onerror = () => { sprs.current[k] = null } }
+    // Sprites de Luly — cada dirección tiene su propio sprite (no mirror)
     L("player_idle",           "/assets/player/player_idle.png")
+    L("player_idle_left",      "/assets/player/player_idle_left.png")
     L("player_walk",           "/assets/player/player_walk.png")
-    L("player_walk_left",           "/assets/player/player_walk_left.png")
+    L("player_walk_left",      "/assets/player/player_walk_left.png")
     L("player_run",            "/assets/player/player_run.png")
+    L("player_run_left",       "/assets/player/player_run_left.png")
     L("player_jump",           "/assets/player/player_jump.png")
+    L("player_jump_left",      "/assets/player/player_jump_left.png")
     L("player_attack",         "/assets/player/player_attack.png")
     L("player_slow_walk",      "/assets/player/player_slow_walk.png")
     L("player_slow_walk_left", "/assets/player/player_slow_walk_left.png")
-    // dash_right/dash_left: cargados pero no usados hasta que estén a 25fps
+    // dash: cargados pero no usados hasta tener sprites 25fps
     L("player_dash_right", "/assets/player/player_dash_right.png")
     L("player_dash_left",  "/assets/player/player_dash_left.png")
     L("enemy_idle", "/assets/enemy/enemy_idle.png")
@@ -7277,12 +7288,16 @@ export default function ProyectoLuly() {
   }, [])
 
   useEffect(() => {
-    // 25fps = 40ms/frame para todos los sprites de Luly (spritesheet 256×256/frame)
+    // 25fps = 40ms/frame para todos los sprites de Luly (spritesheet 5×5, 256×256/frame)
     const LULY_FPF = 40  // ms por frame
     const sp: Record<string, number> = {
-      idle: LULY_FPF, walk: LULY_FPF, run: LULY_FPF, jump: LULY_FPF,
-      attack: LULY_FPF, slow_walk: LULY_FPF, slow_walk_left: LULY_FPF,
-      // dash_right/dash_left: desactivados hasta tener sprites a 25fps
+      idle: LULY_FPF,  idle_left: LULY_FPF,
+      walk: LULY_FPF,  walk_left: LULY_FPF,
+      run:  LULY_FPF,  run_left:  LULY_FPF,
+      jump: LULY_FPF,  jump_left: LULY_FPF,
+      attack: LULY_FPF,
+      slow_walk: LULY_FPF, slow_walk_left: LULY_FPF,
+      // dash: desactivado hasta tener sprites 25fps
     }
     let raf: number, el = 0, last = performance.now()
     // 5×5 spritesheet = 25 frames totales
