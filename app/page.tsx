@@ -1719,8 +1719,13 @@ function tickPlayer(g: G) {
   const wantCrouch = downKey && p.onGround && !jk
   if (wantCrouch && !p.crouching) { p.crouching = true }
   else if (!wantCrouch && p.crouching) { p.crouching = false }
-  if (left && !right) { p.vx = -spd; p.facing = -1; p.pa = run ? "run" : "walk" }
-  else if (right && !left) { p.vx = spd; p.facing = 1; p.pa = run ? "run" : "walk" }
+  if (left && !right) {
+    p.vx = -spd; p.facing = -1
+    p.pa = run ? "run" : (p.exhausted ? "slow_walk_left" : "walk")
+  } else if (right && !left) {
+    p.vx = spd; p.facing = 1
+    p.pa = run ? "run" : (p.exhausted ? "slow_walk" : "walk")
+  }
   else { p.vx = 0; if (p.onGround) p.pa = "idle" }
 
   // ── DASH ────────────────────────────────────────────────────────────
@@ -1730,13 +1735,13 @@ function tickPlayer(g: G) {
   if (shiftKey && canDash) {
     p.dash = true; p.dashDir = p.facing; p.dashTimer = 0.13
     p.dashCd = 0.70; p.inv = Math.max(p.inv, 0.14)
-    p.pa = p.dashDir === 1 ? "dash_right" : "dash_left"
+    p.pa = "run"   // dash_right/dash_left desactivados hasta tener sprites 25fps
     spawnExplosion(g, p.x + p.w / 2, p.y + p.h / 2, ["#FFFFFF", "#CCCCFF", "#8888FF"], 10, 3.5, false)
   }
   if (p.dash) {
     p.vx = p.dashDir * 16
     if (p.vy > 0) p.vy *= 0.12
-    p.pa = p.dashDir === 1 ? "dash_right" : "dash_left"
+    p.pa = "run"   // dash_right/dash_left desactivados hasta tener sprites 25fps
     if (p.dashTimer > 0) { p.dashTimer -= STEP }
     else { p.dash = false; p.vx = p.dashDir * RUN }
   }
@@ -3914,18 +3919,21 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
   // ── Frame animation (4×4 spritesheet = 16 frames, igual que el jugador) ──
   // Velocidad en ms/frame según estado (perro viejo = más lento que Luly)
+  // Rex a 25fps = 40ms/frame (spritesheet 256×256/frame)
+  const REX_FPF = 40
   const REX_SPD: Record<string, number> = {
-    rex_idle:              160,   // descanso pausado
-    rex_saludo_left:       110,   // saludo animado
-    rex_saludo_right:      110,
-    rex_talk_left:         120,   // hablando
-    rex_talk_right:        120,
-    rex_mitad_llave_left:  140,   // sostiene la llave, más solemne
-    rex_mitad_llave_right: 140,
+    rex_idle:              REX_FPF,
+    rex_saludo_left:       REX_FPF,
+    rex_saludo_right:      REX_FPF,
+    rex_talk_left:         REX_FPF,
+    rex_talk_right:        REX_FPF,
+    rex_mitad_llave_left:  REX_FPF,
+    rex_mitad_llave_right: REX_FPF,
   }
-  const rexFrame = Math.floor(Date.now() / (REX_SPD[sprKey] ?? 140)) % 16
-  const rfCol = rexFrame % 4
-  const rfRow = Math.floor(rexFrame / 4)
+  // 5×5 spritesheet (25fps) = 25 frames totales
+  const rexFrame = Math.floor(Date.now() / (REX_SPD[sprKey] ?? REX_FPF)) % 25
+  const rfCol = rexFrame % 5
+  const rfRow = Math.floor(rexFrame / 5)
 
   // ── Fade del nombre: desaparece al entrar en diálogo, reaparece al alejarse ─
   // Se desvanece al entrar en cualquier zona de interacción (callout o diálogo)
@@ -3945,7 +3953,14 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const HRX = bx - 151
     const HRY = by - 326   // contenido apoyado en el suelo (by + 10 = suelo en pantalla)
     if (RH_house && RH_house.complete && RH_house.naturalWidth > 0) {
-      ctx.drawImage(RH_house, HRX, HRY, HRW, HRH)
+      // Animación 36fps — spritesheet 6×6 = 36 frames, frame=384×384px
+      const RH_FPF   = 1000 / 36           // ≈27.78 ms/frame
+      const rhFrame  = Math.floor(Date.now() / RH_FPF) % 36
+      const rhFW     = RH_house.naturalWidth  / 6
+      const rhFH     = RH_house.naturalHeight / 6
+      const rhCol    = rhFrame % 6
+      const rhRow    = Math.floor(rhFrame / 6)
+      ctx.drawImage(RH_house, rhCol * rhFW, rhRow * rhFH, rhFW, rhFH, HRX, HRY, HRW, HRH)
     } else {
       // Fallback: silueta simple de casa mientras carga
       ctx.fillStyle = "rgba(60,45,30,0.85)"
@@ -3966,8 +3981,8 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   // ── Sprite animado ────────────────────────────────────────────────────────
   const spr = sprs[sprKey]
   if (spr) {
-    const fw = spr.width / 4          // ancho de un frame en la hoja
-    const fh = spr.height / 4         // alto de un frame en la hoja
+    const fw = spr.width / 5          // 5×5 spritesheet (25fps)
+    const fh = spr.height / 5
     ctx.drawImage(spr, rfCol * fw, rfRow * fh, fw, fh, rx, ry, rw, rh)
   } else {
     // Fallback procedural mínimo mientras el sprite carga
@@ -4839,13 +4854,20 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
       const CT_RY = sy - 63   // contenido flota 6 px sobre el suelo
       const ctSpr = sprs["cucha_teleport"]
       if (ctSpr && ctSpr.complete && ctSpr.naturalWidth > 0) {
+        // Animación 36fps — spritesheet 6×6 = 36 frames, frame=384×384px
+        const CT_FPF  = 1000 / 36
+        const ctFrame = Math.floor(Date.now() / CT_FPF) % 36
+        const ctFW    = ctSpr.naturalWidth  / 6
+        const ctFH    = ctSpr.naturalHeight / 6
+        const ctCol   = ctFrame % 6
+        const ctRow   = Math.floor(ctFrame / 6)
         ctx.save()
         if (isSpawn) {
           ctx.shadowColor = th.accent; ctx.shadowBlur = 20
         } else {
           ctx.globalAlpha = discovered ? 1 : 0.40
         }
-        ctx.drawImage(ctSpr, CT_RX, CT_RY, CT_RW, CT_RH)
+        ctx.drawImage(ctSpr, ctCol * ctFW, ctRow * ctFH, ctFW, ctFH, CT_RX, CT_RY, CT_RW, CT_RH)
         ctx.restore()
       } else {
         // Fallback procedural mientras carga
@@ -5113,8 +5135,9 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const sx = p.x - g.cx, sy = p.y - g.cy
   const spr = sprs["player_" + p.pa] || sprs["player_idle"]
   if (spr && spr.complete && spr.naturalWidth > 0) {
-    const fw = spr.width / 4, fh = spr.height / 4
-    const col = p.pf % 4, row = Math.floor(p.pf / 4)
+    // 5×5 spritesheet (25fps)
+    const fw = spr.width / 5, fh = spr.height / 5
+    const col = p.pf % 5, row = Math.floor(p.pf / 5)
 
     // ── Dimensiones normalizadas por animación ────────────────────────────
     // Objetivo: personaje de 68 px de alto consistente entre estados.
@@ -5125,20 +5148,25 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     // dash_* se mantienen en PW×PH (animación muy breve, frame inusual).
     type LulyDim = { rw: number; rh: number; ryOff: number; rxOff: number }
     const LULY_DIM: Record<string, LulyDim> = {
-      idle:       { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },
-      walk:       { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },
-      run:        { rw: 80, rh:  83, ryOff:  -9, rxOff: -16 },
-      jump:       { rw: 66, rh: 118, ryOff: -29, rxOff:  -9 },
-      attack:     { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },  // fallback=idle
-      dash_right: { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
-      dash_left:  { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      idle:           { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },
+      walk:           { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },
+      slow_walk:      { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },  // mismas proporciones que walk
+      slow_walk_left: { rw: 63, rh:  75, ryOff:  -2, rxOff:  -7 },  // sprite ya es izquierda
+      run:            { rw: 80, rh:  83, ryOff:  -9, rxOff: -16 },
+      jump:           { rw: 66, rh: 118, ryOff: -29, rxOff:  -9 },
+      attack:         { rw: 52, rh:  72, ryOff:   0, rxOff:  -2 },  // fallback=idle
+      dash_right:     { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      dash_left:      { rw: PW, rh:  PH, ryOff:   0, rxOff:   0 },
     }
     const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
     const rw = dim.rw, rh = dim.rh
     const rx = sx + dim.rxOff
     const ry = sy + dim.ryOff
 
-    if (p.facing === -1) {
+    // slow_walk_left ya tiene el sprite en dirección izquierda: NO reflejar
+    const ownLeftSprite = p.pa === "slow_walk_left"
+
+    if (p.facing === -1 && !ownLeftSprite) {
       ctx.save(); ctx.translate(rx + rw, ry); ctx.scale(-1, 1)
       ctx.drawImage(spr, col * fw, row * fh, fw, fh, 0, 0, rw, rh)
       ctx.restore()
@@ -5286,7 +5314,14 @@ function drawCrates(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
     if (sx + c.w < -40 || sx > CW + 40 || sy + c.h < -40 || sy > CH + 40) continue
 
     if (boxSpr && boxSpr.complete && boxSpr.naturalWidth > 0) {
-      ctx.drawImage(boxSpr, sx + BOX_RX_OFF, sy + BOX_RY_OFF, BOX_RW, BOX_RH)
+      // Animación 25fps — spritesheet 5×5 = 25 frames, frame=256×256px
+      const BOX_FPF  = 40   // ms/frame = 1000/25
+      const boxFrame = Math.floor(Date.now() / BOX_FPF) % 25
+      const bFW      = boxSpr.naturalWidth  / 5
+      const bFH      = boxSpr.naturalHeight / 5
+      const bCol     = boxFrame % 5
+      const bRow     = Math.floor(boxFrame / 5)
+      ctx.drawImage(boxSpr, bCol * bFW, bRow * bFH, bFW, bFH, sx + BOX_RX_OFF, sy + BOX_RY_OFF, BOX_RW, BOX_RH)
     } else {
       // Fallback procedural mientras carga el sprite
       const wi = Math.max(0, Math.min(Math.floor(c.x / (NC * RW)), NW - 1)), th = THEMES[wi]
@@ -5979,16 +6014,17 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ctx.drawImage(spr, x, y, dw, dh)
     ctx.restore()
   }
-  // Helper: dibuja un frame de spritesheet (primera fila, columna frameIdx)
-  const drawFrame = (spr: HTMLImageElement, x: number, y: number, dw: number, dh: number, cols = 4, frameIdx = 0, flipX = false, alpha = 1) => {
+  // Helper: dibuja frame 0 de spritesheet (siempre row=0, col=0)
+  // cols/rows = grid del spritesheet (ej: 5 para 5×5, 4 para 4×4, 6 para 6×6)
+  const drawFrame = (spr: HTMLImageElement, x: number, y: number, dw: number, dh: number, cols = 4, rows = 4, flipX = false, alpha = 1) => {
     const fw = Math.floor(spr.naturalWidth  / cols)
-    const fh = Math.floor(spr.naturalHeight / 4)   // asume 4 filas; usa row 0
+    const fh = Math.floor(spr.naturalHeight / rows)
     ctx.save()
     ctx.imageSmoothingEnabled = true
     ctx.imageSmoothingQuality  = "high"
     if (alpha < 1) ctx.globalAlpha = alpha
-    if (flipX) { ctx.translate(x + dw, y); ctx.scale(-1, 1); ctx.drawImage(spr, frameIdx * fw, 0, fw, fh, 0, 0, dw, dh) }
-    else        ctx.drawImage(spr, frameIdx * fw, 0, fw, fh, x, y, dw, dh)
+    if (flipX) { ctx.translate(x + dw, y); ctx.scale(-1, 1); ctx.drawImage(spr, 0, 0, fw, fh, 0, 0, dw, dh) }
+    else        ctx.drawImage(spr, 0, 0, fw, fh, x, y, dw, dh)
     ctx.restore()
   }
   const iconMode = g.realMapIconMode  // 0=sprites, 1=v1 pixel, 2=v2 minimalist
@@ -6236,7 +6272,7 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           const eMapY = eBotY - eDH
           if (enSpr && enSpr.complete && enSpr.naturalWidth > 0) {
             if (iconMode === 0) {
-              drawFrame(enSpr, eMapX, eMapY, eDW, eDH, 4, 0, e.dir < 0)
+              drawFrame(enSpr, eMapX, eMapY, eDW, eDH, 4, 4, e.dir < 0)  // enemigos: 4×4
             } else {
               drawSmooth(enSpr, eMapX, eMapY, eDW, eDH)
             }
@@ -6263,7 +6299,7 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const rMapX  = rexCX - rDW / 2
         const rMapY  = rBotY - rDH
         if (rexSpr && rexSpr.complete && rexSpr.naturalWidth > 0) {
-          if (iconMode === 0) drawFrame(rexSpr, rMapX, rMapY, rDW, rDH, 4, 0, false)
+          if (iconMode === 0) drawFrame(rexSpr, rMapX, rMapY, rDW, rDH, 5, 5, false)  // Rex: 5×5
           else                drawSmooth(rexSpr, rMapX, rMapY, rDW, rDH)
         } else {
           ctx.fillStyle = "#D4A04ACC"
@@ -6287,7 +6323,7 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         const plMapX = plCX   - dw / 2
         const plMapY = plBotY - dh
         if (sprIdle && sprIdle.complete && sprIdle.naturalWidth > 0) {
-          if (iconMode === 0) drawFrame(sprIdle, plMapX, plMapY, dw, dh, 4, 0, p.facing === -1)
+          if (iconMode === 0) drawFrame(sprIdle, plMapX, plMapY, dw, dh, 5, 5, p.facing === -1)  // Luly: 5×5
           else                drawSmooth(sprIdle, plMapX, plMapY, dw, dh)
         } else {
           ctx.fillStyle = "#FF66FF"
@@ -7154,13 +7190,17 @@ export default function ProyectoLuly() {
 
   useEffect(() => {
     const L = (k: string, s: string) => { const img = new Image(); img.src = asset(s); img.onload = () => { sprs.current[k] = img }; img.onerror = () => { sprs.current[k] = null } }
-    L("player_idle", "/assets/player/player_idle.png")
-    L("player_walk", "/assets/player/player_walk.png")
-    L("player_run", "/assets/player/player_run.png")
-    L("player_jump", "/assets/player/player_jump.png")
-    L("player_attack", "/assets/player/player_attack.png")
+    L("player_idle",           "/assets/player/player_idle.png")
+    L("player_walk",           "/assets/player/player_walk.png")
+    L("player_walk_left",           "/assets/player/player_walk_left.png")
+    L("player_run",            "/assets/player/player_run.png")
+    L("player_jump",           "/assets/player/player_jump.png")
+    L("player_attack",         "/assets/player/player_attack.png")
+    L("player_slow_walk",      "/assets/player/player_slow_walk.png")
+    L("player_slow_walk_left", "/assets/player/player_slow_walk_left.png")
+    // dash_right/dash_left: cargados pero no usados hasta que estén a 25fps
     L("player_dash_right", "/assets/player/player_dash_right.png")
-    L("player_dash_left", "/assets/player/player_dash_left.png")
+    L("player_dash_left",  "/assets/player/player_dash_left.png")
     L("enemy_idle", "/assets/enemy/enemy_idle.png")
     L("enemy_walkR", "/assets/enemy/enemy_walk_right.png")
     L("enemy_walkL", "/assets/enemy/enemy_walk_left.png")
@@ -7237,9 +7277,16 @@ export default function ProyectoLuly() {
   }, [])
 
   useEffect(() => {
-    const sp: Record<string, number> = { idle: 120, walk: 90, run: 70, jump: 130, attack: 80, dash_right: 55, dash_left: 55 }
+    // 25fps = 40ms/frame para todos los sprites de Luly (spritesheet 256×256/frame)
+    const LULY_FPF = 40  // ms por frame
+    const sp: Record<string, number> = {
+      idle: LULY_FPF, walk: LULY_FPF, run: LULY_FPF, jump: LULY_FPF,
+      attack: LULY_FPF, slow_walk: LULY_FPF, slow_walk_left: LULY_FPF,
+      // dash_right/dash_left: desactivados hasta tener sprites a 25fps
+    }
     let raf: number, el = 0, last = performance.now()
-    const fn = (now: number) => { el += now - last; last = now; const g = G.current, s = sp[g.pl.pa] ?? 120; if (el > s) { el = 0; g.pl.pf = (g.pl.pf + 1) % 16 }; raf = requestAnimationFrame(fn) }
+    // 5×5 spritesheet = 25 frames totales
+    const fn = (now: number) => { el += now - last; last = now; const g = G.current, s = sp[g.pl.pa] ?? LULY_FPF; if (el > s) { el = 0; g.pl.pf = (g.pl.pf + 1) % 25 }; raf = requestAnimationFrame(fn) }
     raf = requestAnimationFrame(fn); return () => cancelAnimationFrame(raf)
   }, [])
 
@@ -7771,15 +7818,15 @@ export default function ProyectoLuly() {
       const fn = (now: number) => {
         if (now - lastRef.current >= FRAME_MS) {
           lastRef.current = now
-          frameRef.current = (frameRef.current + 1) % 16
+          frameRef.current = (frameRef.current + 1) % 25  // 5×5 = 25 frames
           const canvas = portraitRef.current; if (!canvas) return
           const ctx2d = canvas.getContext("2d"); if (!ctx2d) return
           ctx2d.clearRect(0, 0, 96, 144)
           const spr = sprs.current["player_idle"]
           const f = frameRef.current
           if (spr && spr.complete && spr.naturalWidth > 0) {
-            const fw = spr.width / 4, fh = spr.height / 4
-            ctx2d.drawImage(spr, (f % 4) * fw, Math.floor(f / 4) * fh, fw, fh, 0, 0, 96, 144)
+            const fw = spr.width / 5, fh = spr.height / 5  // 5×5 spritesheet
+            ctx2d.drawImage(spr, (f % 5) * fw, Math.floor(f / 5) * fh, fw, fh, 0, 0, 96, 144)
           } else {
             ctx2d.save(); const sc = 96 / 48; ctx2d.scale(sc, sc)
             ctx2d.fillStyle = "#D2B48C"; ctx2d.fillRect(4, 16, 22, 26); ctx2d.fillRect(6, 2, 20, 18)
