@@ -184,7 +184,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.6"
+const GAME_VERSION = "0.2.7"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1698,7 +1698,8 @@ function breakCrate(g: G, c: Crate) {
 // ══════════════════════════════════════════════════════════════
 function tickPlayer(g: G) {
   const k = g.keys, p = g.pl, now = performance.now()
-  const STA_RED = 8, STA_DRAIN = 17, STA_RCH_WALK = 22, STA_RCH_IDLE = 40
+  const STA_RED = 8, STA_DRAIN = 36, STA_RCH_WALK = 22, STA_RCH_IDLE = 40
+  // STA_DRAIN=36: agota en ~2.8s corriendo en suelo (antes 17→5.9s demasiado lento)
   const moving = (k["a"] || k["arrowleft"] || k["d"] || k["arrowright"]) && !p.crouching
   const canRun = !p.exhausted  // drena hasta 0; STA_RED solo se usa para reinicio tras agotamiento
   if (!moving || !canRun) p.runMode = false
@@ -4932,13 +4933,15 @@ function drawCheckpoints(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}
       }
     } else {
       // ── Cucha de teletransporte (sprite) ───────────────────────────
-      // Medidas PIL: sheet 1088×512, content 629×402, pad=231/228/55/55
-      // Scale a content-h≈50 px (0.1244): rW=135, rH=64
-      // padL_s=29 padTop_s=7 padBot_s=7 → contentBottom=57 → raise 6 → CT_RY=sy-63
-      // contentCenterX=68 → CT_RX=sx-68
-      const CT_RW = 135, CT_RH = 64
-      const CT_RX = sx - 68   // centra contenido sobre sx
-      const CT_RY = sy - 63   // contenido flota 6 px sobre el suelo
+      // PIL real: sheet 2544×1506, frame 6×6=424×251
+      // Frame0: cW=385 cH=161, padL=19 padT=62 padR=20 padB=28
+      // Target content-h≈90px (más grande que Luly): scale=90/161=0.559
+      // rW=424*0.559=237 rH=251*0.559=140
+      // ryOff: content bottom = rH*(1-28/251)=140*0.888=124.4 → CT_RY=sy-124
+      // rxOff: content centered in frame → CT_RX=sx-CT_RW/2=sx-118
+      const CT_RW = 237, CT_RH = 140
+      const CT_RX = sx - 118  // centra contenido sobre sx
+      const CT_RY = sy - 124  // contenido asentado en el suelo (sy=nivel de suelo)
       const ctSpr = sprs["cucha_teleport"]
       if (ctSpr && ctSpr.complete && ctSpr.naturalWidth > 0) {
         // Animación 12fps — spritesheet 6×6 = 36 frames, frame=384×384px
@@ -5338,17 +5341,58 @@ function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, f
   ctx.drawImage(spr, col * fw, row * fh, fw, fh, dx, dy, dw, dh)
 }
 
-// Dimensiones de render para cada tipo de enemigo (desacopla visual del hitbox)
-// rw/rh = tamaño de render del sprite completo; rxOff/ryOff = offset desde esquina del hitbox
+// Dimensiones de render por tipo y animación (desacopla visual del hitbox)
+// Escala objetivo W1S2: content-h=68px (scale≈0.2646 sobre cH=257px constante)
+// Cálculos: rw=fw*scale, rh=fh*scale, ryOff=eH-rh*(1-padB/fh), rxOff=eW/2-rw/2
 function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; ryOff: number } {
+  const eW = e.w, eH = e.h
+
+  // ── W1 Second Section (eW=60, eH=72) ──────────────────────────────
   if (e.world === 0 && enemySection(e) === "s") {
-    // Sprite PIL analizado: frame≈242×264, cH=257, padT=3, padB=4
-    // Target content-h≈70px → scale=0.265 → rw=64, rh=70
-    // ryOff alinea fondo del contenido con fondo del hitbox (eH=72)
+    // Determinar animación actual (misma lógica que resolveEnemySpr)
+    if (e.dying) {
+      // death: sheet 1112×1112, frame 278×278, cH=257, padB=11
+      // rh=278*0.265=73.7→74, rw=278*0.265=74, ryOff=72-74*(1-11/278)=72-71.1=1, rxOff=30-37=-7
+      return { rw: 74, rh: 74, rxOff: -7, ryOff: 1 }
+    }
+    if (e.hurtTimer > 0) {
+      // hurt: sheet 1032×1120, frame 258×280, cH=257, padB=12
+      // rh=280*0.265=74.2→74, rw=258*0.265=68.4→68, ryOff=72-74*(1-12/280)=72-70.8=1, rxOff=30-34=-4
+      return { rw: 68, rh: 74, rxOff: -4, ryOff: 1 }
+    }
+    if (e.chainHit || e.sa > 0) {
+      // atack1: frame 258×264; atack2: frame 258×262 — similares
+      // rh≈70, rw=68, rxOff=-4, ryOff=3-4 → usar atack1 como referencia
+      return { rw: 68, rh: 70, rxOff: -4, ryOff: 3 }
+    }
+    if (e.isMoving) {
+      // walk: sheet 780×1052, frame 195×263, cH=257, padB=3
+      // rh=263*0.265=69.7→70, rw=195*0.265=51.7→52, ryOff=72-70*(1-3/263)=72-69.2=3, rxOff=30-26=4
+      return { rw: 52, rh: 70, rxOff: 4, ryOff: 3 }
+    }
+    // idle: sheet 968×1056, frame 242×264, cH=257, padB=4
+    // rh=264*0.265=70, rw=242*0.265=64.1→64, ryOff=3, rxOff=30-32=-2
     return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
   }
+
+  // ── W1 First Section (eW=96, eH=96) — solo ajuste de muerte ───────
+  if (e.world === 0 && enemySection(e) === "f" && e.dying) {
+    // death_left/right: frame 458×382, cH≈255(L)/189(R)
+    // Target cH≈80px para quedar similar al idle (cH=359 a rh=96 → 94px)
+    // death_left: scale=80/255=0.314, rh=382*0.314=120, rw=458*0.314=144
+    //   ryOff: content_bot=322*0.314=101.1 → ryOff=96-101=−5 ; rxOff: center=247.5*(144/458)=77.9 → rxOff=48−78=−30
+    // death_right: scale=80/189=0.423, rh=382*0.423=162, rw=458*0.423=194
+    //   ryOff: content_bot=337*0.423=142.5 → ryOff=96−142=−46 ; rxOff: center=123*(194/458)=52.1 → rxOff=48−52=−4
+    const facingLeft = e.deathDir < 0
+    if (facingLeft) {
+      return { rw: 144, rh: 120, rxOff: -30, ryOff: -5 }
+    } else {
+      return { rw: 194, rh: 162, rxOff: -4, ryOff: -46 }
+    }
+  }
+
   // Default: el sprite ocupa exactamente el hitbox
-  return { rw: e.w, rh: e.h, rxOff: 0, ryOff: 0 }
+  return { rw: eW, rh: eH, rxOff: 0, ryOff: 0 }
 }
 
 function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
@@ -5491,12 +5535,14 @@ function drawBones(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 function drawCrates(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {}) {
-  // Sprite: sheet 1950×2395, frame 390×479, contenido 384×365 (PIL)
-  // Escalado target_h=42px (< Luly 68px), scale=0.1151
-  // rw=45, rh=55; content bottom anclado al pie del hitbox (sy+44)
-  const BOX_RW = 45, BOX_RH = 55
-  const BOX_RX_OFF = 0             // contenido ocupa casi todo el ancho del frame
-  const BOX_RY_OFF = -4            // content bottom = sy+44 (sy - ryOff + scaled_padBot≈7 + 42 = sy+45 ≈ sy+44)
+  // Sprite: sheet 1950×2395, frame 390×479
+  // PIL frame0: cW=389 cH=368, padT=56, padB=55
+  // 80% de Luly (cH target=55px): scale=55/368=0.149 → rw=58, rh=71
+  // ryOff: content bottom = rh*(1-padB/fh)=71*(1-55/479)=62.8 → ryOff=44-62.8≈-19
+  // rxOff: content casi llena frame ancho → centrar sobre hitbox (crate.w=44): rxOff=(44-58)/2=-7
+  const BOX_RW = 58, BOX_RH = 71
+  const BOX_RX_OFF = -7
+  const BOX_RY_OFF = -19
   const boxSpr = sprs["box"]
 
   for (const c of g.crates) {
@@ -6387,8 +6433,8 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
             const ctSprV2   = sprs["icon_cucha"]
             // v1 no tiene icono cucha → usa game sprite; v2 usa minimalist
             const ctDraw    = iconMode === 2 ? (ctSprV2 || ctSpr) : ctSpr
-            const ct_rw     = Math.round(135 * scSpr * g.realMapScale)
-            const ct_rh     = Math.round(64  * scSpr * g.realMapScale)
+            const ct_rw     = Math.round(237 * scSpr * g.realMapScale)
+            const ct_rh     = Math.round(140 * scSpr * g.realMapScale)
             const ct_sx     = sx_map - ct_rw / 2
             const ct_sy     = sy_map - ct_rh
             const ctAlpha   = discovered ? (isSpawn ? 1 : 0.80) : 0.30
@@ -8042,14 +8088,14 @@ export default function ProyectoLuly() {
     if (!getFSElement() && !isPseudoFS) tryFullscreen(containerRef.current || document.documentElement)
   }
 
-  // Componente de retrato animado de Luly — usa rAF con timestamp exacto (igual al juego: 120 ms/frame idle)
+  // Componente de retrato animado de Luly — usa rAF con timestamp exacto (LULY_FPF=40ms/frame = 25fps)
   const PausePortrait = ({ thAccent, thBg0 }: { thAccent: string; thBg0: string }) => {
     const portraitRef = useRef<HTMLCanvasElement>(null)
     const rafRef = useRef(0)
     const frameRef = useRef(0)
     const lastRef = useRef(0)
     useEffect(() => {
-      const FRAME_MS = 120  // igual que sp.idle en el juego
+      const FRAME_MS = 40  // igual que LULY_FPF en el juego (25fps)
       const fn = (now: number) => {
         if (now - lastRef.current >= FRAME_MS) {
           lastRef.current = now
