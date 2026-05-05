@@ -1725,10 +1725,11 @@ function tickPlayer(g: G) {
   else if (!wantCrouch && p.crouching) { p.crouching = false }
   if (left && !right) {
     p.vx = -spd; p.facing = -1
-    p.pa = run ? "run_left" : (p.exhausted ? "slow_walk_left" : "walk_left")
+    // pa de movimiento solo en el suelo — en el aire lo controla el override al final del tick
+    if (p.onGround) p.pa = run ? "run_left" : (p.exhausted ? "slow_walk_left" : "walk_left")
   } else if (right && !left) {
     p.vx = spd; p.facing = 1
-    p.pa = run ? "run" : (p.exhausted ? "slow_walk" : "walk")
+    if (p.onGround) p.pa = run ? "run" : (p.exhausted ? "slow_walk" : "walk")
   }
   else { p.vx = 0; if (p.onGround) p.pa = p.facing === 1 ? "idle" : "idle_left" }
 
