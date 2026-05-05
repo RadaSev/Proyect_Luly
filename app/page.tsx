@@ -1820,6 +1820,7 @@ function tickPlayer(g: G) {
     const mkP = () => { const d = getDir(g); const px = p.x + (p.facing === 1 ? p.w : 0), py = p.y + p.h / 2; g.projs.push({ x: px, y: py, vx: d.x * PSPD, vy: d.y * PSPD - 1, active: true, pl: true, star: false, rot: Math.atan2(d.y, d.x) * 180 / Math.PI, life: 3.5, dist: 0, ox: px, oy: py }); p.ammo-- }
     if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
     else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
+    else { p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }  // mantiene mientras se sostiene N
   } else p.sh = false
   p.wcd = Math.max(0, p.wcd - STEP * 1000)
   if (k["m"] && !p.wh && p.wcd <= 0 && !g.whip && !p.exhausted) {
@@ -1830,6 +1831,8 @@ function tickPlayer(g: G) {
     p.wcd = 500; p.wh = true; p.pa = p.facing === 1 ? "atack_correa" : "atack_correa_left"
   }
   if (!k["m"]) p.wh = false
+  // Mantiene la animación de correa mientras el látigo sigue activo (life=0.2s)
+  if (g.whip) p.pa = p.facing === 1 ? "atack_correa" : "atack_correa_left"
 
   // ── Animación en el aire: sobrescribe estado de movimiento ─────────────
   // Umbrales para evitar falsos positivos en bordes o suelo con pequeñas oscilaciones:
@@ -5187,12 +5190,12 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       jump:           { rw:  59, rh: 105, ryOff: -17, rxOff:  -9 },
       jump_left:      { rw:  59, rh: 105, ryOff: -17, rxOff:  -3 },
       attack:            { rw:  50, rh:  69, ryOff:   4, rxOff:  -1 },  // fallback=idle
-      fall:              { rw:  55, rh:  69, ryOff:   4, rxOff:  -2 },
-      fall_left:         { rw:  55, rh:  69, ryOff:   4, rxOff:   2 },
-      atack_bone:        { rw:  66, rh:  69, ryOff:   3, rxOff:  -5 },
-      atack_bone_left:   { rw:  66, rh:  69, ryOff:   3, rxOff:   5 },
-      atack_correa:      { rw: 121, rh:  72, ryOff:   0, rxOff:   0 },  // sprite ancho: Luly izq, correa extiende dcha
-      atack_correa_left: { rw: 121, rh:  72, ryOff:   0, rxOff: -89 },  // Luly dcha, correa extiende izq
+      fall:              { rw:  62, rh:  78, ryOff:  -1, rxOff:   0 },  // frame0: 233x295, cH=257
+      fall_left:         { rw:  62, rh:  78, ryOff:  -1, rxOff:   0 },
+      atack_bone:        { rw:  66, rh:  69, ryOff:   3, rxOff:   0 },  // frame0: 251x261, cH=257
+      atack_bone_left:   { rw:  66, rh:  69, ryOff:   3, rxOff:   0 },
+      atack_correa:      { rw: 127, rh:  76, ryOff:  -1, rxOff:  -1 },  // frame0: 335x201, Luly izq, correa dcha
+      atack_correa_left: { rw: 126, rh:  76, ryOff:   0, rxOff: -79 },  // Luly dcha, correa extiende izq
       dash_right:        { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
       dash_left:         { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
     }
