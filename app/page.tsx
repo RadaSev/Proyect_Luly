@@ -5225,22 +5225,48 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.fillStyle = "#FFD700"; ctx.fillRect(13, 23, 6, 2); ctx.restore()
 }
 
-function pickEnemySprite(e: Enemy): string {
-  const dir = e.dying ? e.deathDir : e.dir
-  const side = dir >= 0 ? "right" : "left"
+// Determina la sección del enemigo a partir de su fila (extraída del ID "w_c_r_i")
+function enemySection(e: Enemy): "f" | "s" {
+  const row = parseInt(e.id.split("_")[2]) || 0
+  return row < TROW ? "f" : "s"
+}
+
+// Resuelve el sprite correcto con cadena de fallbacks:
+//   1. Sprite específico del mundo+sección+animación+dirección
+//   2. Variante sin dirección (ej: idle único para esa sección)
+//   3. Variante de la dirección opuesta (si solo existe un lado)
+// Los jefes (boss) siguen usando los prefijos boos_ sin cambios.
+function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
+  const dir = (e.dying ? e.deathDir : e.dir) >= 0 ? "right" : "left"
+  const opp = dir === "right" ? "left" : "right"
+  const ok  = (k: string) => { const s = sprs[k]; return s?.complete && s.naturalWidth > 0 ? s : null }
+
   if (e.boss) {
-    if (e.dying) return `boos_defeat_${side}`
-    if (e.hurtTimer > 0) return `boos_hurt_${side}`
-    if (e.sa > 0) return `boos_atack_${side}`
-    if (e.isMoving) return `boos_flight_${side}`
-    return "enemy_idle"
-  } else {
-    if (e.dying) return `enemy_death_${side}`
-    if (e.hurtTimer > 0) return `enemy_hurt_${side}`
-    if (e.sa > 0) return `enemy_atack_${side}`
-    if (e.isMoving) return `enemy_walk_${side}`
-    return "enemy_idle"
+    const anim = e.dying ? "defeat" : e.hurtTimer > 0 ? "hurt" : e.sa > 0 ? "atack" : "flight"
+    return ok(`boos_${anim}_${dir}`) ?? ok(`boos_${anim}_${opp}`) ?? null
   }
+
+  const w   = Math.max(1, Math.min(e.world + 1, NW))  // 1-indexed (1-4)
+  const sec = enemySection(e)                          // "f" | "s"
+  const pk  = `e_w${w}_${sec}_`
+
+  let keys: string[]
+  if (e.dying) {
+    keys = [`${pk}death_${dir}`, `${pk}death_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
+  } else if (e.hurtTimer > 0) {
+    keys = [`${pk}hurt_${dir}`, `${pk}hurt_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
+  } else if (e.sa > 0) {
+    // phase determina cuál ataque usar (0→atack1, 1→atack2); cae en atack genérico si no existe
+    const pn = (e.phase || 0) % 2 + 1
+    keys = [`${pk}atack${pn}_${dir}`, `${pk}atack${pn}`, `${pk}atack_${dir}`, `${pk}atack`, `${pk}idle_${dir}`, `${pk}idle`]
+  } else if (e.isMoving) {
+    keys = [`${pk}walk_${dir}`, `${pk}walk_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
+  } else {
+    keys = [`${pk}idle_${dir}`, `${pk}idle_${opp}`, `${pk}idle`]
+  }
+
+  for (const k of keys) { const s = ok(k); if (s) return s }
+  return null
 }
 
 function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, frame: number, dx: number, dy: number, dw: number, dh: number) {
@@ -5258,9 +5284,8 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const wi = Math.max(0, Math.min(e.world, NW - 1)), th = THEMES[wi]
     if (e.dying) { const fade = Math.max(0, 1 - (e.deathTimer - 0.9) / 0.45); ctx.globalAlpha = Math.min(1, fade) }
     if (e.hurtTimer > 0 && Math.floor(Date.now() / 60) % 2 === 0) { ctx.globalAlpha = 0.45 }
-    const key = pickEnemySprite(e)
-    const spr = sprs[key]
-    if (spr && spr.complete && spr.naturalWidth > 0) {
+    const spr = resolveEnemySpr(e, sprs)
+    if (spr) {
       drawSpriteFrame(ctx, spr, e.ef, sx, sy, e.w, e.h)
     } else {
       ctx.fillStyle = e.boss ? th.doorC : th.wallHi
@@ -6290,12 +6315,8 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       // ── Enemigos activos en este cubículo ────────────────────────
       {
-        const enSprGame = sprs["enemy_idle"]
-        const enSprV1   = sprs["icon_enemy_v1"]
-        const enSprV2   = sprs["icon_enemy_v2"]
-        const enSpr     = iconMode === 1 ? (enSprV1 || enSprGame)
-                        : iconMode === 2 ? (enSprV2 || enSprGame)
-                        : enSprGame
+        const enSprV1 = sprs["icon_enemy_v1"]
+        const enSprV2 = sprs["icon_enemy_v2"]
         for (const e of g.enemies) {
           if (!e.active || e.dying) continue
           if (e.world !== w) continue
@@ -6308,9 +6329,14 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           const eBotY = cy + (e.y + e.h      - y0) * scY
           const eMapX = eCX   - eDW / 2
           const eMapY = eBotY - eDH
+          // iconMode=0: sprite de juego resuelto por mundo/sección del enemigo
+          const enSprGame = resolveEnemySpr(e, sprs)
+          const enSpr = iconMode === 1 ? (enSprV1 || enSprGame)
+                      : iconMode === 2 ? (enSprV2 || enSprGame)
+                      : enSprGame
           if (enSpr && enSpr.complete && enSpr.naturalWidth > 0) {
             if (iconMode === 0) {
-              drawFrame(enSpr, eMapX, eMapY, eDW, eDH, 4, 4, e.dir < 0)  // enemigos: 4×4
+              drawFrame(enSpr, eMapX, eMapY, eDW, eDH, 4, 4, e.dir < 0)  // 4×4 spritesheet
             } else {
               drawSmooth(enSpr, eMapX, eMapY, eDW, eDH)
             }
@@ -7249,19 +7275,30 @@ export default function ProyectoLuly() {
     // dash: cargados pero no usados hasta tener sprites 25fps
     L("player_dash_right", "/assets/player/player_dash_right.png")
     L("player_dash_left",  "/assets/player/player_dash_left.png")
-    L("enemy_idle", "/assets/enemy/enemy_idle.png")
-    L("enemy_walkR", "/assets/enemy/enemy_walk_right.png")
-    L("enemy_walkL", "/assets/enemy/enemy_walk_left.png")
-    L("enemy_walk_right", "/assets/enemy/enemy_walk_right.png")
-    L("enemy_walk_left", "/assets/enemy/enemy_walk_left.png")
-    L("enemy_atackR", "/assets/enemy/enemy_atack_right.png")
-    L("enemy_atackL", "/assets/enemy/enemy_atack_left.png")
-    L("enemy_atack_right", "/assets/enemy/enemy_atack_right.png")
-    L("enemy_atack_left", "/assets/enemy/enemy_atack_left.png")
-    L("enemy_hurt_right", "/assets/enemy/enemy_hurt_right.png")
-    L("enemy_hurt_left", "/assets/enemy/enemy_hurt_left.png")
-    L("enemy_death_right", "/assets/enemy/enemy_death_right.png")
-    L("enemy_death_left", "/assets/enemy/enemy_death_left.png")
+    // Enemigos — sprites por Mundo (1-4) × Sección (f=First / s=Second)
+    // Claves: e_w{W}_{sec}_{anim}_{dir}  ej: e_w1_f_idle_right
+    // Sprites opcionales: si el archivo no existe, onerror → null (fallback graceful)
+    for (const w of [1,2,3,4] as const) {
+      for (const [si, secFolder] of (["First_Section","Second_Section"] as const).entries()) {
+        const sk = si === 0 ? "f" : "s"
+        const base = `/assets/enemy/World_${w}/${secFolder}/enemy_`
+        const pk   = `e_w${w}_${sk}_`
+        for (const dir of ["right","left"] as const) {
+          L(`${pk}idle_${dir}`,   `${base}idle_${dir}.png`)
+          L(`${pk}walk_${dir}`,   `${base}walk_${dir}.png`)
+          L(`${pk}hurt_${dir}`,   `${base}hurt_${dir}.png`)
+          L(`${pk}death_${dir}`,  `${base}death_${dir}.png`)
+          L(`${pk}atack_${dir}`,  `${base}atack_${dir}.png`)
+          L(`${pk}atack1_${dir}`, `${base}atack_1_${dir}.png`)
+          L(`${pk}atack2_${dir}`, `${base}atack_2_${dir}.png`)
+        }
+        // Variantes sin dirección (ej: enemy_idle.png único)
+        L(`${pk}idle`,   `${base}idle.png`)
+        L(`${pk}atack`,  `${base}atack.png`)
+        L(`${pk}atack1`, `${base}atack_1.png`)
+        L(`${pk}atack2`, `${base}atack_2.png`)
+      }
+    }
     L("boos_flight_right", "/assets/boos/boos_flight_right.png")
     L("boos_flight_left", "/assets/boos/boos_flight_left.png")
     L("boos_atack_right", "/assets/boos/boos_atack_right.png")
