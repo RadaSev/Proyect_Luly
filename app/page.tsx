@@ -1702,8 +1702,12 @@ function tickPlayer(g: G) {
     p.staminaCooldown = Math.max(0, p.staminaCooldown - STEP)
     if (p.staminaCooldown <= 0) { p.exhausted = false; p.stamina = STA_RED }
   } else if (actuallyRunning) {
-    p.stamina = Math.max(0, p.stamina - STA_DRAIN * STEP)
-    if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
+    if (p.onGround) {
+      // Drena stamina solo al correr en el suelo
+      p.stamina = Math.max(0, p.stamina - STA_DRAIN * STEP)
+      if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
+    }
+    // En el aire corriendo: stamina PAUSADA (ni drena ni recupera — efecto impulso)
   } else {
     p.stamina = Math.min(p.maxStamina, p.stamina + (moving ? STA_RCH_WALK : STA_RCH_IDLE) * STEP)
   }
@@ -1774,11 +1778,11 @@ function tickPlayer(g: G) {
   } else if (jk && !p.jh && !p.crouching) {
     const jumpAnim = p.facing === 1 ? "jump" : "jump_left"
     if (p.onGround) {
-      p.vy = JV; p.onGround = false; p.jh = true; p.djump = true; p.djumpAvail = true; p.pa = jumpAnim
+      p.vy = JV; p.onGround = false; p.jh = true; p.djump = true; p.djumpAvail = true; p.pa = jumpAnim; p.pf = 0
     } else if (!p.djump) {
-      p.vy = JV; p.jh = true; p.djump = true; p.pa = jumpAnim
+      p.vy = JV; p.jh = true; p.djump = true; p.pa = jumpAnim; p.pf = 0
     } else if (p.djumpAvail) {
-      p.vy = JV * 0.88; p.jh = true; p.djumpAvail = false; p.pa = jumpAnim
+      p.vy = JV * 0.88; p.jh = true; p.djumpAvail = false; p.pa = jumpAnim; p.pf = 0
     }
   }
 
@@ -1814,8 +1818,8 @@ function tickPlayer(g: G) {
 
   if (k["n"] && p.ammo > 0) {
     const mkP = () => { const d = getDir(g); const px = p.x + (p.facing === 1 ? p.w : 0), py = p.y + p.h / 2; g.projs.push({ x: px, y: py, vx: d.x * PSPD, vy: d.y * PSPD - 1, active: true, pl: true, star: false, rot: Math.atan2(d.y, d.x) * 180 / Math.PI, life: 3.5, dist: 0, ox: px, oy: py }); p.ammo-- }
-    if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = "attack" }
-    else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = "attack" }
+    if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
+    else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
   } else p.sh = false
   p.wcd = Math.max(0, p.wcd - STEP * 1000)
   if (k["m"] && !p.wh && p.wcd <= 0 && !g.whip && !p.exhausted) {
@@ -1823,9 +1827,31 @@ function tickPlayer(g: G) {
     g.whip = { x: cx, y: cy, ex: cx + d.x * WLEN, ey: cy + d.y * WLEN, life: 0.2, dealt: false }
     p.stamina = Math.max(0, p.stamina - 18)
     if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
-    p.wcd = 500; p.wh = true; p.pa = "attack"
+    p.wcd = 500; p.wh = true; p.pa = p.facing === 1 ? "atack_correa" : "atack_correa_left"
   }
   if (!k["m"]) p.wh = false
+
+  // ── Animación en el aire: sobrescribe estado de movimiento ─────────────
+  // Umbrales para evitar falsos positivos en bordes o suelo con pequeñas oscilaciones:
+  //   vy < -2  → sube con fuerza → jump
+  //   vy > 2.5 → cae con fuerza → fall  (NO se activa por caminar al borde 1-2 frames)
+  //   entre -2 y 2.5 → zona de transición, mantiene la animación actual
+  if (!p.onGround && !p.wallSliding && !p.dash) {
+    const isAttacking = p.pa === "atack_bone" || p.pa === "atack_bone_left" ||
+                        p.pa === "atack_correa" || p.pa === "atack_correa_left"
+    if (!isAttacking) {
+      if (p.vy < -2) {
+        p.pa = p.facing === 1 ? "jump" : "jump_left"
+      } else if (p.vy > 2.5) {
+        // Resetea frame al entrar en fall para que siempre empiece desde el inicio
+        const fallAnim = p.facing === 1 ? "fall" : "fall_left"
+        if (p.pa !== fallAnim) p.pf = 0
+        p.pa = fallAnim
+      }
+      // zona media (-2 a 2.5): mantiene pa actual (walk/idle/jump congelado)
+    }
+  }
+
   if (p.inv > 0) p.inv -= STEP
   if (g.infiniteAmmo) { p.ammo = 15; p.stamina = p.maxStamina; p.exhausted = false; p.staminaCooldown = 0; if (g.abilities.has("tball")) g.tballAmmo = TB_AMMO_MAX }
 }
@@ -3918,10 +3944,9 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const rx = bx - rw / 2
   const ry = by - dim.ryOff   // pies del personaje exactamente sobre el suelo
 
-  // ── Frame animation (4×4 spritesheet = 16 frames, igual que el jugador) ──
-  // Velocidad en ms/frame según estado (perro viejo = más lento que Luly)
-  // Rex a 25fps = 40ms/frame (spritesheet 256×256/frame)
-  const REX_FPF = 40
+  // ── Frame animation (5×5 spritesheet = 25 frames) ──
+  // Rex a ~10fps = 100ms/frame (animaciones de perro viejo, lentas y pausadas)
+  const REX_FPF = 100
   const REX_SPD: Record<string, number> = {
     rex_idle:              REX_FPF,
     rex_saludo_left:       REX_FPF,
@@ -5161,9 +5186,15 @@ function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       run_left:       { rw:  69, rh:  70, ryOff:   3, rxOff: -10 },
       jump:           { rw:  59, rh: 105, ryOff: -17, rxOff:  -9 },
       jump_left:      { rw:  59, rh: 105, ryOff: -17, rxOff:  -3 },
-      attack:         { rw:  50, rh:  69, ryOff:   4, rxOff:  -1 },  // fallback=idle
-      dash_right:     { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
-      dash_left:      { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      attack:            { rw:  50, rh:  69, ryOff:   4, rxOff:  -1 },  // fallback=idle
+      fall:              { rw:  55, rh:  69, ryOff:   4, rxOff:  -2 },
+      fall_left:         { rw:  55, rh:  69, ryOff:   4, rxOff:   2 },
+      atack_bone:        { rw:  66, rh:  69, ryOff:   3, rxOff:  -5 },
+      atack_bone_left:   { rw:  66, rh:  69, ryOff:   3, rxOff:   5 },
+      atack_correa:      { rw: 121, rh:  72, ryOff:   0, rxOff:   0 },  // sprite ancho: Luly izq, correa extiende dcha
+      atack_correa_left: { rw: 121, rh:  72, ryOff:   0, rxOff: -89 },  // Luly dcha, correa extiende izq
+      dash_right:        { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      dash_left:         { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
     }
     const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
     const rw = dim.rw, rh = dim.rh
@@ -5263,13 +5294,9 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 }
 
 function drawWhip(ctx: CanvasRenderingContext2D, g: G) {
-  const w = g.whip; if (!w) return
-  const sx1 = w.x - g.cx, sy1 = w.y - g.cy, sx2 = w.ex - g.cx, sy2 = w.ey - g.cy
-  const len = Math.sqrt((sx2 - sx1) ** 2 + (sy2 - sy1) ** 2)
-  const wi = getWorldAtX(g.cx), cols = ["#8B4513", "#A0A0A0", "#4682B4", "#9400D3"]
-  ctx.save(); ctx.translate(sx1, sy1); ctx.rotate(Math.atan2(sy2 - sy1, sx2 - sx1))
-  ctx.fillStyle = "#5A2D0F"; ctx.fillRect(-5, -3, 10, 6); ctx.fillStyle = cols[wi]; ctx.fillRect(5, -2, len - 10, 4)
-  ctx.fillStyle = "#FFF"; ctx.fillRect(len - 6, -1, 6, 2); ctx.restore()
+  // Visual reemplazado por el sprite atack_correa/atack_correa_left en drawPlayer.
+  // La lógica de hitbox/daño sigue en tickWhip (g.whip objeto intacto).
+  void ctx; void g
 }
 
 function drawProjs(ctx: CanvasRenderingContext2D, g: G) {
@@ -7206,9 +7233,15 @@ export default function ProyectoLuly() {
     L("player_run_left",       "/assets/player/player_run_left.png")
     L("player_jump",           "/assets/player/player_jump.png")
     L("player_jump_left",      "/assets/player/player_jump_left.png")
-    L("player_attack",         "/assets/player/player_attack.png")
-    L("player_slow_walk",      "/assets/player/player_slow_walk.png")
-    L("player_slow_walk_left", "/assets/player/player_slow_walk_left.png")
+    L("player_attack",             "/assets/player/player_attack.png")
+    L("player_slow_walk",          "/assets/player/player_slow_walk.png")
+    L("player_slow_walk_left",     "/assets/player/player_slow_walk_left.png")
+    L("player_fall",               "/assets/player/player_fall.png")
+    L("player_fall_left",          "/assets/player/player_fall_left.png")
+    L("player_atack_bone",         "/assets/player/player_atack_bone.png")
+    L("player_atack_bone_left",    "/assets/player/player_atack_bone_left.png")
+    L("player_atack_correa",       "/assets/player/luly_atack_correa.png")
+    L("player_atack_correa_left",  "/assets/player/luly_atack_correa_left.png")
     // dash: cargados pero no usados hasta tener sprites 25fps
     L("player_dash_right", "/assets/player/player_dash_right.png")
     L("player_dash_left",  "/assets/player/player_dash_left.png")
@@ -7295,13 +7328,31 @@ export default function ProyectoLuly() {
       walk: LULY_FPF,  walk_left: LULY_FPF,
       run:  LULY_FPF,  run_left:  LULY_FPF,
       jump: LULY_FPF,  jump_left: LULY_FPF,
+      fall: LULY_FPF,  fall_left: LULY_FPF,
       attack: LULY_FPF,
       slow_walk: LULY_FPF, slow_walk_left: LULY_FPF,
+      atack_bone: LULY_FPF, atack_bone_left: LULY_FPF,
+      atack_correa: LULY_FPF, atack_correa_left: LULY_FPF,
       // dash: desactivado hasta tener sprites 25fps
     }
     let raf: number, el = 0, last = performance.now()
     // 5×5 spritesheet = 25 frames totales
-    const fn = (now: number) => { el += now - last; last = now; const g = G.current, s = sp[g.pl.pa] ?? LULY_FPF; if (el > s) { el = 0; g.pl.pf = (g.pl.pf + 1) % 25 }; raf = requestAnimationFrame(fn) }
+    // jump: cicla hasta frame 24 y lo congela mientras el jugador está en el aire
+    const fn = (now: number) => {
+      el += now - last; last = now
+      const g = G.current, p = g.pl
+      const s = sp[p.pa] ?? LULY_FPF
+      if (el > s) {
+        el = 0
+        const isJump = p.pa === "jump" || p.pa === "jump_left"
+        if (isJump && !p.onGround && p.pf >= 24) {
+          // Congela en el último frame mientras está en el aire
+        } else {
+          p.pf = (p.pf + 1) % 25
+        }
+      }
+      raf = requestAnimationFrame(fn)
+    }
     raf = requestAnimationFrame(fn); return () => cancelAnimationFrame(raf)
   }, [])
 
