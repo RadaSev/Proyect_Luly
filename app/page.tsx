@@ -20,6 +20,7 @@ const EN_HBX = 14, EN_HBT = 10
 const EW = 96, EH = 96, BW = 140, BH = 140
 const WALK = 3, RUN = 6, JV = -12, GUP = 0.38, GDN = 0.62, GMAX = 13
 const PSPD = 6, WLEN = 70, WDMG = 1, STEP = 1 / 60
+const CHAIN_REACH = 85    // alcance del ataque de cadena del enemigo W1S2 (px)
 const KENNEL_R = 100
 const TOT_W = NW * NC * RW   // 50400
 const TOT_H = NR * RH      // 6120
@@ -47,8 +48,10 @@ type Enemy = {
   isMoving: boolean
   alertDelay: number
   phase: number
+  ls2: number                                                   // timestamp último ataque-2
+  chainHit: { dir: number; life: number; dealt: boolean } | null // ataque melee de cadena
 }
-type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean }
+type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean; lightning?: boolean }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
 type Whip = { x: number; y: number; ex: number; ey: number; life: number; dealt: boolean }
 type Drop   = { x: number; y: number; vx: number; vy: number; active: boolean; life: number; kind: "h" | "a" | "tba" | "c" }
@@ -181,7 +184,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.5"
+const GAME_VERSION = "0.2.6"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1193,8 +1196,10 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
       const eid = `${rid(w, c, r)}_${i}`
       if (dead.has(eid)) return
       const [, , hp, spd, cd, boss] = sp
-      const eW = boss ? BW : EW
-      const eH = boss ? BH : EH
+      // W1 Second Section (world=0, row≥TROW): tamaño similar a Luly
+      const isW1S2spawn = w === 0 && r >= TROW && !boss
+      const eW = boss ? BW : (isW1S2spawn ? 60 : EW)
+      const eH = boss ? BH : (isW1S2spawn ? 72 : EH)
 
       // Para jefes: ignorar exclusión de shafts (su sala siempre tiene espacio suficiente)
       // y validar posición al nivel del PISO en vez del canal (chanBot puede estar
@@ -1264,7 +1269,8 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         state: "patrol", alert: false, alertT: 0, guardX: -1,
         idleT: Math.floor(rand() * 500), jumpCd: 0,
         dying: false, deathTimer: 0, deathDir: 1,
-        hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1
+        hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1,
+        ls2: 0, chainHit: null
       })
     })
   }
@@ -1464,17 +1470,16 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
     return
   }
   e.dying = true; e.deathTimer = 0; e.deathDir = e.dir; e.ef = 0; e.eft = 0
-  e.vx = 0; e.alert = false; e.sa = 0
+  e.vx = 0; e.alert = false; e.sa = 0; e.chainHit = null
 
   // FIX: extraer el ID spawn original del originalId antes de registrar
   // El originalId tiene formato "w_c_r_i" o puede haber sido corrompido.
   // Normalizar: tomar solo los primeros 4 segmentos del originalId.
   const parts = e.originalId.split("_")
   const normalizedOriginal = parts.slice(0, 4).join("_")  // "w_c_r_i"
-  // En dmgEnemy, antes del g.dead.add:
   console.log("murió:", e.id, "| original:", e.originalId, "| world:", e.world)
   e.dying = true; e.deathTimer = 0; e.deathDir = e.dir; e.ef = 0; e.eft = 0
-  e.vx = 0; e.alert = false; e.sa = 0
+  e.vx = 0; e.alert = false; e.sa = 0; e.chainHit = null
 
   // Siempre registrar el ID spawn original limpio (w_c_r_i = exactamente 4 segmentos)
   const origParts = e.originalId.split("_")
@@ -1905,8 +1910,8 @@ function tickEnemies(g: G, now: number) {
       e.eft += dt
       if (e.eft > 75) { e.ef = Math.min(e.ef + 1, 15); e.eft = 0 }
       e.deathTimer += STEP
-      e.vy += GDN * 0.4; if (e.vy > GMAX) e.vy = GMAX
-      e.y += e.vy
+      // Sin gravedad: el sprite de muerte ya los muestra caídos en el piso.
+      // e.y y e.vx no se modifican durante la muerte.
       if (e.ef >= 15 && e.deathTimer > 1.35) e.active = false
       continue
     }
@@ -2439,39 +2444,91 @@ function tickEnemies(g: G, now: number) {
       spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF0000", "#FF8800", "#FFFF00", "#FFFFFF", "#FF4400"], 24, 6, true)
     }
 
-    // ── Disparo ──────────────────────────────────────────────────────
+    // ── Disparo / Ataques ────────────────────────────────────────────
     const canShoot = e.boss
       ? (dist < sight)
       : (plSameRoom && canSee && e.state === "chase" && e.alertDelay <= 0)
-    if (now - e.ls > e.cd && canShoot) {
-      const sp = e.boss ? (e.phase === 2 ? 4.2 : 3.2) : 2.8
-      const ex2 = e.x + e.w / 2, ey2 = e.y + e.h / 2
-      // Puntería predictiva: apunta al punto donde estará el jugador ~0.4s después
-      const LEAD = e.boss ? 0.5 : 0.38
-      const pdx = (p.x + p.w / 2 + p.vx * LEAD) - ex2
-      const pdy = (p.y + p.h / 2 + p.vy * LEAD) - ey2
-      const plen = Math.sqrt(pdx * pdx + pdy * pdy) || 1
-      // Proyectil dirigido principal
-      g.projs.push({ x: ex2, y: ey2, vx: (pdx / plen) * sp, vy: (pdy / plen) * sp, active: true, pl: false, star: false, rot: Math.atan2(pdy, pdx) * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
-      if (e.boss) {
-        // Salva radial: 8 en fase 1, 12 en fase 2
-        const numRadial = e.phase === 2 ? 12 : 8
-        for (let a = 0; a < numRadial; a++) {
-          const rad = a * Math.PI * 2 / numRadial, bx = ex2, by = ey2
-          const rsp = e.phase === 2 ? 3.0 : 2.2
-          g.projs.push({ x: bx, y: by, vx: Math.cos(rad) * rsp, vy: Math.sin(rad) * rsp, active: true, pl: false, star: true, rot: a * (360 / numRadial), life: 4, dist: 0, ox: bx, oy: by })
+
+    // ── W1 Second Section: ataques específicos de cadena y rayo ─────
+    const isW1S2 = e.world === 0 && enemySection(e) === "s"
+    if (isW1S2 && !e.boss) {
+      const damagePct = (e.mhp - e.hp) / e.mhp   // 0=lleno, 1=muerto
+      const useAtk2   = damagePct >= 0.60          // ≥60% daño recibido → rayo
+
+      if (!useAtk2) {
+        // ── Ataque 1: Golpe de cadena (melee) — cada 500ms ───────────
+        const ATK1_CD = 500
+        if (now - e.ls > ATK1_CD && canShoot && dist < CHAIN_REACH + 30) {
+          e.chainHit = { dir: e.dir, life: 0.22, dealt: false }
+          e.ls = now; e.sa = 220
         }
-        // Fase 2: ráfaga triple dirigida al jugador
-        if (e.phase === 2) {
-          const ang = Math.atan2(dy, dx)
-          for (let a = -1; a <= 1; a++) {
-            const aOff = ang + a * 0.32
-            g.projs.push({ x: ex2, y: ey2, vx: Math.cos(aOff) * sp * 1.2, vy: Math.sin(aOff) * sp * 1.2, active: true, pl: false, star: true, rot: aOff * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
+      } else {
+        // ── Ataque 2: Rayo — cada 2000ms ─────────────────────────────
+        const ATK2_CD = 2000
+        if (now - e.ls2 > ATK2_CD && canShoot) {
+          const ex2 = e.x + e.w / 2, ey2 = e.y + e.h * 0.4
+          const pdx  = (p.x + p.w / 2 + p.vx * 0.3) - ex2
+          const pdy  = (p.y + p.h / 2 + p.vy * 0.3) - ey2
+          const plen = Math.sqrt(pdx * pdx + pdy * pdy) || 1
+          g.projs.push({
+            x: ex2, y: ey2,
+            vx: (pdx / plen) * 3.8, vy: (pdy / plen) * 3.8,
+            active: true, pl: false, star: false,
+            rot: Math.atan2(pdy, pdx) * 180 / Math.PI,
+            life: 3.5, dist: 0, ox: ex2, oy: ey2,
+            lightning: true
+          })
+          triggerShake(g, 3, 0.14)
+          e.ls2 = now; e.sa = 400
+        }
+      }
+
+      // ── Tick del chain hit: daño y vida ──────────────────────────
+      if (e.chainHit) {
+        e.chainHit.life -= STEP
+        if (!e.chainHit.dealt) {
+          // Hitbox de la cadena: extiende desde el frente del enemigo
+          const cDir  = e.chainHit.dir
+          const cX    = cDir > 0 ? (e.x + e.w) : (e.x - CHAIN_REACH)
+          const cY    = e.y + e.h * 0.25
+          const cW2   = CHAIN_REACH, cH2 = e.h * 0.55
+          const phx2  = p.x + PL_HBX, phy2 = p.y + PL_HBT
+          const phw2  = p.w - 2 * PL_HBX, phh2 = p.h - PL_HBT
+          if (phx2 < cX + cW2 && phx2 + phw2 > cX && phy2 < cY + cH2 && phy2 + phh2 > cY) {
+            if (p.inv <= 0) { dmgPlayer(g, 1); e.chainHit.dealt = true }
           }
         }
-        triggerShake(g, e.phase === 2 ? 5 : 3, 0.18)
+        if (e.chainHit.life <= 0) e.chainHit = null
       }
-      e.ls = now; e.sa = 300
+
+    } else {
+      // ── Ataque genérico (resto de enemigos + boss) ────────────────
+      if (now - e.ls > e.cd && canShoot) {
+        const sp = e.boss ? (e.phase === 2 ? 4.2 : 3.2) : 2.8
+        const ex2 = e.x + e.w / 2, ey2 = e.y + e.h / 2
+        const LEAD = e.boss ? 0.5 : 0.38
+        const pdx = (p.x + p.w / 2 + p.vx * LEAD) - ex2
+        const pdy = (p.y + p.h / 2 + p.vy * LEAD) - ey2
+        const plen = Math.sqrt(pdx * pdx + pdy * pdy) || 1
+        g.projs.push({ x: ex2, y: ey2, vx: (pdx / plen) * sp, vy: (pdy / plen) * sp, active: true, pl: false, star: false, rot: Math.atan2(pdy, pdx) * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
+        if (e.boss) {
+          const numRadial = e.phase === 2 ? 12 : 8
+          for (let a = 0; a < numRadial; a++) {
+            const rad = a * Math.PI * 2 / numRadial, bx = ex2, by = ey2
+            const rsp = e.phase === 2 ? 3.0 : 2.2
+            g.projs.push({ x: bx, y: by, vx: Math.cos(rad) * rsp, vy: Math.sin(rad) * rsp, active: true, pl: false, star: true, rot: a * (360 / numRadial), life: 4, dist: 0, ox: bx, oy: by })
+          }
+          if (e.phase === 2) {
+            const ang = Math.atan2(dy, dx)
+            for (let a = -1; a <= 1; a++) {
+              const aOff = ang + a * 0.32
+              g.projs.push({ x: ex2, y: ey2, vx: Math.cos(aOff) * sp * 1.2, vy: Math.sin(aOff) * sp * 1.2, active: true, pl: false, star: true, rot: aOff * 180 / Math.PI, life: 3.5, dist: 0, ox: ex2, oy: ey2 })
+            }
+          }
+          triggerShake(g, e.phase === 2 ? 5 : 3, 0.18)
+        }
+        e.ls = now; e.sa = 300
+      }
     }
     if (e.sa > 0) e.sa -= dt
 
@@ -5256,8 +5313,14 @@ function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
   } else if (e.hurtTimer > 0) {
     keys = [`${pk}hurt_${dir}`, `${pk}hurt_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
   } else if (e.sa > 0) {
-    // phase determina cuál ataque usar (0→atack1, 1→atack2); cae en atack genérico si no existe
-    const pn = (e.phase || 0) % 2 + 1
+    // W1S2: atack1 si hay chainHit, atack2 si disparó rayo; resto: phase
+    const isW1S2spr = e.world === 0 && sec === "s"
+    let pn: number
+    if (isW1S2spr) {
+      pn = e.chainHit ? 1 : 2
+    } else {
+      pn = (e.phase || 0) % 2 + 1
+    }
     keys = [`${pk}atack${pn}_${dir}`, `${pk}atack${pn}`, `${pk}atack_${dir}`, `${pk}atack`, `${pk}idle_${dir}`, `${pk}idle`]
   } else if (e.isMoving) {
     keys = [`${pk}walk_${dir}`, `${pk}walk_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
@@ -5275,6 +5338,19 @@ function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, f
   ctx.drawImage(spr, col * fw, row * fh, fw, fh, dx, dy, dw, dh)
 }
 
+// Dimensiones de render para cada tipo de enemigo (desacopla visual del hitbox)
+// rw/rh = tamaño de render del sprite completo; rxOff/ryOff = offset desde esquina del hitbox
+function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; ryOff: number } {
+  if (e.world === 0 && enemySection(e) === "s") {
+    // Sprite PIL analizado: frame≈242×264, cH=257, padT=3, padB=4
+    // Target content-h≈70px → scale=0.265 → rw=64, rh=70
+    // ryOff alinea fondo del contenido con fondo del hitbox (eH=72)
+    return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
+  }
+  // Default: el sprite ocupa exactamente el hitbox
+  return { rw: e.w, rh: e.h, rxOff: 0, ryOff: 0 }
+}
+
 function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   for (const e of g.enemies) {
     if (g.noEnemies && !e.boss) continue  // noEnemies: oculta enemigos normales pero muestra bosses
@@ -5286,7 +5362,8 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     if (e.hurtTimer > 0 && Math.floor(Date.now() / 60) % 2 === 0) { ctx.globalAlpha = 0.45 }
     const spr = resolveEnemySpr(e, sprs)
     if (spr) {
-      drawSpriteFrame(ctx, spr, e.ef, sx, sy, e.w, e.h)
+      const { rw, rh, rxOff, ryOff } = getEnemyRenderDim(e)
+      drawSpriteFrame(ctx, spr, e.ef, sx + rxOff, sy + ryOff, rw, rh)
     } else {
       ctx.fillStyle = e.boss ? th.doorC : th.wallHi
       if (e.boss) {
@@ -5308,6 +5385,37 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       }
     }
     ctx.globalAlpha = 1
+
+    // ── Chain hit visual (W1S2) ────────────────────────────────────
+    if (e.chainHit && !e.dying) {
+      const ch = e.chainHit
+      const lifeRatio = ch.life / 0.22           // 1→0 durante el ataque
+      const originX = sx + e.w / 2
+      const originY = sy + e.h * 0.4
+      const tipX = ch.dir > 0 ? sx + e.w + CHAIN_REACH : sx - CHAIN_REACH
+      const tipY = originY
+      ctx.save()
+      ctx.globalAlpha = Math.max(0, lifeRatio) * 0.92
+      // Eslabones de cadena: círculos a lo largo de la línea
+      const NUM_LINKS = 6
+      for (let li = 0; li <= NUM_LINKS; li++) {
+        const t   = li / NUM_LINKS
+        const lx  = originX + (tipX - originX) * t
+        const ly  = originY + Math.sin(t * Math.PI * 2 + Date.now() / 60) * 3  // leve ondulación
+        const r   = li === 0 || li === NUM_LINKS ? 4.5 : 3
+        ctx.fillStyle = li % 2 === 0 ? "#AAAAAA" : "#666666"
+        ctx.shadowColor = "#CCCCCC"; ctx.shadowBlur = 4
+        ctx.beginPath(); ctx.arc(lx, ly, r, 0, Math.PI * 2); ctx.fill()
+      }
+      // Línea principal de la cadena
+      ctx.strokeStyle = "#888888"
+      ctx.lineWidth   = 2
+      ctx.shadowBlur  = 6; ctx.shadowColor = "#AAAAFF"
+      ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(tipX, tipY); ctx.stroke()
+      ctx.shadowBlur = 0
+      ctx.restore()
+    }
+
     // Barra de HP sobre la cabeza — solo enemigos normales (el boss usa la barra del HUD)
     if (!e.dying && !e.boss) {
       const hpR = Math.max(0, e.hp) / e.mhp
@@ -5346,6 +5454,26 @@ function drawProjs(ctx: CanvasRenderingContext2D, g: G) {
       ctx.beginPath(); ctx.arc(-9, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(9, 0, 5, 0, Math.PI * 2); ctx.fill()
       ctx.beginPath(); ctx.arc(-9, -4, 3, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(-9, 4, 3, 0, Math.PI * 2); ctx.fill()
       ctx.beginPath(); ctx.arc(9, -4, 3, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(9, 4, 3, 0, Math.PI * 2); ctx.fill()
+      ctx.shadowBlur = 0
+    } else if (pr.lightning) {
+      // Rayo amarillo del enemigo W1S2
+      ctx.rotate(pr.rot * Math.PI / 180)
+      ctx.shadowColor = "#FFFF44"; ctx.shadowBlur = 10
+      // Cuerpo del rayo: zigzag
+      ctx.strokeStyle = "#FFEE00"; ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.moveTo(-14, 0)
+      ctx.lineTo(-6,  -5)
+      ctx.lineTo( -1,  1)
+      ctx.lineTo(  5, -5)
+      ctx.lineTo( 14,  0)
+      ctx.stroke()
+      // Núcleo brillante
+      ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1
+      ctx.stroke()
+      // Chispa central
+      ctx.fillStyle = "#FFFF88"
+      ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI * 2); ctx.fill()
       ctx.shadowBlur = 0
     } else if (pr.star) { ctx.rotate(pr.rot * Math.PI / 180); ctx.fillStyle = th.doorC; ctx.fillRect(-6, -1.5, 12, 3); ctx.fillRect(-1.5, -6, 3, 12) }
     else { ctx.fillStyle = th.doorC + "DD"; ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = th.doorC; ctx.lineWidth = 2; ctx.stroke() }
