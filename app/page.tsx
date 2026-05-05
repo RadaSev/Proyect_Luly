@@ -124,6 +124,7 @@ type G = {
   realMapWorld: number   // mundo actualmente visible en el real map dev
   realMapScale: number   // multiplicador de tamaño para personajes/enemigos/cajas
   realMapIconMode: number // 0=sprites juego, 1=iconos v1 (pixel), 2=iconos v2 (minimalist)
+  realMapSection: number  // 0=sección superior (r0-TROW), 1=sección inferior (TROW-NR-1)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1356,6 +1357,7 @@ function mkG_lazy(): G {
     realMapWorld: 0,
     realMapScale: 1.5,
     realMapIconMode: 0,
+    realMapSection: 0,
   } as G
 }
 
@@ -5939,12 +5941,19 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const plC  = Math.max(0, Math.min(NC - 1, Math.floor((p.x - curW * NC * RW) / RW)))
   const plR  = Math.max(0, Math.min(NR - 1, Math.floor(p.y / RH)))
 
+  // ── Sección visible ───────────────────────────────────────────
+  // Cada sección muestra 5 filas (la mitad + TROW compartido)
+  const section = g.realMapSection ?? 0  // 0=superior(r0-TROW), 1=inferior(TROW-NR-1)
+  const NVIS    = 5                       // filas visibles a la vez
+  const rStart  = section === 0 ? 0 : TROW
+  const rEnd    = rStart + NVIS - 1       // incl: 0→4 ó 4→8
+
   // ── Layout ────────────────────────────────────────────────────
   const HDR = 28, MARG = 6, GAP = 2
   const availW = CW - MARG * 2
-  const availH = CH - HDR - MARG * 2
+  const availH = CH - HDR - MARG * 2 - 14   // -14 para el footer
   const cellW  = Math.floor((availW - (NC - 1) * GAP) / NC)
-  const cellH  = Math.floor((availH - (NR - 1) * GAP) / NR)
+  const cellH  = Math.floor((availH - (NVIS - 1) * GAP) / NVIS)
   const gridX  = MARG
   const gridY  = HDR + MARG / 2
   const scX    = cellW / RW
@@ -5967,12 +5976,13 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
   // ── Header ────────────────────────────────────────────────────
   const SCALE_STEPS = [1.0, 1.5, 2.0, 3.0]
-  const scaleLabel  = `${g.realMapScale}x`
-  const iconLabel   = iconMode === 0 ? "SPRITES" : iconMode === 1 ? "ICONOS-v1" : "ICONOS-v2"
+  const scaleLabel   = `${g.realMapScale}x`
+  const iconLabel    = iconMode === 0 ? "SPRITES" : iconMode === 1 ? "ICONOS-v1" : "ICONOS-v2"
+  const sectionLabel = section === 0 ? "SUP(r0-4)" : "INF(r4-8)"
   ctx.fillStyle = "#111"; ctx.fillRect(0, 0, CW, HDR - 2)
   ctx.fillStyle = "#00FF44"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText(
-    `⚙ REAL MAP DEV  ·  W${w+1}: ${WORLD_NAMES[w]}  ·  [←→] mundo  [S] escala:${scaleLabel}  [V] gfx:${iconLabel}  [Y/Esc] cerrar`,
+    `⚙ REAL MAP DEV  ·  W${w+1}: ${WORLD_NAMES[w]}  ·  [←→/AD] mundo  [W/S] sección:${sectionLabel}  [Z] escala:${scaleLabel}  [V] gfx:${iconLabel}  [Y/Esc] cerrar`,
     CW / 2, 17
   )
   ctx.textAlign = "left"
@@ -5981,9 +5991,10 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const allPlats = getWorldPlats(w)
 
   for (let c = 0; c < NC; c++) {
-    for (let r = 0; r < NR; r++) {
+    for (let r = rStart; r <= rEnd; r++) {
+      const ri   = r - rStart                    // fila de display 0-4
       const cx   = gridX + c * (cellW + GAP)
-      const cy   = gridY + r * (cellH + GAP)
+      const cy   = gridY + ri * (cellH + GAP)
       const x0   = w * NC * RW + c * RW
       const y0   = r * RH
       const isPlayerRoom = w === curW && c === plC && r === plR
@@ -6327,7 +6338,7 @@ function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.fillStyle = "#111"; ctx.fillRect(0, CH - 14, CW, 14)
   ctx.fillStyle = "#444"; ctx.font = "7px 'Courier New',monospace"; ctx.textAlign = "center"
   ctx.fillText(
-    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  escala:${g.realMapScale}x  gfx:${iconLabel}  ·  [Y] cerrar`,
+    `Player (${Math.round(p.x)}, ${Math.round(p.y)})  ·  Room [${plC}, ${plR}]  ·  W${curW+1} ${WORLD_NAMES[curW]}  ·  sección:${sectionLabel}  escala:${scaleLabel}  gfx:${iconLabel}  ·  [Y] cerrar`,
     CW / 2, CH - 3
   )
   ctx.textAlign = "left"
@@ -7026,6 +7037,23 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   const ax = (i: number) => pad!.axes[i] ?? 0
   const edgeDown = (i: number) => { const now = btn(i); const prev = _gpPrev[i] ?? false; _gpPrev[i] = now; return now && !prev }
 
+  // ── Real Map DEV: stick derecho cambia sección/mundo ────────────
+  if (g.showRealMap && g.devMode) {
+    _gpStickNavCd = Math.max(0, _gpStickNavCd - 16)
+    const THRESH = 0.55
+    if (_gpStickNavCd <= 0) {
+      const ry = ax(3)   // stick derecho Y (up=sección superior, down=inferior)
+      const rx = ax(2)   // stick derecho X (izquierda/derecha = mundo)
+      if      (ry < -THRESH) { g.realMapSection = 0; _gpStickNavCd = 400 }
+      else if (ry >  THRESH) { g.realMapSection = 1; _gpStickNavCd = 400 }
+      if      (rx < -THRESH) { g.realMapWorld = (g.realMapWorld - 1 + NW) % NW; _gpStickNavCd = 300 }
+      else if (rx >  THRESH) { g.realMapWorld = (g.realMapWorld + 1) % NW;       _gpStickNavCd = 300 }
+    }
+    if (edgeDown(GP.B) || edgeDown(GP.START) || edgeDown(GP.BACK)) g.showRealMap = false
+    _gpBPrev = btn(GP.B)
+    return  // no procesar movimiento de jugador
+  }
+
   // ── FIX: Dev Map — cursor celda a celda, sin scroll ──────────────
   if (g.showDevMap) {
     // Debounce: ~16ms por frame, cooldown de 180ms
@@ -7325,7 +7353,9 @@ export default function ProyectoLuly() {
         const SCALE_STEPS = [1.0, 1.5, 2.0, 3.0]
         if (k === "arrowleft"  || k === "a") { g.realMapWorld = (g.realMapWorld - 1 + NW) % NW; return }
         if (k === "arrowright" || k === "d") { g.realMapWorld = (g.realMapWorld + 1) % NW; return }
-        if (k === "s") {
+        if (k === "w" || k === "arrowup")    { g.realMapSection = 0; return }  // sección superior
+        if (k === "s" || k === "arrowdown")  { g.realMapSection = 1; return }  // sección inferior
+        if (k === "z") {
           const idx = SCALE_STEPS.indexOf(g.realMapScale)
           g.realMapScale = SCALE_STEPS[(idx + 1) % SCALE_STEPS.length]
           return
@@ -7376,6 +7406,9 @@ export default function ProyectoLuly() {
         if (g.showRealMap) {
           // Al abrir, mostrar el mundo donde está el jugador
           g.realMapWorld = Math.max(0, Math.min(NW - 1, Math.floor(g.pl.x / (NC * RW))))
+          // Auto-seleccionar la sección donde está Luly
+          const _plRow = Math.max(0, Math.min(NR - 1, Math.floor(g.pl.y / RH)))
+          g.realMapSection = _plRow <= TROW ? 0 : 1
         }
       }
       if (g.devMode && k === "h") {
@@ -8891,7 +8924,11 @@ export default function ProyectoLuly() {
 
         {/* ── RealMap DEV — solo devMode/PC, toggle con N ── */}
         {screen === "playing" && ui.devMode && !G.current.isMobile && (
-          <RealMapDev visible={ui.showRealMap} drawFn={realMapDrawFn} />
+          <RealMapDev
+            visible={ui.showRealMap}
+            drawFn={realMapDrawFn}
+            onSwipe={(dir) => { G.current.realMapSection = dir > 0 ? 1 : 0 }}
+          />
         )}
 
         {/* ── Gamepad táctil ── */}
