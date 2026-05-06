@@ -34,12 +34,14 @@ const W1P2_BW = 140, W1P2_BH = 220   // Boss W1 Segunda Sección: ~3× Luly (3×
 const SLAM_REACH = 180    // alcance del golpe de piso (px) frente al boss
 const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
 const SLAM_DMG   = 1      // daño del slam
-const SPIN_DURATION = 5.0 // segundos de giro (≥2 ciclos completos de animación)
-const SPIN_STUN  = 2.0    // segundos de parálisis post-giro
+const SPIN_DURATION = 4.5 // 2 ciclos × 25 frames × 90 ms = 4500 ms exactos
+const SPIN_STUN  = 3.0    // segundos de parálisis post-giro (vulnerable, esperar 3s)
 const SPIN_DMG   = 2      // daño del giro al jugador
 const SPIN_RADIUS = 220   // radio de daño durante el giro
-const SLAM_CD    = 2800   // ms entre slams
-const SPIN_CD    = 9000   // ms entre giros (incluye tiempo de stun)
+const SLAM_CD    = 5000   // ms entre slams (base 5 s)
+const SLAM_CD_CLOSE = 3000 // ms entre slams cuando está cerca (<SLAM_CLOSE_DIST)
+const SLAM_CLOSE_DIST = 210 // px — umbral de "cerca" para el slam rápido
+const SPIN_CD    = 2500   // ms de caminata rage antes de iniciar el giro
 const MOUND_W    = 160    // ancho del montículo de herramientas
 const MOUND_H    = 112    // alto del montículo
 const KENNEL_R = 100
@@ -2597,11 +2599,12 @@ function tickEnemies(g: G, now: number) {
           if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
           if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
         }
-        // W1P2: paralizar durante giro y stun
-        if (isW1P2Boss(e) && (e.spinTimer > 0 || e.stunTimer > 0)) {
+        // W1P2: paralizar solo durante stun; durante el giro el boss avanza normalmente
+        if (isW1P2Boss(e) && e.stunTimer > 0) {
           targetVx = 0
           e.vx = 0
         }
+        // Durante el giro el boss sigue moviéndose (targetVx ya viene del chase arriba)
       }
 
     } else if (e.state === "chase" && plSameRoom) {
@@ -2872,7 +2875,8 @@ function tickEnemies(g: G, now: number) {
 
     } else if (isW1P2Boss(e)) {
       // ── Jefe W1 Segunda Sección: golpe de piso + giro de martillo ──
-      // Tick del giro (spinTimer)
+
+      // ── 1. Tick del giro (spinTimer) ──────────────────────────────────
       if (e.spinTimer > 0) {
         e.spinTimer -= STEP
         // Daño al jugador en radio de giro
@@ -2892,45 +2896,58 @@ function tickEnemies(g: G, now: number) {
             nearMound.active = false
             e.spinHitMound = true
             launchToolsFromMound(g, nearMound, e.dir)
-            // VFX: explosión de herramientas + vibración
             spawnExplosion(g, nearMound.x + nearMound.w / 2, nearMound.y, ["#FF6600", "#FFAA00", "#CC8800", "#FF4400", "#DDDDDD"], 24, 6.0)
             triggerShake(g, 9, 0.35)
           }
         }
         if (e.spinTimer <= 0) {
-          // Fin del giro → parálisis
+          // Fin del giro → parálisis 3 s (vulnerable)
           e.stunTimer = SPIN_STUN
           e.spinTimer = 0
           e.sa = 0
           spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF6600", "#FFAA00", "#FF0000"], 10, 3.5)
+          triggerShake(g, 5, 0.25)
         }
+
+      // ── 2. Tick del stun post-giro ─────────────────────────────────────
       } else if (e.stunTimer > 0) {
         e.stunTimer -= STEP
-        // Paralizado: no hace nada, vulnerable
+        if (e.stunTimer <= 0) {
+          // Stun terminó → comenzar caminata de rage (resetear timer de rage walk)
+          e.stunTimer = 0
+          e.ls2 = now
+        }
+
+      // ── 3. Decisión de ataque (solo si puede disparar y no está en stun/giro) ──
       } else if (canShoot) {
-        // Elegir ataque
-        const canSlam = now - e.ls > SLAM_CD
+        // Cooldown del slam: más corto cuando está cerca
+        const activeSlamCD = dist < SLAM_CLOSE_DIST ? SLAM_CD_CLOSE : SLAM_CD
+        const canSlam = now - e.ls > activeSlamCD && dist < SLAM_REACH + e.w + 30
+        // El giro siempre sigue a la caminata de rage (fase 2): tras SPIN_CD ms caminando, girar
         const canSpin = e.phase >= 2 && now - e.ls2 > SPIN_CD
-        if (canSpin && (Math.random() < 0.4 || !canSlam)) {
-          // Iniciar giro: resetear animación para que se vean 2 ciclos completos
+
+        if (canSpin) {
+          // Siempre después de caminata rage: iniciar 2 ciclos completos (25 fr × 2 × 90 ms = 4500 ms)
           e.spinTimer = SPIN_DURATION
           e.spinHitMound = false
           e.ef = 0; e.eft = 0
-          e.ls2 = now; e.sa = Math.ceil(SPIN_DURATION * 1000)
-        } else if (canSlam && dist < SLAM_REACH + e.w + 30) {
-          // Slam de piso: animar completo (25 frames × 90ms = 2250ms), hitbox activado a mitad
+          e.sa = Math.ceil(SPIN_DURATION * 1000)
+        } else if (canSlam) {
+          // Slam de piso: hitbox activado a mitad de animación
           e.chainHit = null
           e.ls = now; e.sa = 2500; e.ef = 0; e.eft = 0
         }
       }
 
-      // Activar hitbox del slam cuando llegue a la mitad de la animación (~1200ms)
-      if (e.sa > 0 && e.sa <= 1200 && e.spinTimer <= 0 && e.chainHit === null && !e.dying) {
+      // ── 4. Activar hitbox del slam a mitad de animación (~1200 ms restantes) ──
+      if (e.sa > 0 && e.sa <= 1200 && e.spinTimer <= 0 && e.stunTimer <= 0 && e.chainHit === null && !e.dying) {
         e.chainHit = { dir: e.dir, life: 0.40, dealt: false }
         spawnExplosion(g, e.x + (e.dir >= 0 ? e.w + SLAM_REACH * 0.5 : -SLAM_REACH * 0.5), e.y + e.h, ["#FF6600", "#FFAA00", "#FFFFFF"], 12, 3.5)
-        triggerShake(g, 7, 0.25)
+        // Solo vibración de piso pequeña (no pantalla completa)
+        triggerShake(g, 2, 0.12)
       }
-      // Tick del chainHit del slam
+
+      // ── 5. Tick del hitbox del slam ────────────────────────────────────
       if (e.chainHit && e.spinTimer <= 0) {
         e.chainHit.life -= STEP
         if (!e.chainHit.dealt) {
@@ -2943,7 +2960,7 @@ function tickEnemies(g: G, now: number) {
           if (phx2 < sX + sW2 && phx2 + phw2 > sX && phy2 < sY + sH2 && phy2 + phh2 > sY) {
             if (p.inv <= 0) {
               dmgPlayer(g, SLAM_DMG)
-              p.vy = SLAM_KB_VY   // expulsión hacia arriba
+              p.vy = SLAM_KB_VY
               p.onGround = false
               e.chainHit.dealt = true
             }
@@ -6010,8 +6027,8 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     }
     ctx.globalAlpha = 1
 
-    // ── Chain hit visual (W1S2) ────────────────────────────────────
-    if (e.chainHit && !e.dying) {
+    // ── Chain hit visual (W1S2 únicamente — el W1P2 usa hitbox invisible) ──
+    if (e.chainHit && !e.dying && !isW1P2Boss(e)) {
       const ch = e.chainHit
       const lifeRatio = ch.life / 0.22           // 1→0 durante el ataque
       const originX = sx + e.w / 2
