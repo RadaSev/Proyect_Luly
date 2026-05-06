@@ -5836,8 +5836,8 @@ function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, f
 function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; ryOff: number } {
   const eW = e.w, eH = e.h
 
-  // ── W1 Second Section (eW=60, eH=72) ──────────────────────────────
-  if (e.world === 0 && enemySection(e) === "s") {
+  // ── W1 Second Section (eW=60, eH=72) ── solo enemigos normales, NO el boss ─
+  if (e.world === 0 && enemySection(e) === "s" && !e.boss) {
     // Determinar animación actual (misma lógica que resolveEnemySpr)
     if (e.dying) {
       // death: sheet 1112×1112, frame 278×278, cH=257, padB=11
