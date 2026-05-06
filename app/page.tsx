@@ -21,6 +21,15 @@ const EW = 96, EH = 96, BW = 140, BH = 140
 const WALK = 3, RUN = 6, JV = -12, GUP = 0.38, GDN = 0.62, GMAX = 13
 const PSPD = 6, WLEN = 70, WDMG = 1, STEP = 1 / 60
 const CHAIN_REACH = 85    // alcance del ataque de cadena del enemigo W1S2 (px)
+const W1P1_BW = 64, W1P1_BH = 84   // Jefe W1 Sección 1: hitbox (un poco más grande que Luly)
+const WHIP1_REACH = 105   // alcance del látigo Ataque 1 del jefe W1P1 (px)
+const WHIP2_REACH = 148   // alcance del látigo Ataque 2 del jefe W1P1 (px, más fuerte)
+const WHIP1_DMG   = 1     // daño Ataque 1
+const WHIP2_DMG   = 2     // daño Ataque 2
+const WHIP1_CD    = 1800  // cooldown Ataque 1 (ms)
+const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
+const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
+const WHIP_KB_VY  = -3.5  // componente vertical del repulsión
 const KENNEL_R = 100
 const TOT_W = NW * NC * RW   // 50400
 const TOT_H = NR * RH      // 6120
@@ -184,7 +193,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.8"
+const GAME_VERSION = "0.2.9"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -581,6 +590,10 @@ function computeDoors(w: number, c: number, r: number): { L: boolean; R: boolean
     if (r === NR - 1)   { if (c > 0) d.L = true; if (c < NC - 1) d.R = true }  // fila 8 — completa
   }
 
+  // ★ Sala del jefe P1: sellada arriba y abajo — el boss no salta, arena completamente cerrada.
+  const [bp1c, bp1r] = WORLD_P1_BOSS[w]
+  if (c === bp1c && r === bp1r) { d.U = false; d.D = false }
+
   return d
 }
 
@@ -724,6 +737,10 @@ function makeInternalPlats(w: number, c: number, r: number): WPlat[] {
 
   const kr = KENNEL_ROOMS[w]
   if (kr.c === c && kr.r === r) return []
+
+  // Sala del jefe P1: arena limpia sin plataformas (boss no salta)
+  const [bp1c2, bp1r2] = WORLD_P1_BOSS[w]
+  if (c === bp1c2 && r === bp1r2) return []
 
   // Corredor de transición: pasillo limpio; solo añadir plataformas de escalada
   // donde haya una conexión vertical hacia arriba (Part1) o hacia abajo (Part2)
@@ -1198,8 +1215,11 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
       const [, , hp, spd, cd, boss] = sp
       // W1 Second Section (world=0, row≥TROW): tamaño similar a Luly
       const isW1S2spawn = w === 0 && r >= TROW && !boss
-      const eW = boss ? BW : (isW1S2spawn ? 60 : EW)
-      const eH = boss ? BH : (isW1S2spawn ? 72 : EH)
+      // W1 P1 boss: tamaño moderado (un poco más grande que Luly)
+      const [bp1cs, bp1rs] = WORLD_P1_BOSS[w]
+      const isW1P1bossSpawn = boss && w === 0 && c === bp1cs && r === bp1rs
+      const eW = boss ? (isW1P1bossSpawn ? W1P1_BW : BW) : (isW1S2spawn ? 60 : EW)
+      const eH = boss ? (isW1P1bossSpawn ? W1P1_BH : BH) : (isW1S2spawn ? 72 : EH)
 
       // Para jefes: ignorar exclusión de shafts (su sala siempre tiene espacio suficiente)
       // y validar posición al nivel del PISO en vez del canal (chanBot puede estar
@@ -2287,10 +2307,13 @@ function tickEnemies(g: G, now: number) {
         }
         if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
         e.dir = dx > 0 ? 1 : -1
-        const playerAbove = plFloor !== null && plFloor < e.y + e.h - 60 && p.onGround
-        const playerBelow = p.onGround && p.y + p.h > e.y + e.h + 40
-        if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
-        if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
+        // El jefe W1P1 no salta — sólo los demás bosses tienen lógica de salto
+        if (!isW1P1Boss(e)) {
+          const playerAbove = plFloor !== null && plFloor < e.y + e.h - 60 && p.onGround
+          const playerBelow = p.onGround && p.y + p.h > e.y + e.h + 40
+          if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
+          if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
+        }
       }
 
     } else if (e.state === "chase" && plSameRoom) {
@@ -2502,11 +2525,10 @@ function tickEnemies(g: G, now: number) {
         }
       }
 
-      // ── Tick del chain hit: daño y vida ──────────────────────────
+      // ── Tick del chain hit (W1S2): daño y vida ───────────────────
       if (e.chainHit) {
         e.chainHit.life -= STEP
         if (!e.chainHit.dealt) {
-          // Hitbox de la cadena: extiende desde el frente del enemigo
           const cDir  = e.chainHit.dir
           const cX    = cDir > 0 ? (e.x + e.w) : (e.x - CHAIN_REACH)
           const cY    = e.y + e.h * 0.25
@@ -2520,8 +2542,48 @@ function tickEnemies(g: G, now: number) {
         if (e.chainHit.life <= 0) e.chainHit = null
       }
 
+    } else if (isW1P1Boss(e)) {
+      // ── Jefe W1 Primera Sección: ataque de látigo (sin proyectiles) ─
+      const whipCD    = e.phase >= 2 ? WHIP2_CD   : WHIP1_CD
+      const whipReach = e.phase >= 2 ? WHIP2_REACH : WHIP1_REACH
+      const whipDmg   = e.phase >= 2 ? WHIP2_DMG  : WHIP1_DMG
+      const whipLife  = 0.45  // segundos que dura el hitbox del látigo
+      const whipSa    = 500   // ms de animación de ataque visible
+
+      // Lanzar ataque si está en cooldown, el jugador está al alcance y no hay uno activo
+      if (!e.chainHit && now - e.ls > whipCD && canShoot && dist < whipReach + e.w + 20) {
+        e.chainHit = { dir: e.dir, life: whipLife, dealt: false }
+        e.ls = now; e.sa = whipSa
+        triggerShake(g, e.phase >= 2 ? 5 : 3, 0.15)
+      }
+
+      // Tick del látigo: ventana de daño y knockback
+      if (e.chainHit) {
+        e.chainHit.life -= STEP
+        if (!e.chainHit.dealt) {
+          // Hitbox: desde el frente del hitbox del boss, extiende 'whipReach' hacia adelante
+          const wDir = e.chainHit.dir
+          const wX   = wDir > 0 ? (e.x + e.w) : (e.x - whipReach)
+          const wY   = e.y + e.h * 0.05
+          const wW   = whipReach, wH = e.h * 0.9
+          const phx2 = p.x + PL_HBX, phy2 = p.y + PL_HBT
+          const phw2 = p.w - 2 * PL_HBX, phh2 = p.h - PL_HBT
+          if (phx2 < wX + wW && phx2 + phw2 > wX && phy2 < wY + wH && phy2 + phh2 > wY) {
+            if (p.inv <= 0) {
+              dmgPlayer(g, whipDmg)
+              // Repulsar al jugador en dirección opuesta al látigo
+              const kbDir = wDir  // el látigo viene de este lado, el jugador sale por el mismo lado
+              p.vx = kbDir * WHIP_KB_VX
+              p.vy = WHIP_KB_VY
+              e.chainHit.dealt = true
+            }
+          }
+        }
+        if (e.chainHit.life <= 0) e.chainHit = null
+      }
+
     } else {
-      // ── Ataque genérico (resto de enemigos + boss) ────────────────
+      // ── Ataque genérico (resto de enemigos + otros bosses) ────────
       if (now - e.ls > e.cd && canShoot) {
         const sp = e.boss ? (e.phase === 2 ? 4.2 : 3.2) : 2.8
         const ex2 = e.x + e.w / 2, ey2 = e.y + e.h / 2
@@ -2551,8 +2613,9 @@ function tickEnemies(g: G, now: number) {
     }
     if (e.sa > 0) e.sa -= dt
 
-    // ── Daño por contacto ────────────────────────────────────────────
-    if (e.hurtTimer <= 0) {
+    // ── Daño por contacto ─────────────────────────────────────────────
+    // El jefe W1P1 no inflige daño por contacto — sólo a través del látigo
+    if (e.hurtTimer <= 0 && !isW1P1Boss(e)) {
       const ecx = e.x + EN_HBX, ecy = e.y + EN_HBT, ecw = e.w - 2 * EN_HBX, ech = e.h - EN_HBT
       if (p.inv <= 0 && phx < ecx + ecw && phx + phw > ecx && phy < ecy + ech && phy + phh > ecy) dmgPlayer(g, 1)
     }
@@ -5317,6 +5380,12 @@ function getBossSection(e: Enemy): "fs" | "ss" | "fb" {
   return "ss"                   // Second Section boss
 }
 
+// Verdadero sólo para el jefe de la Primera Sección del World 1 (c=8, r=1, w=0)
+// Este jefe usa látigo (sin proyectiles), no salta, y tiene hitbox pequeño.
+function isW1P1Boss(e: Enemy): boolean {
+  return e.boss && e.world === 0 && getBossSection(e) === "fs"
+}
+
 // Resuelve el sprite correcto con cadena de fallbacks:
 //   1. Sprite específico del mundo+sección+animación+dirección
 //   2. Variante sin dirección (ej: idle único para esa sección)
@@ -5411,6 +5480,31 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
     // idle: sheet 968×1056, frame 242×264, cH=257, padB=4
     // rh=264*0.265=70, rw=242*0.265=64.1→64, ryOff=3, rxOff=30-32=-2
     return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
+  }
+
+  // ── W1 First Section Boss (eW=64, eH=84) — látigo ────────────────
+  // Frame: 5×5 = 25 frames, 384px/frame (1920×1920 total).
+  // Sin PIL: valores aproximados ajustables cuando lleguen los sprites.
+  // Escala objetivo: contenido ≈ 84px alto (= hitbox), anclado al suelo.
+  if (isW1P1Boss(e)) {
+    const eH2 = e.h   // 84px
+    const eW2 = e.w   // 64px
+    if (e.dying) {
+      // Muerte: boss tendido — más ancho que alto
+      return { rw: 110, rh: 80, rxOff: -23, ryOff: eH2 - 80 }
+    }
+    if (e.chainHit || e.sa > 0) {
+      // Ataque — látigo extendido lateralmente; rw varía según dirección
+      const whipW  = e.phase >= 2 ? 180 : 150   // ancho total del frame con látigo
+      const xShift = e.dir >= 0 ? -86 : -(whipW - eW2 - 5)  // anclar al hitbox
+      return { rw: whipW, rh: 94, rxOff: xShift, ryOff: eH2 - 94 }
+    }
+    if (e.isMoving || e.phase >= 2) {
+      // Walk / Rage_Walk
+      return { rw: 76, rh: 94, rxOff: -6, ryOff: eH2 - 94 }
+    }
+    // Idle
+    return { rw: 72, rh: 94, rxOff: -4, ryOff: eH2 - 94 }
   }
 
   // ── W1 First Section (eW=96, eH=96) — solo ajuste de muerte ───────
