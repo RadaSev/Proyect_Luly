@@ -30,8 +30,8 @@ const WHIP1_CD    = 1800  // cooldown Ataque 1 (ms)
 const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
 const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
 const WHIP_KB_VY  = -3.5  // componente vertical del repulsión
-const W1P2_BW = 160, W1P2_BH = 360   // Boss W1 Segunda Sección: grande e imponente
-const SLAM_REACH = 200    // alcance del golpe de piso (px) frente al boss
+const W1P2_BW = 140, W1P2_BH = 220   // Boss W1 Segunda Sección: ~3× Luly (3×72=216)
+const SLAM_REACH = 180    // alcance del golpe de piso (px) frente al boss
 const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
 const SLAM_DMG   = 1      // daño del slam
 const SPIN_DURATION = 5.0 // segundos de giro (≥2 ciclos completos de animación)
@@ -5864,46 +5864,46 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
     return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
   }
 
-  // ── W1 Second Section Boss (eW=160, eH=360) — Blacksmith ──────────
-  // Valores PIL recalculados para target cH=360, eW/2=80
-  // Walk_right:       fw=303,fh=411, cH=387,padL=10,padB=14  → scale=0.9302
-  // Walk_left:        fw=303,fh=411, cH=385,padL=28,padB=13  → scale=0.9351
-  // Atack_1_(both):   fw=494,fh=571, cH=385,padL=124,padB=93 → scale=0.9351
-  // Atack_2_right:    fw=494,fh=525, cH=404,padL=71,padB=121 → scale=0.8911
-  // Atack_2_left:     fw=494,fh=531, cH=385,padL=124,padB=73 → scale=0.9351
-  // Death_right:      fw=478,fh=463, cH=386,padL=115,padB=39 → scale=0.9326
-  // Death_left:       fw=478,fh=463, cH=385,padL=116,padB=39 → scale=0.9351
-  // Rage_Walk_right:  fw=354,fh=440, cH=382,padL=14,padB=51  → scale=0.9424
-  // Rage_Walk_left:   fw=354,fh=440, cH=385,padL=53,padB=28  → scale=0.9351
+  // ── W1 Second Section Boss (eW=140, eH=220) — Blacksmith (~3× Luly) ─────
+  // Valores PIL: scale = 220 / cH(frame0), eW/2 = 70
+  // Walk_right:      fw=303,fh=411, cW=263,cH=387,padL=10, padB=14  scale=0.5685
+  // Walk_left:       fw=303,fh=411, cW=247,cH=385,padL=28, padB=13  scale=0.5714
+  // Atack_1_(both):  fw=494,fh=571, cW=247,cH=385,padL=124,padB=93  scale=0.5714
+  // Atack_2_right:   fw=494,fh=525, cW=259,cH=404,padL=71, padB=121 scale=0.5446
+  // Atack_2_left:    fw=494,fh=531, cW=247,cH=385,padL=124,padB=73  scale=0.5714
+  // Death_right:     fw=478,fh=463, cW=247,cH=386,padL=115,padB=39  scale=0.5699
+  // Death_left:      fw=478,fh=463, cW=247,cH=385,padL=116,padB=39  scale=0.5714
+  // Rage_Walk_right: fw=354,fh=440, cW=325,cH=382,padL=14, padB=51  scale=0.5759
+  // Rage_Walk_left:  fw=354,fh=440, cW=248,cH=385,padL=53, padB=28  scale=0.5714
   if (isW1P2Boss(e)) {
     const dir3 = (e.dying ? e.deathDir : e.dir) >= 0
     if (e.dying) {
       return dir3
-        ? { rw: 446, rh: 432, rxOff: -142, ryOff: -36 }  // Death_right
-        : { rw: 447, rh: 433, rxOff: -144, ryOff: -37 }  // Death_left
+        ? { rw: 272, rh: 264, rxOff: -66, ryOff: -22 }  // Death_right
+        : { rw: 273, rh: 265, rxOff: -67, ryOff: -23 }  // Death_left
     }
     if (e.spinTimer > 0 || (e.sa > 0 && e.phase >= 2)) {
       // Atack_2: giro del martillo
       return dir3
-        ? { rw: 440, rh: 468, rxOff:  -99, ryOff:   0 }  // right
-        : { rw: 462, rh: 497, rxOff: -151, ryOff: -69 }  // left
+        ? { rw: 269, rh: 286, rxOff: -39, ryOff:   0 }  // right
+        : { rw: 282, rh: 303, rxOff: -71, ryOff: -41 }  // left
     }
     if (e.sa > 0 && e.spinTimer <= 0) {
-      // Atack_1: golpe de piso
+      // Atack_1: golpe de piso (el martillo baja hasta el suelo intencionalmente)
       return dir3
-        ? { rw: 462, rh: 534, rxOff: -151, ryOff: -87 }  // right
-        : { rw: 462, rh: 534, rxOff: -151, ryOff: -87 }  // left (simétrico)
+        ? { rw: 282, rh: 326, rxOff: -71, ryOff: -53 }  // right
+        : { rw: 282, rh: 326, rxOff: -71, ryOff: -53 }  // left (simétrico)
     }
     if (e.phase >= 2) {
-      // Rage_Walk
+      // Rage_Walk (en llamas)
       return dir3
-        ? { rw: 334, rh: 415, rxOff:  -86, ryOff:  -7 }  // right
-        : { rw: 331, rh: 411, rxOff:  -86, ryOff: -25 }  // left
+        ? { rw: 204, rh: 253, rxOff: -32, ryOff:  -4 }  // right
+        : { rw: 202, rh: 251, rxOff: -31, ryOff: -15 }  // left
     }
-    // Walk
+    // Walk normal
     return dir3
-      ? { rw: 282, rh: 382, rxOff:  -52, ryOff:  -9 }  // right
-      : { rw: 283, rh: 384, rxOff:  -62, ryOff: -12 }  // left
+      ? { rw: 172, rh: 234, rxOff: -10, ryOff:  -6 }  // right
+      : { rw: 173, rh: 235, rxOff: -17, ryOff:  -8 }  // left
   }
 
   // ── W1 First Section Boss (eW=64, eH=84) ─────────────────────────
