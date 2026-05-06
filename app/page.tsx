@@ -41,6 +41,21 @@ function rid(w: number, c: number, r: number) { return `${w}_${c}_${r}` }
 //  TIPOS
 // ══════════════════════════════════════════════════════════════
 type WPlat = { x: number; y: number; w: number; h: number; mode: "s" | "t" | "d"; sw?: number }
+// Plataforma móvil del arena del jefe (sube/baja + ciclo visible/oculta)
+type MovingPlat = {
+  baseX: number; baseY: number   // posición base (Y en el centro del recorrido)
+  w: number; h: number
+  // movimiento vertical
+  ampY: number                   // amplitud (px arriba/abajo desde baseY)
+  phase: number                  // fase actual (rad, 0-2π)
+  speed: number                  // rad/s
+  // ciclo visible/oculto
+  visible: boolean
+  hiddenTimer: number            // tiempo restante oculta (s)
+  showTimer: number              // tiempo restante visible (s)
+  // posición actual (calculada en tick)
+  x: number; y: number
+}
 type Player = {
   x: number; y: number; w: number; h: number; vx: number; vy: number; onGround: boolean; facing: 1 | -1; hp: number; maxHp: number; inv: number; ammo: number; ls: number; as2: number; sh: boolean; jh: boolean; djump: boolean; djumpAvail: boolean; wh: boolean; wcd: number; pf: number; pft: number; pa: string; crouching: boolean; stamina: number; maxStamina: number; staminaCooldown: number; exhausted: boolean; runMode: boolean; tapLeft: number; tapRight: number;
   tapDown: number; dropThruPlatform: boolean
@@ -137,6 +152,10 @@ type G = {
   realMapScale: number   // multiplicador de tamaño para personajes/enemigos/cajas
   realMapIconMode: number // 0=sprites juego, 1=iconos v1 (pixel), 2=iconos v2 (minimalist)
   realMapSection: number  // 0=sección superior (r0-TROW), 1=sección inferior (TROW-NR-1)
+  // Arena del jefe P1: Set<worldIndex> — la entrada se cierra al entrar, abre al morir el boss
+  bossArenaLocked: Set<number>
+  // Plataformas móviles del arena: aparecen al entrar al cubículo del jefe P1
+  bossArenaPlats: MovingPlat[]
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -193,7 +212,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.9"
+const GAME_VERSION = "0.2.10"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -719,6 +738,7 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
   // ★ Sellar TODAS las entradas de las salas de los jefes seccionales
   //   sw 300+w → jefe P1 (bloqueado hasta matar enemigos normales de Part1)
   //   sw 400+w → jefe P2 (bloqueado hasta matar enemigos normales de Part2)
+  //   sw 500+w → jefe P1 arena: se cierra al entrar, se abre al matar al boss
   const bossType = isBossRoom(w, c, r)
   if (bossType === "p1" || bossType === "p2") {
     const sw = bossType === "p1" ? 300 + w : 400 + w
@@ -726,6 +746,12 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw })
     if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1), y: y0, w: DW, h: WT, mode: "d", sw })
     if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r), y: y0 + RH - WT, w: DW, h: WT, mode: "d", sw })
+    // Puerta de cierre de arena (sw 500+w): se activa al entrar a la batalla y sella la entrada
+    if (bossType === "p1") {
+      const swArena = 500 + w
+      if (d.L) result.push({ x: x0, y: y0 + lrDoorY_rel(w, c - 1, r), w: WT, h: DH, mode: "d", sw: swArena })
+      if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw: swArena })
+    }
   }
 
   return result
@@ -1384,6 +1410,8 @@ function mkG_lazy(): G {
     realMapScale: 1.5,
     realMapIconMode: 0,
     realMapSection: 0,
+    bossArenaLocked: new Set<number>(),
+    bossArenaPlats: [],
   } as G
 }
 
@@ -1396,6 +1424,7 @@ let _apLoadedKey = ""  // string de mundos cargados para invalidar cache
 function activePlats(g: G): WPlat[] {
   const key = [...g.loadedWorlds].sort().join(",") + "|" + g.cw.size + "|" + g.dead.size
     + "|" + (g.p1BossRexSeen ? 1 : 0) + (g.p2BossRexSeen ? 1 : 0) + (g.ultraBossRexSeen ? 1 : 0)
+    + "|arena:" + g.bossArenaLocked.size
   if (_apCache2 && _apLoadedKey === key) return _apCache2
 
   const allPlats: WPlat[] = []
@@ -1404,6 +1433,11 @@ function activePlats(g: G): WPlat[] {
   _apCache2 = allPlats.filter(p => {
     if (p.mode !== "d") return true
     if (p.sw === undefined) return true
+    if (p.sw >= 500 && p.sw < 600) {
+      // puerta arena jefe P1: sólida durante la batalla (bossArenaLocked activo)
+      const bossW = p.sw - 500
+      return g.bossArenaLocked.has(bossW)
+    }
     if (p.sw >= 400 && p.sw < 500) {
       // puerta roja Jefe P2: sólida hasta que Rex explique al Herrero
       return !g.p2BossRexSeen
@@ -1451,6 +1485,17 @@ function resolve(ex: number, ey: number, ew: number, eh: number, vx: number, vy:
       }
     }
   }
+  // Plataformas móviles del arena del jefe (one-way, modo "t")
+  for (const mp of g.bossArenaPlats) {
+    if (!mp.visible) continue
+    const p = mp
+    if (p.x + p.w < x - 4 || p.x > x + ew + 4) continue
+    if (vy >= 0 && ey + eh <= p.y + 5) {
+      const overlapX = x < p.x + p.w && x + ew > p.x
+      const overlapFuture = x < p.x + p.w && x + ew > p.x && ey + eh + vy >= p.y && ey + eh <= p.y + 5
+      if (overlapFuture && !g.dropThru) { y = p.y - eh; vy = 0; og = true }
+    }
+  }
   x = Math.max(0, Math.min(x, TOT_W - ew))
   if (y + eh > TOT_H) { y = TOT_H - eh; vy = 0; og = true }
   return { x, y, vx, vy, og }
@@ -1462,6 +1507,71 @@ function getDir(g: G) {
   if (!(k["a"] || k["arrowleft"] || k["d"] || k["arrowright"])) dx = p.facing
   else { if (k["d"] || k["arrowright"]) dx += 1; if (k["a"] || k["arrowleft"]) dx -= 1 }
   const len = Math.sqrt(dx * dx + dy * dy) || 1; return { x: dx / len, y: dy / len }
+}
+
+const ARENA_PLAT_SHOW  = 5.0   // segundos visibles
+const ARENA_PLAT_HIDE  = 3.0   // segundos ocultas
+const ARENA_PLAT_AMP   = 70    // amplitud del movimiento (px arriba/abajo)
+const ARENA_PLAT_SPD   = 1.4   // rad/s de oscilación vertical
+const ARENA_PLAT_W     = 180   // ancho de cada plataforma (px)
+const ARENA_PLAT_H     = 20    // alto de cada plataforma (px)
+
+// Crea las dos plataformas móviles del arena del boss P1 (llamado una sola vez al activar)
+function spawnBossArenaPlats(g: G, bossWorld: number, bossCol: number, bossRow: number) {
+  if (g.bossArenaPlats.length > 0) return  // ya existen
+  const { x: rx, y: ry } = ro(bossWorld, bossCol, bossRow)
+  const floorY  = ry + RH - WT                  // piso interior
+  const ceilY   = ry + WT                        // techo interior
+  const midY    = (floorY + ceilY) / 2
+  // baseY: posición central del recorrido, dejando espacio para que Luly pueda saltar desde el suelo
+  const baseY   = midY - 30
+
+  // Plataforma 1: izquierda, fase 0
+  const platW   = ARENA_PLAT_W
+  const p1x     = rx + WT + Math.floor((RW - 2 * WT) * 0.22) - platW / 2
+  // Plataforma 2: derecha, fase π (opuesta → alterna)
+  const p2x     = rx + WT + Math.floor((RW - 2 * WT) * 0.72) - platW / 2
+
+  g.bossArenaPlats = [
+    {
+      baseX: p1x, baseY, w: platW, h: ARENA_PLAT_H,
+      ampY: ARENA_PLAT_AMP, phase: 0, speed: ARENA_PLAT_SPD,
+      visible: true, hiddenTimer: 0, showTimer: ARENA_PLAT_SHOW,
+      x: p1x, y: baseY,
+    },
+    {
+      baseX: p2x, baseY, w: platW, h: ARENA_PLAT_H,
+      ampY: ARENA_PLAT_AMP, phase: Math.PI, speed: ARENA_PLAT_SPD,
+      visible: false, hiddenTimer: ARENA_PLAT_HIDE * 0.5, showTimer: 0,  // empieza desfasada
+      x: p2x, y: baseY,
+    },
+  ]
+}
+
+function tickBossArenaPlats(g: G, dt: number) {
+  for (const mp of g.bossArenaPlats) {
+    mp.phase += mp.speed * STEP
+    mp.y = mp.baseY + Math.sin(mp.phase) * mp.ampY
+
+    if (mp.visible) {
+      mp.showTimer -= STEP
+      if (mp.showTimer <= 0) {
+        mp.visible = false
+        mp.hiddenTimer = ARENA_PLAT_HIDE
+        // Si el jugador está parado encima, bajarlo un poco para que caiga
+      }
+    } else {
+      mp.hiddenTimer -= STEP
+      if (mp.hiddenTimer <= 0) {
+        mp.visible = true
+        mp.showTimer = ARENA_PLAT_SHOW
+      }
+    }
+  }
+  // Limpiar plataformas si el boss murió (arena desbloqueada)
+  if (g.bossArenaPlats.length > 0 && !g.bossArenaLocked.has(0)) {
+    g.bossArenaPlats = []
+  }
 }
 
 function dmgPlayer(g: G, dmg: number) {
@@ -1522,6 +1632,8 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
   // Shake en muerte de enemigo
   if (e.boss) triggerShake(g, 14, 0.6)
   else triggerShake(g, 3, 0.12)
+  // Desbloquear arena del jefe P1 al morir el boss
+  if (isW1P1Boss(e)) g.bossArenaLocked.delete(e.world)
   // ── Desbloqueo de habilidades al matar boss ─────────────────────────
   // Solo el ultra-jefe [TRANSIT_BOSS_COL, TROW] = [4,4] otorga la habilidad del mundo.
   if (e.boss) {
@@ -1933,8 +2045,9 @@ function tickEnemies(g: G, now: number) {
       if (e.eft > 75) { e.ef = Math.min(e.ef + 1, deathFrameMax); e.eft = 0 }
       e.deathTimer += STEP
       // Sin gravedad: el sprite de muerte ya los muestra caídos en el piso.
-      // e.y y e.vx no se modifican durante la muerte.
-      if (e.ef >= deathFrameMax && e.deathTimer > 1.35) e.active = false
+      // Primero debe completar la animación (ef=max), LUEGO esperar 0.6s de fade.
+      const deathAnimEnd = deathFrameMax * 0.075  // segundos para completar animación (75ms/frame)
+      if (e.ef >= deathFrameMax && e.deathTimer > deathAnimEnd + 0.6) e.active = false
       continue
     }
 
@@ -2304,6 +2417,15 @@ function tickEnemies(g: G, now: number) {
         if (e.state !== "chase") {
           e.state = "chase"
           triggerShake(g, 10, 0.45)
+          // Cerrar la arena del jefe P1 al entrar en combate
+          if (isW1P1Boss(e) && !g.bossArenaLocked.has(e.world)) {
+            g.bossArenaLocked.add(e.world)
+            // El cache de activePlats se invalida automáticamente via arena key
+            triggerShake(g, 8, 0.5)  // vibración de cierre de puerta
+            // Crear las plataformas móviles del arena
+            const hr3 = homeRoom(e)
+            spawnBossArenaPlats(g, hr3.w, hr3.c, hr3.r)
+          }
         }
         if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
         e.dir = dx > 0 ? 1 : -1
@@ -3327,7 +3449,7 @@ function tick(g: G) {
     g.pl.vx = 0
     g.pl.crouching = false
   }
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -5482,29 +5604,42 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
     return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
   }
 
-  // ── W1 First Section Boss (eW=64, eH=84) — látigo ────────────────
-  // Frame: 5×5 = 25 frames, 384px/frame (1920×1920 total).
-  // Sin PIL: valores aproximados ajustables cuando lleguen los sprites.
-  // Escala objetivo: contenido ≈ 84px alto (= hitbox), anclado al suelo.
+  // ── W1 First Section Boss (eW=64, eH=84) ─────────────────────────
+  // Valores PIL sobre frame 0 de cada spritesheet 5×5.
+  // Scale = 84 / contentH  →  rw=fw*scale, rh=fh*scale
+  // ryOff = eH − rh*(1−padB/fh)  →  pies del personaje en sy+eH
+  // rxOff = eW/2 − (padL+cW/2)*scale  →  centro del contenido sobre centro del hitbox
   if (isW1P1Boss(e)) {
-    const eH2 = e.h   // 84px
-    const eW2 = e.w   // 64px
+    const dir2 = (e.dying ? e.deathDir : e.dir) >= 0   // true=right
     if (e.dying) {
-      // Muerte: boss tendido — más ancho que alto
-      return { rw: 110, rh: 80, rxOff: -23, ryOff: eH2 - 80 }
+      // Death_left:  frame 484×415, cW=280 cH=385, padL=102, padB=15  scale=0.2182
+      // Death_right: frame 484×424, cW=290 cH=397, padL=34,  padB=27  scale=0.2116
+      return dir2
+        ? { rw: 102, rh: 90, rxOff: -6,  ryOff: 0  }   // right
+        : { rw: 106, rh: 91, rxOff: -21, ryOff: -4 }   // left
     }
     if (e.chainHit || e.sa > 0) {
-      // Ataque — látigo extendido lateralmente; rw varía según dirección
-      const whipW  = e.phase >= 2 ? 180 : 150   // ancho total del frame con látigo
-      const xShift = e.dir >= 0 ? -86 : -(whipW - eW2 - 5)  // anclar al hitbox
-      return { rw: whipW, rh: 94, rxOff: xShift, ryOff: eH2 - 94 }
+      if (e.phase >= 2) {
+        // Atack_2_right: frame 505×500, scale=0.2148  Atack_2_left: frame 505×511, scale=0.2176
+        return dir2
+          ? { rw: 108, rh: 107, rxOff: -15, ryOff: 0   }  // right
+          : { rw: 110, rh: 111, rxOff: -23, ryOff: -14 }  // left
+      }
+      // Atack_1_right: frame 505×485, scale=0.2148  Atack_1_left: frame 505×501, scale=0.2182
+      return dir2
+        ? { rw: 108, rh: 104, rxOff: -23, ryOff: 0   }  // right
+        : { rw: 110, rh: 109, rxOff: -23, ryOff: -12 }  // left
     }
-    if (e.isMoving || e.phase >= 2) {
-      // Walk / Rage_Walk
-      return { rw: 76, rh: 94, rxOff: -6, ryOff: eH2 - 94 }
+    if (e.phase >= 2) {
+      // Rage_Walk_right: frame 462×442, scale=0.2132  Rage_Walk_left: frame 463×440, scale=0.2182
+      return dir2
+        ? { rw: 99,  rh: 94, rxOff: -6,  ryOff: -1 }  // right
+        : { rw: 101, rh: 96, rxOff: -19, ryOff: -6 }  // left
     }
-    // Idle
-    return { rw: 72, rh: 94, rxOff: -4, ryOff: eH2 - 94 }
+    // Walk_right: frame 464×400, scale=0.2252  Walk_left: frame 464×400, scale=0.2199
+    return dir2
+      ? { rw: 104, rh: 90, rxOff: -21, ryOff: -4 }  // right
+      : { rw: 102, rh: 88, rxOff: -23, ryOff: -2 }  // left
   }
 
   // ── W1 First Section (eW=96, eH=96) — solo ajuste de muerte ───────
@@ -5534,7 +5669,17 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const sx = e.x - g.cx, sy = e.y - g.cy
     if (sx + e.w < -10 || sx > CW + 10 || sy + e.h < -10 || sy > CH + 10) continue
     const wi = Math.max(0, Math.min(e.world, NW - 1)), th = THEMES[wi]
-    if (e.dying) { const fade = Math.max(0, 1 - (e.deathTimer - 0.9) / 0.45); ctx.globalAlpha = Math.min(1, fade) }
+    if (e.dying) {
+      // Fade sólo DESPUÉS de completar la animación de muerte
+      const deathFrameMax2 = e.boss ? 24 : 15
+      const deathAnimEnd2  = deathFrameMax2 * 0.075   // misma constante que el tick
+      if (e.ef >= deathFrameMax2) {
+        // e.deathTimer en este punto es ≥ deathAnimEnd2; fade de 0.6s
+        const t = e.deathTimer - deathAnimEnd2
+        ctx.globalAlpha = Math.max(0, 1 - t / 0.6)
+      }
+      // Si la animación aún no terminó: alpha=1 (opacidad completa)
+    }
     if (e.hurtTimer > 0 && Math.floor(Date.now() / 60) % 2 === 0) { ctx.globalAlpha = 0.45 }
     const spr = resolveEnemySpr(e, sprs)
     if (spr) {
@@ -6989,6 +7134,32 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 
+function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
+  if (g.bossArenaPlats.length === 0) return
+  const curW = Math.floor(g.pl.x / (NC * RW))
+  const th = THEMES[Math.max(0, Math.min(curW, NW - 1))]
+  for (const mp of g.bossArenaPlats) {
+    const sx = mp.x - g.cx, sy = mp.y - g.cy
+    if (!mp.visible) {
+      // destello tenue cuando están ocultas — aviso visual de que van a aparecer
+      if (mp.hiddenTimer < 0.6) {
+        ctx.globalAlpha = (0.6 - mp.hiddenTimer) / 0.6 * 0.35
+        ctx.fillStyle = th.platHi
+        ctx.fillRect(sx, sy, mp.w, mp.h)
+        ctx.globalAlpha = 1
+      }
+      continue
+    }
+    // Plataforma visible
+    ctx.fillStyle = th.platC
+    ctx.fillRect(sx, sy, mp.w, mp.h)
+    ctx.fillStyle = th.platHi
+    ctx.fillRect(sx, sy, mp.w, 4)   // borde superior brillante
+    ctx.fillStyle = "#00000044"
+    ctx.fillRect(sx, sy + mp.h - 3, mp.w, 3)  // sombra inferior
+  }
+}
+
 function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w: number; c: number; r: number } | null = null) {
   ctx.clearRect(0, 0, CW, CH)
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
@@ -6999,7 +7170,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
   drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
