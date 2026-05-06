@@ -184,7 +184,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.7"
+const GAME_VERSION = "0.2.8"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1266,7 +1266,7 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         spd, cd,
         ls: Math.floor(rand() * cd * 0.5), sa: 0,
         active: true, boss, ef: 0, eft: 0, world: w,
-        state: "patrol", alert: false, alertT: 0, guardX: -1,
+        state: "patrol", alert: false, alertT: 0, guardX: boss ? (x0 + Math.floor(RW / 2) - Math.floor(eW / 2)) : -1,
         idleT: Math.floor(rand() * 500), jumpCd: 0,
         dying: false, deathTimer: 0, deathDir: 1,
         hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1,
@@ -1909,11 +1909,12 @@ function tickEnemies(g: G, now: number) {
     // ── Animación de muerte ──────────────────────────────────────────
     if (e.dying) {
       e.eft += dt
-      if (e.eft > 75) { e.ef = Math.min(e.ef + 1, 15); e.eft = 0 }
+      const deathFrameMax = e.boss ? 24 : 15
+      if (e.eft > 75) { e.ef = Math.min(e.ef + 1, deathFrameMax); e.eft = 0 }
       e.deathTimer += STEP
       // Sin gravedad: el sprite de muerte ya los muestra caídos en el piso.
       // e.y y e.vx no se modifican durante la muerte.
-      if (e.ef >= 15 && e.deathTimer > 1.35) e.active = false
+      if (e.ef >= deathFrameMax && e.deathTimer > 1.35) e.active = false
       continue
     }
 
@@ -1923,7 +1924,8 @@ function tickEnemies(g: G, now: number) {
 
     // ── Animación de frame ───────────────────────────────────────────
     const frameSp = e.hurtTimer > 0 ? 55 : 90
-    e.eft += dt; if (e.eft > frameSp) { e.ef = (e.ef + 1) % 16; e.eft = 0 }
+    const frameMax = e.boss ? 25 : 16
+    e.eft += dt; if (e.eft > frameSp) { e.ef = (e.ef + 1) % frameMax; e.eft = 0 }
     if (e.hurtTimer > 0) e.hurtTimer = Math.max(0, e.hurtTimer - STEP)
     e.jumpCd = Math.max(0, e.jumpCd - dt)
     if (e.alertT > 0) e.alertT -= dt
@@ -2268,12 +2270,28 @@ function tickEnemies(g: G, now: number) {
     }
 
     if (e.boss) {
-      if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
-      e.dir = dx > 0 ? 1 : -1
-      const playerAbove = plFloor !== null && plFloor < e.y + e.h - 60 && p.onGround
-      const playerBelow = p.onGround && p.y + p.h > e.y + e.h + 40
-      if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
-      if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
+      if (!plSameRoom) {
+        // ── Boss inactivo: mantener posición centrada en la sala ──────
+        const hr2 = homeRoom(e)
+        const { x: bx0 } = ro(hr2.w, hr2.c, hr2.r)
+        const centerX = bx0 + Math.floor(RW / 2) - Math.floor(e.w / 2)
+        const cdx = centerX - e.x
+        if (Math.abs(cdx) > 4) targetVx = (cdx > 0 ? 1 : -1) * e.spd * 0.5
+        e.dir = cdx >= 0 ? 1 : -1
+        e.state = "patrol"
+      } else {
+        // ── Boss activo: perseguir al jugador ─────────────────────────
+        if (e.state !== "chase") {
+          e.state = "chase"
+          triggerShake(g, 10, 0.45)
+        }
+        if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
+        e.dir = dx > 0 ? 1 : -1
+        const playerAbove = plFloor !== null && plFloor < e.y + e.h - 60 && p.onGround
+        const playerBelow = p.onGround && p.y + p.h > e.y + e.h + 40
+        if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
+        if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
+      }
 
     } else if (e.state === "chase" && plSameRoom) {
       // ── Flanqueo: si hay otro enemigo persiguiendo desde el mismo lado, rodear ──
@@ -2437,8 +2455,8 @@ function tickEnemies(g: G, now: number) {
       }
     }
 
-    // ── Transición de fase del boss ──────────────────────────────────
-    if (e.boss && e.phase === 1 && e.hp <= Math.ceil(e.mhp * 0.5) && !e.dying) {
+    // ── Transición de fase del boss (50% HP → fase 2: Rage_Walk + Atack_2) ──
+    if (e.boss && e.phase === 1 && e.state === "chase" && e.hp <= Math.ceil(e.mhp * 0.5) && !e.dying) {
       e.phase = 2
       e.spd *= 1.5; e.cd = Math.floor(e.cd * 0.55)
       triggerShake(g, 12, 0.55)
@@ -2447,7 +2465,7 @@ function tickEnemies(g: G, now: number) {
 
     // ── Disparo / Ataques ────────────────────────────────────────────
     const canShoot = e.boss
-      ? (dist < sight)
+      ? (e.state === "chase" && dist < sight)   // boss solo ataca cuando está activo (jugador en sala)
       : (plSameRoom && canSee && e.state === "chase" && e.alertDelay <= 0)
 
     // ── W1 Second Section: ataques específicos de cadena y rayo ─────
@@ -5291,19 +5309,39 @@ function enemySection(e: Enemy): "f" | "s" {
   return row < TROW ? "f" : "s"
 }
 
+// Devuelve la sección del boss según la fila de su homeRoom
+function getBossSection(e: Enemy): "fs" | "ss" | "fb" {
+  const row = parseInt(e.id.split("_")[2]) || 0
+  if (row < TROW) return "fs"   // First Section boss
+  if (row === TROW) return "fb" // Transit/Final boss (row=TROW, col=TRANSIT_BOSS_COL)
+  return "ss"                   // Second Section boss
+}
+
 // Resuelve el sprite correcto con cadena de fallbacks:
 //   1. Sprite específico del mundo+sección+animación+dirección
 //   2. Variante sin dirección (ej: idle único para esa sección)
 //   3. Variante de la dirección opuesta (si solo existe un lado)
-// Los jefes (boss) siguen usando los prefijos boos_ sin cambios.
+// Los jefes usan el nuevo sistema: boss_w{N}_{fs|ss|fb}_{anim}_{right|left}
 function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
   const dir = (e.dying ? e.deathDir : e.dir) >= 0 ? "right" : "left"
   const opp = dir === "right" ? "left" : "right"
   const ok  = (k: string) => { const s = sprs[k]; return s?.complete && s.naturalWidth > 0 ? s : null }
 
   if (e.boss) {
-    const anim = e.dying ? "defeat" : e.hurtTimer > 0 ? "hurt" : e.sa > 0 ? "atack" : "flight"
-    return ok(`boos_${anim}_${dir}`) ?? ok(`boos_${anim}_${opp}`) ?? null
+    const wn = Math.max(1, Math.min(e.world + 1, NW))  // 1-indexed
+    const bsec = getBossSection(e)
+    const bpk = `boss_w${wn}_${bsec}_`
+    let banim: string
+    if (e.dying) {
+      banim = "death"
+    } else if (e.sa > 0) {
+      banim = e.phase >= 2 ? "atack2" : "atack1"
+    } else if (e.phase >= 2) {
+      banim = "rage_walk"
+    } else {
+      banim = "walk"
+    }
+    return ok(`${bpk}${banim}_${dir}`) ?? ok(`${bpk}${banim}_${opp}`) ?? null
   }
 
   const w   = Math.max(1, Math.min(e.world + 1, NW))  // 1-indexed (1-4)
@@ -5335,9 +5373,9 @@ function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
   return null
 }
 
-function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, frame: number, dx: number, dy: number, dw: number, dh: number) {
-  const cols = 4, rows = 4, fw = spr.width / cols, fh = spr.height / rows
-  const col = frame % cols, row = Math.floor(frame / cols)
+function drawSpriteFrame(ctx: CanvasRenderingContext2D, spr: HTMLImageElement, frame: number, dx: number, dy: number, dw: number, dh: number, gridCols = 4, gridRows = 4) {
+  const fw = spr.width / gridCols, fh = spr.height / gridRows
+  const col = frame % gridCols, row = Math.floor(frame / gridCols)
   ctx.drawImage(spr, col * fw, row * fh, fw, fh, dx, dy, dw, dh)
 }
 
@@ -5407,7 +5445,8 @@ function drawEnemies(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const spr = resolveEnemySpr(e, sprs)
     if (spr) {
       const { rw, rh, rxOff, ryOff } = getEnemyRenderDim(e)
-      drawSpriteFrame(ctx, spr, e.ef, sx + rxOff, sy + ryOff, rw, rh)
+      const gc = e.boss ? 5 : 4, gr = e.boss ? 5 : 4
+      drawSpriteFrame(ctx, spr, e.ef, sx + rxOff, sy + ryOff, rw, rh, gc, gr)
     } else {
       ctx.fillStyle = e.boss ? th.doorC : th.wallHi
       if (e.boss) {
@@ -7473,16 +7512,31 @@ export default function ProyectoLuly() {
         L(`${pk}atack2`, `${base}atack_2.png`)
       }
     }
-    L("boos_flight_right", "/assets/boos/boos_flight_right.png")
-    L("boos_flight_left", "/assets/boos/boos_flight_left.png")
-    L("boos_atack_right", "/assets/boos/boos_atack_right.png")
-    L("boos_atack_left", "/assets/boos/boos_atack_left.png")
-    L("boos_atackR", "/assets/boos/boos_atack_right.png")
-    L("boos_atackL", "/assets/boos/boos_atack_left.png")
-    L("boos_hurt_right", "/assets/boos/boos_hurt_right.png")
-    L("boos_hurt_left", "/assets/boos/boos_hurt_left.png")
-    L("boos_defeat_right", "/assets/boos/boos_defeat_right.png")
-    L("boos_defeat_left", "/assets/boos/boos_defeat_left.png")
+    // ── Boss sprites — nuevo sistema por mundo/sección (5×5, 25 frames) ──
+    const BOSS_SECTIONS: Array<{ key: string; folder: string }> = [
+      { key: "fs", folder: "First_Section" },
+      { key: "ss", folder: "Second_Section" },
+      { key: "fb", folder: "Final_Boss" },
+    ]
+    // [sprite-key suffix, filename prefix]
+    const BOSS_ANIMS: Array<[string, string]> = [
+      ["walk",      "Walk"],
+      ["death",     "Death"],
+      ["atack1",    "Atack_1"],
+      ["atack2",    "Atack_2"],
+      ["rage_walk", "Rage_Walk"],
+    ]
+    const BOSS_DIRS: Array<"right" | "left"> = ["right", "left"]
+    for (let wn = 1; wn <= 4; wn++) {
+      for (const { key: bsec, folder: bfolder } of BOSS_SECTIONS) {
+        for (const [animKey, animFile] of BOSS_ANIMS) {
+          for (const bdir of BOSS_DIRS) {
+            L(`boss_w${wn}_${bsec}_${animKey}_${bdir}`,
+              `/assets/boos/World_${wn}/${bfolder}/${animFile}_${bdir}.png`)
+          }
+        }
+      }
+    }
     // Cajas de suministros
     L("box", "/assets/Enviroment/Boxes/box.png")
     // Kennels de entorno — uno por mundo
