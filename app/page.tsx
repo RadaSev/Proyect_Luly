@@ -2416,12 +2416,12 @@ function tickEnemies(g: G, now: number) {
         // ── Boss activo: perseguir al jugador ─────────────────────────
         if (e.state !== "chase") {
           e.state = "chase"
-          triggerShake(g, 10, 0.45)
+          if (!isW1P1Boss(e)) triggerShake(g, 10, 0.45)
           // Cerrar la arena del jefe P1 al entrar en combate
           if (isW1P1Boss(e) && !g.bossArenaLocked.has(e.world)) {
             g.bossArenaLocked.add(e.world)
             // El cache de activePlats se invalida automáticamente via arena key
-            triggerShake(g, 8, 0.5)  // vibración de cierre de puerta
+            triggerShake(g, 6, 0.4)  // una sola vibración al cerrarse la puerta
             // Crear las plataformas móviles del arena
             const hr3 = homeRoom(e)
             spawnBossArenaPlats(g, hr3.w, hr3.c, hr3.r)
@@ -2676,7 +2676,7 @@ function tickEnemies(g: G, now: number) {
       if (!e.chainHit && now - e.ls > whipCD && canShoot && dist < whipReach + e.w + 20) {
         e.chainHit = { dir: e.dir, life: whipLife, dealt: false }
         e.ls = now; e.sa = whipSa
-        triggerShake(g, e.phase >= 2 ? 5 : 3, 0.15)
+        // Sin shake periódico — solo el impacto en el jugador produce efecto visual
       }
 
       // Tick del látigo: ventana de daño y knockback
@@ -7136,27 +7136,21 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
 
 function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
   if (g.bossArenaPlats.length === 0) return
-  const curW = Math.floor(g.pl.x / (NC * RW))
-  const th = THEMES[Math.max(0, Math.min(curW, NW - 1))]
+  const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
+  // El boss P1 siempre está en la Part 1 del mundo → zona "p1"
   for (const mp of g.bossArenaPlats) {
     const sx = mp.x - g.cx, sy = mp.y - g.cy
     if (!mp.visible) {
-      // destello tenue cuando están ocultas — aviso visual de que van a aparecer
+      // Destello tenue los últimos 0.6s antes de reaparecer — aviso visual
       if (mp.hiddenTimer < 0.6) {
-        ctx.globalAlpha = (0.6 - mp.hiddenTimer) / 0.6 * 0.35
-        ctx.fillStyle = th.platHi
-        ctx.fillRect(sx, sy, mp.w, mp.h)
+        ctx.globalAlpha = ((0.6 - mp.hiddenTimer) / 0.6) * 0.4
+        drawTraversableTile(ctx, sx, sy, mp.w, mp.h, curW, g.gfx, "p1")
         ctx.globalAlpha = 1
       }
       continue
     }
-    // Plataforma visible
-    ctx.fillStyle = th.platC
-    ctx.fillRect(sx, sy, mp.w, mp.h)
-    ctx.fillStyle = th.platHi
-    ctx.fillRect(sx, sy, mp.w, 4)   // borde superior brillante
-    ctx.fillStyle = "#00000044"
-    ctx.fillRect(sx, sy + mp.h - 3, mp.w, 3)  // sombra inferior
+    // Plataforma visible: usa el sprite de plataforma atravesable del mundo
+    drawTraversableTile(ctx, sx, sy, mp.w, mp.h, curW, g.gfx, "p1")
   }
 }
 
