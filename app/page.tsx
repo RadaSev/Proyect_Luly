@@ -30,6 +30,18 @@ const WHIP1_CD    = 1800  // cooldown Ataque 1 (ms)
 const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
 const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
 const WHIP_KB_VY  = -3.5  // componente vertical del repulsión
+const W1P2_BW = 144, W1P2_BH = 216   // Boss W1 Segunda Sección: ~3× Luly
+const SLAM_REACH = 160    // alcance del golpe de piso (px) frente al boss
+const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
+const SLAM_DMG   = 1      // daño del slam
+const SPIN_DURATION = 3.5 // segundos de giro
+const SPIN_STUN  = 2.0    // segundos de parálisis post-giro
+const SPIN_DMG   = 2      // daño del giro al jugador
+const SPIN_RADIUS = 190   // radio de daño durante el giro
+const SLAM_CD    = 2200   // ms entre slams
+const SPIN_CD    = 7000   // ms entre giros (incluye tiempo de stun)
+const MOUND_W    = 90     // ancho del montículo de herramientas
+const MOUND_H    = 56     // alto del montículo
 const KENNEL_R = 100
 const TOT_W = NW * NC * RW   // 50400
 const TOT_H = NR * RH      // 6120
@@ -74,6 +86,9 @@ type Enemy = {
   phase: number
   ls2: number                                                   // timestamp último ataque-2
   chainHit: { dir: number; life: number; dealt: boolean } | null // ataque melee de cadena
+  spinTimer: number     // segundos restantes de giro del Blacksmith
+  stunTimer: number     // segundos restantes de parálisis post-giro
+  spinHitMound: boolean // ya golpeó un montículo en esta iteración de giro
 }
 type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean; lightning?: boolean }
 type Bone = { x: number; y: number; w: number; h: number; vx: number; vy: number; active: boolean; life: number }
@@ -84,6 +99,8 @@ type Pickup = { id: string; kind: "tball" | "tball_key" | "baton"; x: number; y:
 type Crate = { id: number; x: number; y: number; w: number; h: number; active: boolean }
 type WorldAnim = { name: string; sub: string; alpha: number; phase: "in" | "hold" | "out"; timer: number }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; r: number; col: string }
+type ToolMound  = { id: number; x: number; y: number; w: number; h: number; active: boolean }
+type FlyingTool = { x: number; y: number; vx: number; vy: number; life: number; active: boolean; dealt: boolean }
 type WorldSnapshot = {
   enemies: Enemy[]
   crates: Crate[]
@@ -156,6 +173,8 @@ type G = {
   bossArenaLocked: Set<number>
   // Plataformas móviles del arena: aparecen al entrar al cubículo del jefe P1
   bossArenaPlats: MovingPlat[]
+  toolMounds: ToolMound[]
+  flyingTools: FlyingTool[]
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -212,7 +231,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.10"
+const GAME_VERSION = "0.2.11"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -613,6 +632,12 @@ function computeDoors(w: number, c: number, r: number): { L: boolean; R: boolean
   const [bp1c, bp1r] = WORLD_P1_BOSS[w]
   if (c === bp1c && r === bp1r) { d.U = false; d.D = false }
 
+  // ★ Sala del jefe P2: solo entrada superior (el jugador cae desde arriba)
+  const [bp2c_d, bp2r_d] = WORLD_P2_BOSS[w]
+  if (c === bp2c_d && r === bp2r_d) { d.L = false; d.R = false; d.D = false; d.U = true }
+  // El cuarto encima del boss P2 siempre tiene salida hacia abajo
+  if (c === bp2c_d && r === bp2r_d - 1) d.D = true
+
   return d
 }
 
@@ -746,11 +771,16 @@ function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw })
     if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1), y: y0, w: DW, h: WT, mode: "d", sw })
     if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r), y: y0 + RH - WT, w: DW, h: WT, mode: "d", sw })
-    // Puerta de cierre de arena (sw 500+w): se activa al entrar a la batalla y sella la entrada
+    // Puerta de cierre de arena P1 (sw 500+w): sella entrada lateral
     if (bossType === "p1") {
       const swArena = 500 + w
       if (d.L) result.push({ x: x0, y: y0 + lrDoorY_rel(w, c - 1, r), w: WT, h: DH, mode: "d", sw: swArena })
       if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw: swArena })
+    }
+    // Puerta de cierre de arena P2 (sw 510+w): sella entrada superior al entrar en batalla
+    if (bossType === "p2") {
+      const swArena2 = 510 + w
+      if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1), y: y0, w: DW, h: WT, mode: "d", sw: swArena2 })
     }
   }
 
@@ -767,6 +797,39 @@ function makeInternalPlats(w: number, c: number, r: number): WPlat[] {
   // Sala del jefe P1: arena limpia sin plataformas (boss no salta)
   const [bp1c2, bp1r2] = WORLD_P1_BOSS[w]
   if (c === bp1c2 && r === bp1r2) return []
+
+  // Sala del jefe P2: paredes flotantes laterales + 2 plataformas atravesables por lado
+  const [bp2c2, bp2r2] = WORLD_P2_BOSS[w]
+  if (c === bp2c2 && r === bp2r2) {
+    const iL2 = x0 + WT, iR2 = x0 + RW - WT
+    const iT2 = y0 + WT, iB2 = y0 + RH - WT, iH2 = iB2 - iT2
+    const wallThk = 22       // grosor de la pared flotante
+    const wallGap = 28       // separación de la pared real
+    const wallH   = Math.floor(iH2 * 0.55)   // altura de la sección sólida flotante
+    const wallTop = iT2 + Math.floor(iH2 * 0.22)   // empieza al 22% desde el techo
+    const wallBot = wallTop + wallH
+    // Pared flotante izquierda (sólida, bloquea herramientas)
+    const lwX = iL2 + wallGap
+    const rwX = iR2 - wallGap - wallThk
+    const plW2 = 120   // ancho de las plataformas atravesables
+    // Paredes sólidas flotantes
+    const solid2 = (px2: number, py2: number, pw2: number, ph2: number): WPlat => ({ x: px2, y: py2, w: pw2, h: ph2, mode: "s" })
+    const trav2  = (px2: number, py2: number, pw2: number, ph2: number): WPlat => ({ x: px2, y: py2, w: pw2, h: ph2, mode: "t" })
+    const result2: WPlat[] = [
+      // Pared flotante izquierda
+      solid2(lwX, wallTop, wallThk, wallH),
+      // Plataformas atravesables izquierda (salir por abajo, sólido en la parte superior)
+      trav2(lwX + wallThk, wallTop + Math.floor(wallH * 0.3), plW2, STAIR_H),
+      trav2(lwX + wallThk, wallTop + Math.floor(wallH * 0.65), plW2, STAIR_H),
+      // Pared flotante derecha
+      solid2(rwX, wallTop, wallThk, wallH),
+      // Plataformas atravesables derecha
+      trav2(rwX - plW2, wallTop + Math.floor(wallH * 0.3), plW2, STAIR_H),
+      trav2(rwX - plW2, wallTop + Math.floor(wallH * 0.65), plW2, STAIR_H),
+    ]
+    void wallBot  // suppress unused var warning
+    return result2
+  }
 
   // Corredor de transición: pasillo limpio; solo añadir plataformas de escalada
   // donde haya una conexión vertical hacia arriba (Part1) o hacia abajo (Part2)
@@ -1244,8 +1307,10 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
       // W1 P1 boss: tamaño moderado (un poco más grande que Luly)
       const [bp1cs, bp1rs] = WORLD_P1_BOSS[w]
       const isW1P1bossSpawn = boss && w === 0 && c === bp1cs && r === bp1rs
-      const eW = boss ? (isW1P1bossSpawn ? W1P1_BW : BW) : (isW1S2spawn ? 60 : EW)
-      const eH = boss ? (isW1P1bossSpawn ? W1P1_BH : BH) : (isW1S2spawn ? 72 : EH)
+      const [bp2cs, bp2rs] = WORLD_P2_BOSS[w]
+      const isW1P2bossSpawn = boss && w === 0 && c === bp2cs && r === bp2rs
+      const eW = boss ? (isW1P1bossSpawn ? W1P1_BW : isW1P2bossSpawn ? W1P2_BW : BW) : (isW1S2spawn ? 60 : EW)
+      const eH = boss ? (isW1P1bossSpawn ? W1P1_BH : isW1P2bossSpawn ? W1P2_BH : BH) : (isW1S2spawn ? 72 : EH)
 
       // Para jefes: ignorar exclusión de shafts (su sala siempre tiene espacio suficiente)
       // y validar posición al nivel del PISO en vez del canal (chanBot puede estar
@@ -1316,7 +1381,8 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         idleT: Math.floor(rand() * 500), jumpCd: 0,
         dying: false, deathTimer: 0, deathDir: 1,
         hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1,
-        ls2: 0, chainHit: null
+        ls2: 0, chainHit: null,
+        spinTimer: 0, stunTimer: 0, spinHitMound: false,
       })
     })
   }
@@ -1412,6 +1478,8 @@ function mkG_lazy(): G {
     realMapSection: 0,
     bossArenaLocked: new Set<number>(),
     bossArenaPlats: [],
+    toolMounds: [],
+    flyingTools: [],
   } as G
 }
 
@@ -1433,7 +1501,12 @@ function activePlats(g: G): WPlat[] {
   _apCache2 = allPlats.filter(p => {
     if (p.mode !== "d") return true
     if (p.sw === undefined) return true
-    if (p.sw >= 500 && p.sw < 600) {
+    if (p.sw >= 510 && p.sw < 520) {
+      // puerta arena jefe P2: sólida durante la batalla
+      const arenaKey = (p.sw - 510) + 10   // world + 10 = P2 arena key
+      return g.bossArenaLocked.has(arenaKey)
+    }
+    if (p.sw >= 500 && p.sw < 510) {
       // puerta arena jefe P1: sólida durante la batalla (bossArenaLocked activo)
       const bossW = p.sw - 500
       return g.bossArenaLocked.has(bossW)
@@ -1574,6 +1647,79 @@ function tickBossArenaPlats(g: G, dt: number) {
   }
 }
 
+// Crea 3 montículos de herramientas en el arena del Blacksmith
+function spawnToolMounds(g: G, e: Enemy) {
+  if (g.toolMounds.length > 0) return
+  const hr = { w: e.world, c: parseInt(e.id.split("_")[1]), r: parseInt(e.id.split("_")[2]) }
+  const { x: rx, y: ry } = ro(hr.w, hr.c, hr.r)
+  const floorY = ry + RH - WT - MOUND_H
+  const innerW = RW - 2 * WT
+  // Posicionar 3 montículos distribuidos horizontalmente
+  const positions = [0.20, 0.50, 0.80]
+  g.toolMounds = positions.map((frac, i) => ({
+    id: i,
+    x: rx + WT + Math.floor(innerW * frac) - MOUND_W / 2,
+    y: floorY,
+    w: MOUND_W,
+    h: MOUND_H,
+    active: true,
+  }))
+}
+
+// Lanza herramientas desde un montículo cuando el boss lo golpea
+function launchToolsFromMound(g: G, mound: ToolMound, dir: number) {
+  const cx = mound.x + mound.w / 2
+  const cy = mound.y + mound.h / 2
+  const count = 4 + Math.floor(Math.random() * 3)  // 4-6 herramientas
+  for (let i = 0; i < count; i++) {
+    const spreadY = (Math.random() - 0.5) * 3
+    const spreadX = 0.8 + Math.random() * 0.5
+    g.flyingTools.push({
+      x: cx, y: cy,
+      vx: dir * spreadX * 7,
+      vy: spreadY - 2,  // leve impulso hacia arriba
+      life: 2.5,
+      active: true,
+      dealt: false,
+    })
+  }
+}
+
+function tickToolMounds(g: G) {
+  // Tick de herramientas voladoras
+  for (const ft of g.flyingTools) {
+    if (!ft.active) continue
+    ft.x += ft.vx
+    ft.y += ft.vy
+    ft.vy += 0.35  // gravedad
+    ft.life -= STEP
+    if (ft.life <= 0) { ft.active = false; continue }
+    // Colisión con paredes sólidas (plataformas flotantes del arena)
+    const ap2 = activePlats(g)
+    for (const pl of ap2) {
+      if (pl.mode !== "s") continue
+      if (ft.x > pl.x && ft.x < pl.x + pl.w && ft.y > pl.y && ft.y < pl.y + pl.h) {
+        ft.vx *= -0.4  // rebotar un poco
+        ft.vy *= -0.3
+        ft.active = false  // se destruye al tocar la pared
+      }
+    }
+    // Daño al jugador
+    if (!ft.dealt) {
+      const p = g.pl
+      if (ft.x > p.x && ft.x < p.x + p.w && ft.y > p.y && ft.y < p.y + p.h && p.inv <= 0) {
+        dmgPlayer(g, 1)
+        ft.dealt = true
+        ft.active = false
+      }
+    }
+  }
+  g.flyingTools = g.flyingTools.filter(f => f.active)
+  // Limpiar montículos si el boss murió
+  const w1p2dead = g.toolMounds.length > 0 && !g.bossArenaLocked.has(10)
+  if (w1p2dead) { g.toolMounds = []; g.flyingTools = [] }
+}
+
 function dmgPlayer(g: G, dmg: number) {
   if (g.godMode) { g.pl.hp = g.pl.maxHp; g.pl.inv = 0.5; return }
   if (g.pl.inv > 0) return
@@ -1632,8 +1778,9 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
   // Shake en muerte de enemigo
   if (e.boss) triggerShake(g, 14, 0.6)
   else triggerShake(g, 3, 0.12)
-  // Desbloquear arena del jefe P1 al morir el boss
+  // Desbloquear arenas al morir el boss
   if (isW1P1Boss(e)) g.bossArenaLocked.delete(e.world)
+  if (isW1P2Boss(e)) g.bossArenaLocked.delete(e.world + 10)
   // ── Desbloqueo de habilidades al matar boss ─────────────────────────
   // Solo el ultra-jefe [TRANSIT_BOSS_COL, TROW] = [4,4] otorga la habilidad del mundo.
   if (e.boss) {
@@ -2420,21 +2567,29 @@ function tickEnemies(g: G, now: number) {
           // Cerrar la arena del jefe P1 al entrar en combate
           if (isW1P1Boss(e) && !g.bossArenaLocked.has(e.world)) {
             g.bossArenaLocked.add(e.world)
-            // El cache de activePlats se invalida automáticamente via arena key
-            triggerShake(g, 6, 0.4)  // una sola vibración al cerrarse la puerta
-            // Crear las plataformas móviles del arena
+            triggerShake(g, 6, 0.4)
             const hr3 = homeRoom(e)
             spawnBossArenaPlats(g, hr3.w, hr3.c, hr3.r)
+          }
+          if (isW1P2Boss(e) && !g.bossArenaLocked.has(e.world + 10)) {
+            g.bossArenaLocked.add(e.world + 10)
+            triggerShake(g, 8, 0.5)
+            spawnToolMounds(g, e)
           }
         }
         if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
         e.dir = dx > 0 ? 1 : -1
-        // El jefe W1P1 no salta — sólo los demás bosses tienen lógica de salto
-        if (!isW1P1Boss(e)) {
+        // W1P1 y W1P2 no saltan; W1P2 tampoco se mueve durante spin/stun
+        if (!isW1P1Boss(e) && !isW1P2Boss(e)) {
           const playerAbove = plFloor !== null && plFloor < e.y + e.h - 60 && p.onGround
           const playerBelow = p.onGround && p.y + p.h > e.y + e.h + 40
           if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
           if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
+        }
+        // W1P2: paralizar durante giro y stun
+        if (isW1P2Boss(e) && (e.spinTimer > 0 || e.stunTimer > 0)) {
+          targetVx = 0
+          e.vx = 0
         }
       }
 
@@ -2704,6 +2859,78 @@ function tickEnemies(g: G, now: number) {
         if (e.chainHit.life <= 0) e.chainHit = null
       }
 
+    } else if (isW1P2Boss(e)) {
+      // ── Jefe W1 Segunda Sección: golpe de piso + giro de martillo ──
+      // Tick del giro (spinTimer)
+      if (e.spinTimer > 0) {
+        e.spinTimer -= STEP
+        // Daño al jugador en radio de giro
+        const scx = e.x + e.w / 2, scy = e.y + e.h / 2
+        const sdx = (p.x + p.w / 2) - scx, sdy = (p.y + p.h / 2) - scy
+        if (Math.sqrt(sdx * sdx + sdy * sdy) < SPIN_RADIUS + e.w / 2 && p.inv <= 0) {
+          dmgPlayer(g, SPIN_DMG)
+          p.vx = sdx > 0 ? 4 : -4   // empujar hacia fuera
+        }
+        // Golpear montículos durante el giro (solo uno por iteración)
+        if (!e.spinHitMound) {
+          const nearMound = g.toolMounds.find(m => m.active &&
+            Math.abs((m.x + m.w / 2) - (e.x + e.w / 2)) < SPIN_RADIUS + e.w / 2 + m.w / 2 &&
+            Math.abs((m.y + m.h / 2) - (e.y + e.h / 2)) < e.h * 0.8
+          )
+          if (nearMound) {
+            nearMound.active = false
+            e.spinHitMound = true
+            launchToolsFromMound(g, nearMound, e.dir)
+          }
+        }
+        if (e.spinTimer <= 0) {
+          // Fin del giro → parálisis
+          e.stunTimer = SPIN_STUN
+          e.spinTimer = 0
+          e.sa = 0
+          spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF6600", "#FFAA00", "#FF0000"], 10, 3.5)
+        }
+      } else if (e.stunTimer > 0) {
+        e.stunTimer -= STEP
+        // Paralizado: no hace nada, vulnerable
+      } else if (canShoot) {
+        // Elegir ataque
+        const canSlam = now - e.ls > SLAM_CD
+        const canSpin = e.phase >= 2 && now - e.ls2 > SPIN_CD
+        if (canSpin && (Math.random() < 0.4 || !canSlam)) {
+          // Iniciar giro
+          e.spinTimer = SPIN_DURATION
+          e.spinHitMound = false
+          e.ls2 = now; e.sa = Math.ceil(SPIN_DURATION * 1000)
+        } else if (canSlam && dist < SLAM_REACH + e.w + 30) {
+          // Slam de piso
+          e.chainHit = { dir: e.dir, life: 0.35, dealt: false }
+          e.ls = now; e.sa = 400
+        }
+      }
+
+      // Tick del chainHit del slam
+      if (e.chainHit && e.spinTimer <= 0) {
+        e.chainHit.life -= STEP
+        if (!e.chainHit.dealt) {
+          const sDir  = e.chainHit.dir
+          const sX    = sDir > 0 ? (e.x + e.w) : (e.x - SLAM_REACH)
+          const sY    = e.y + e.h * 0.6   // zona baja (golpe al suelo)
+          const sW2   = SLAM_REACH, sH2 = e.h * 0.45
+          const phx2  = p.x + PL_HBX, phy2 = p.y + PL_HBT
+          const phw2  = p.w - 2 * PL_HBX, phh2 = p.h - PL_HBT
+          if (phx2 < sX + sW2 && phx2 + phw2 > sX && phy2 < sY + sH2 && phy2 + phh2 > sY) {
+            if (p.inv <= 0) {
+              dmgPlayer(g, SLAM_DMG)
+              p.vy = SLAM_KB_VY   // expulsión hacia arriba
+              p.onGround = false
+              e.chainHit.dealt = true
+            }
+          }
+        }
+        if (e.chainHit.life <= 0) e.chainHit = null
+      }
+
     } else {
       // ── Ataque genérico (resto de enemigos + otros bosses) ────────
       if (now - e.ls > e.cd && canShoot) {
@@ -2737,7 +2964,7 @@ function tickEnemies(g: G, now: number) {
 
     // ── Daño por contacto ─────────────────────────────────────────────
     // El jefe W1P1 no inflige daño por contacto — sólo a través del látigo
-    if (e.hurtTimer <= 0 && !isW1P1Boss(e)) {
+    if (e.hurtTimer <= 0 && !isW1P1Boss(e) && !isW1P2Boss(e)) {
       const ecx = e.x + EN_HBX, ecy = e.y + EN_HBT, ecw = e.w - 2 * EN_HBX, ech = e.h - EN_HBT
       if (p.inv <= 0 && phx < ecx + ecw && phx + phw > ecx && phy < ecy + ech && phy + phh > ecy) dmgPlayer(g, 1)
     }
@@ -3449,7 +3676,7 @@ function tick(g: G) {
     g.pl.vx = 0
     g.pl.crouching = false
   }
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0); tickToolMounds(g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -5508,6 +5735,12 @@ function isW1P1Boss(e: Enemy): boolean {
   return e.boss && e.world === 0 && getBossSection(e) === "fs"
 }
 
+// Verdadero sólo para el jefe de la Segunda Sección del World 1 (c=8, r=7, w=0)
+// Blacksmith: no salta, golpe de piso + giro de martillo
+function isW1P2Boss(e: Enemy): boolean {
+  return e.boss && e.world === 0 && getBossSection(e) === "ss"
+}
+
 // Resuelve el sprite correcto con cadena de fallbacks:
 //   1. Sprite específico del mundo+sección+animación+dirección
 //   2. Variante sin dirección (ej: idle único para esa sección)
@@ -5525,6 +5758,12 @@ function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
     let banim: string
     if (e.dying) {
       banim = "death"
+    } else if (isW1P2Boss(e) && e.spinTimer > 0) {
+      // Giro del Blacksmith → Atack_2
+      banim = "atack2"
+    } else if (isW1P2Boss(e) && e.stunTimer > 0) {
+      // Parálisis post-giro → Walk (quieto)
+      banim = "walk"
     } else if (e.sa > 0) {
       banim = e.phase >= 2 ? "atack2" : "atack1"
     } else if (e.phase >= 2) {
@@ -5602,6 +5841,38 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
     // idle: sheet 968×1056, frame 242×264, cH=257, padB=4
     // rh=264*0.265=70, rw=242*0.265=64.1→64, ryOff=3, rxOff=30-32=-2
     return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
+  }
+
+  // ── W1 Second Section Boss (eW=144, eH=216) — Blacksmith ──────────
+  // Valores PIL, escala = 216/385 = 0.5610 (cH constante ≈ 385px)
+  // ryOff = eH − rh*(1−padB/fh) ; rxOff = eW/2 − (padL+cW/2)*scale
+  if (isW1P2Boss(e)) {
+    const dir3 = (e.dying ? e.deathDir : e.dir) >= 0
+    if (e.dying) {
+      return dir3
+        ? { rw: 267, rh: 259, rxOff: -61, ryOff: -21 }  // Death_right
+        : { rw: 268, rh: 260, rxOff: -62, ryOff: -22 }  // Death_left
+    }
+    if (e.spinTimer > 0 || (e.sa > 0 && e.phase >= 2)) {
+      // Atack_2: giro del martillo
+      return dir3
+        ? { rw: 264, rh: 281, rxOff: -35, ryOff:   0 }  // right
+        : { rw: 277, rh: 298, rxOff: -67, ryOff: -41 }  // left
+    }
+    if (e.sa > 0 && !e.spinTimer) {
+      // Atack_1: golpe de piso (simétrico)
+      return { rw: 277, rh: 320, rxOff: -67, ryOff: -52 }
+    }
+    if (e.phase >= 2) {
+      // Rage_Walk
+      return dir3
+        ? { rw: 200, rh: 249, rxOff: -28, ryOff:  -4 }  // right
+        : { rw: 199, rh: 247, rxOff: -27, ryOff: -15 }  // left
+    }
+    // Walk
+    return dir3
+      ? { rw: 169, rh: 229, rxOff:  -7, ryOff:  -5 }  // right
+      : { rw: 170, rh: 231, rxOff: -13, ryOff:  -8 }  // left
   }
 
   // ── W1 First Section Boss (eW=64, eH=84) ─────────────────────────
@@ -7134,6 +7405,35 @@ function drawBossRoomFog(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 
+function drawToolMounds(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
+  const spr = sprs["monticulo_herramientas"]
+  for (const m of g.toolMounds) {
+    if (!m.active) continue
+    const sx = m.x - g.cx, sy = m.y - g.cy
+    if (spr && spr.complete && spr.naturalWidth > 0) {
+      ctx.drawImage(spr, sx, sy, m.w, m.h)
+    } else {
+      ctx.fillStyle = "#5A4020"
+      ctx.fillRect(sx, sy, m.w, m.h)
+      ctx.fillStyle = "#8A6030"
+      ctx.fillRect(sx + 4, sy + 4, m.w - 8, m.h - 8)
+    }
+  }
+  // Herramientas voladoras
+  for (const ft of g.flyingTools) {
+    if (!ft.active) continue
+    const sx = ft.x - g.cx, sy = ft.y - g.cy
+    ctx.save()
+    ctx.fillStyle = "#C0C0C0"
+    ctx.translate(sx, sy)
+    ctx.rotate(Math.atan2(ft.vy, ft.vx))
+    ctx.fillRect(-8, -3, 16, 6)
+    ctx.fillStyle = "#8B6914"
+    ctx.fillRect(-8, -3, 5, 6)
+    ctx.restore()
+  }
+}
+
 function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
   if (g.bossArenaPlats.length === 0) return
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
@@ -7164,7 +7464,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
   drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
@@ -7803,6 +8103,7 @@ export default function ProyectoLuly() {
     L("kennel_red",    "/assets/Enviroment/Kennel/Kennel_red.png")     // W1 Fábrica Canina
     L("kennel_blue",   "/assets/Enviroment/Kennel/Kennel_blue.png")    // W2 Los Tubos
     L("kennel_violet",    "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
+    L("monticulo_herramientas", "/assets/Enviroment/monticulo_herramientas/monticulo_herramientas.png")
     L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
     L("floor_w1_base",          "/assets/Enviroment/World_1/Floor/F-1.png")
