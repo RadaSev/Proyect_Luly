@@ -30,18 +30,18 @@ const WHIP1_CD    = 1800  // cooldown Ataque 1 (ms)
 const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
 const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
 const WHIP_KB_VY  = -3.5  // componente vertical del repulsión
-const W1P2_BW = 144, W1P2_BH = 216   // Boss W1 Segunda Sección: ~3× Luly
-const SLAM_REACH = 160    // alcance del golpe de piso (px) frente al boss
+const W1P2_BW = 160, W1P2_BH = 360   // Boss W1 Segunda Sección: grande e imponente
+const SLAM_REACH = 200    // alcance del golpe de piso (px) frente al boss
 const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
 const SLAM_DMG   = 1      // daño del slam
-const SPIN_DURATION = 3.5 // segundos de giro
+const SPIN_DURATION = 5.0 // segundos de giro (≥2 ciclos completos de animación)
 const SPIN_STUN  = 2.0    // segundos de parálisis post-giro
 const SPIN_DMG   = 2      // daño del giro al jugador
-const SPIN_RADIUS = 190   // radio de daño durante el giro
-const SLAM_CD    = 2200   // ms entre slams
-const SPIN_CD    = 7000   // ms entre giros (incluye tiempo de stun)
-const MOUND_W    = 90     // ancho del montículo de herramientas
-const MOUND_H    = 56     // alto del montículo
+const SPIN_RADIUS = 220   // radio de daño durante el giro
+const SLAM_CD    = 2800   // ms entre slams
+const SPIN_CD    = 9000   // ms entre giros (incluye tiempo de stun)
+const MOUND_W    = 160    // ancho del montículo de herramientas
+const MOUND_H    = 112    // alto del montículo
 const KENNEL_R = 100
 const TOT_W = NW * NC * RW   // 50400
 const TOT_H = NR * RH      // 6120
@@ -100,7 +100,7 @@ type Crate = { id: number; x: number; y: number; w: number; h: number; active: b
 type WorldAnim = { name: string; sub: string; alpha: number; phase: "in" | "hold" | "out"; timer: number }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; r: number; col: string }
 type ToolMound  = { id: number; x: number; y: number; w: number; h: number; active: boolean }
-type FlyingTool = { x: number; y: number; vx: number; vy: number; life: number; active: boolean; dealt: boolean }
+type FlyingTool = { x: number; y: number; vx: number; vy: number; life: number; active: boolean; dealt: boolean; rot: number; rotSpd: number }
 type WorldSnapshot = {
   enemies: Enemy[]
   crates: Crate[]
@@ -798,36 +798,36 @@ function makeInternalPlats(w: number, c: number, r: number): WPlat[] {
   const [bp1c2, bp1r2] = WORLD_P1_BOSS[w]
   if (c === bp1c2 && r === bp1r2) return []
 
-  // Sala del jefe P2: paredes flotantes laterales + 2 plataformas atravesables por lado
+  // Sala del jefe P2: paredes flotantes más anchas + plataformas entre pared exterior y flotante
   const [bp2c2, bp2r2] = WORLD_P2_BOSS[w]
   if (c === bp2c2 && r === bp2r2) {
     const iL2 = x0 + WT, iR2 = x0 + RW - WT
     const iT2 = y0 + WT, iB2 = y0 + RH - WT, iH2 = iB2 - iT2
-    const wallThk = 22       // grosor de la pared flotante
-    const wallGap = 28       // separación de la pared real
-    const wallH   = Math.floor(iH2 * 0.55)   // altura de la sección sólida flotante
-    const wallTop = iT2 + Math.floor(iH2 * 0.22)   // empieza al 22% desde el techo
-    const wallBot = wallTop + wallH
-    // Pared flotante izquierda (sólida, bloquea herramientas)
+    const wallThk = 52       // grosor de la pared flotante (más gruesa)
+    const wallGap = 140      // ancho del pasillo entre pared real y pared flotante
+    const wallH   = Math.floor(iH2 * 0.60)   // cubre 60% de la altura interior
+    const wallTop = iT2 + Math.floor(iH2 * 0.18)   // empieza al 18% desde el techo
+    // Pared flotante izquierda: arranca en iL2 + wallGap
     const lwX = iL2 + wallGap
+    // Pared flotante derecha: termina en iR2 - wallGap
     const rwX = iR2 - wallGap - wallThk
-    const plW2 = 120   // ancho de las plataformas atravesables
+    // Plataformas en el pasillo entre pared real y pared flotante
+    const plW2 = wallGap     // ancho exacto del pasillo
     // Paredes sólidas flotantes
     const solid2 = (px2: number, py2: number, pw2: number, ph2: number): WPlat => ({ x: px2, y: py2, w: pw2, h: ph2, mode: "s" })
     const trav2  = (px2: number, py2: number, pw2: number, ph2: number): WPlat => ({ x: px2, y: py2, w: pw2, h: ph2, mode: "t" })
     const result2: WPlat[] = [
       // Pared flotante izquierda
       solid2(lwX, wallTop, wallThk, wallH),
-      // Plataformas atravesables izquierda (salir por abajo, sólido en la parte superior)
-      trav2(lwX + wallThk, wallTop + Math.floor(wallH * 0.3), plW2, STAIR_H),
-      trav2(lwX + wallThk, wallTop + Math.floor(wallH * 0.65), plW2, STAIR_H),
+      // Plataformas atravesables izquierda (entre pared real y pared flotante)
+      trav2(iL2, wallTop + Math.floor(wallH * 0.28), plW2, STAIR_H),
+      trav2(iL2, wallTop + Math.floor(wallH * 0.58), plW2, STAIR_H),
       // Pared flotante derecha
       solid2(rwX, wallTop, wallThk, wallH),
-      // Plataformas atravesables derecha
-      trav2(rwX - plW2, wallTop + Math.floor(wallH * 0.3), plW2, STAIR_H),
-      trav2(rwX - plW2, wallTop + Math.floor(wallH * 0.65), plW2, STAIR_H),
+      // Plataformas atravesables derecha (entre pared flotante y pared real)
+      trav2(rwX + wallThk, wallTop + Math.floor(wallH * 0.28), plW2, STAIR_H),
+      trav2(rwX + wallThk, wallTop + Math.floor(wallH * 0.58), plW2, STAIR_H),
     ]
-    void wallBot  // suppress unused var warning
     return result2
   }
 
@@ -1652,10 +1652,13 @@ function spawnToolMounds(g: G, e: Enemy) {
   if (g.toolMounds.length > 0) return
   const hr = { w: e.world, c: parseInt(e.id.split("_")[1]), r: parseInt(e.id.split("_")[2]) }
   const { x: rx, y: ry } = ro(hr.w, hr.c, hr.r)
-  const floorY = ry + RH - WT - MOUND_H
+  // El sprite del montículo tiene padB=153/768 de transparencia inferior y content llega a 614/768.
+  // Para que el contenido quede al ras del suelo, ajustamos Y:
+  const moundContentBotFrac = 614 / 768
+  const floorY = ry + RH - WT - Math.ceil(MOUND_H * moundContentBotFrac)
   const innerW = RW - 2 * WT
-  // Posicionar 3 montículos distribuidos horizontalmente
-  const positions = [0.20, 0.50, 0.80]
+  // 3 montículos distribuidos horizontalmente (evitar zona de paredes flotantes)
+  const positions = [0.25, 0.50, 0.75]
   g.toolMounds = positions.map((frac, i) => ({
     id: i,
     x: rx + WT + Math.floor(innerW * frac) - MOUND_W / 2,
@@ -1669,18 +1672,24 @@ function spawnToolMounds(g: G, e: Enemy) {
 // Lanza herramientas desde un montículo cuando el boss lo golpea
 function launchToolsFromMound(g: G, mound: ToolMound, dir: number) {
   const cx = mound.x + mound.w / 2
-  const cy = mound.y + mound.h / 2
-  const count = 4 + Math.floor(Math.random() * 3)  // 4-6 herramientas
+  const cy = mound.y + mound.h / 4  // lanzar desde la parte superior del montículo
+  const count = 6 + Math.floor(Math.random() * 4)  // 6-9 herramientas
   for (let i = 0; i < count; i++) {
-    const spreadY = (Math.random() - 0.5) * 3
-    const spreadX = 0.8 + Math.random() * 0.5
+    // Lanzar en abanico: algunas hacia el lado del boss, algunas al opuesto
+    const dirFrac = i < count * 0.7 ? dir : -dir  // 70% hacia el lado del boss
+    const spreadY = -(1.5 + Math.random() * 3)   // siempre hacia arriba primero
+    const spreadX = (0.6 + Math.random() * 0.8) * dirFrac
+    const spd = 8 + Math.random() * 6
     g.flyingTools.push({
-      x: cx, y: cy,
-      vx: dir * spreadX * 7,
-      vy: spreadY - 2,  // leve impulso hacia arriba
-      life: 2.5,
+      x: cx + (Math.random() - 0.5) * 30,
+      y: cy,
+      vx: spreadX * spd,
+      vy: spreadY,
+      life: 3.0,
       active: true,
       dealt: false,
+      rot: Math.random() * Math.PI * 2,
+      rotSpd: (Math.random() - 0.5) * 15,
     })
   }
 }
@@ -1692,6 +1701,8 @@ function tickToolMounds(g: G) {
     ft.x += ft.vx
     ft.y += ft.vy
     ft.vy += 0.35  // gravedad
+    ft.vx *= 0.98  // fricción del aire
+    ft.rot += ft.rotSpd * STEP
     ft.life -= STEP
     if (ft.life <= 0) { ft.active = false; continue }
     // Colisión con paredes sólidas (plataformas flotantes del arena)
@@ -2881,6 +2892,9 @@ function tickEnemies(g: G, now: number) {
             nearMound.active = false
             e.spinHitMound = true
             launchToolsFromMound(g, nearMound, e.dir)
+            // VFX: explosión de herramientas + vibración
+            spawnExplosion(g, nearMound.x + nearMound.w / 2, nearMound.y, ["#FF6600", "#FFAA00", "#CC8800", "#FF4400", "#DDDDDD"], 24, 6.0)
+            triggerShake(g, 9, 0.35)
           }
         }
         if (e.spinTimer <= 0) {
@@ -2898,17 +2912,24 @@ function tickEnemies(g: G, now: number) {
         const canSlam = now - e.ls > SLAM_CD
         const canSpin = e.phase >= 2 && now - e.ls2 > SPIN_CD
         if (canSpin && (Math.random() < 0.4 || !canSlam)) {
-          // Iniciar giro
+          // Iniciar giro: resetear animación para que se vean 2 ciclos completos
           e.spinTimer = SPIN_DURATION
           e.spinHitMound = false
+          e.ef = 0; e.eft = 0
           e.ls2 = now; e.sa = Math.ceil(SPIN_DURATION * 1000)
         } else if (canSlam && dist < SLAM_REACH + e.w + 30) {
-          // Slam de piso
-          e.chainHit = { dir: e.dir, life: 0.35, dealt: false }
-          e.ls = now; e.sa = 400
+          // Slam de piso: animar completo (25 frames × 90ms = 2250ms), hitbox activado a mitad
+          e.chainHit = null
+          e.ls = now; e.sa = 2500; e.ef = 0; e.eft = 0
         }
       }
 
+      // Activar hitbox del slam cuando llegue a la mitad de la animación (~1200ms)
+      if (e.sa > 0 && e.sa <= 1200 && e.spinTimer <= 0 && e.chainHit === null && !e.dying) {
+        e.chainHit = { dir: e.dir, life: 0.40, dealt: false }
+        spawnExplosion(g, e.x + (e.dir >= 0 ? e.w + SLAM_REACH * 0.5 : -SLAM_REACH * 0.5), e.y + e.h, ["#FF6600", "#FFAA00", "#FFFFFF"], 12, 3.5)
+        triggerShake(g, 7, 0.25)
+      }
       // Tick del chainHit del slam
       if (e.chainHit && e.spinTimer <= 0) {
         e.chainHit.life -= STEP
@@ -5843,36 +5864,46 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
     return { rw: 64, rh: 70, rxOff: -2, ryOff: 3 }
   }
 
-  // ── W1 Second Section Boss (eW=144, eH=216) — Blacksmith ──────────
-  // Valores PIL, escala = 216/385 = 0.5610 (cH constante ≈ 385px)
-  // ryOff = eH − rh*(1−padB/fh) ; rxOff = eW/2 − (padL+cW/2)*scale
+  // ── W1 Second Section Boss (eW=160, eH=360) — Blacksmith ──────────
+  // Valores PIL recalculados para target cH=360, eW/2=80
+  // Walk_right:       fw=303,fh=411, cH=387,padL=10,padB=14  → scale=0.9302
+  // Walk_left:        fw=303,fh=411, cH=385,padL=28,padB=13  → scale=0.9351
+  // Atack_1_(both):   fw=494,fh=571, cH=385,padL=124,padB=93 → scale=0.9351
+  // Atack_2_right:    fw=494,fh=525, cH=404,padL=71,padB=121 → scale=0.8911
+  // Atack_2_left:     fw=494,fh=531, cH=385,padL=124,padB=73 → scale=0.9351
+  // Death_right:      fw=478,fh=463, cH=386,padL=115,padB=39 → scale=0.9326
+  // Death_left:       fw=478,fh=463, cH=385,padL=116,padB=39 → scale=0.9351
+  // Rage_Walk_right:  fw=354,fh=440, cH=382,padL=14,padB=51  → scale=0.9424
+  // Rage_Walk_left:   fw=354,fh=440, cH=385,padL=53,padB=28  → scale=0.9351
   if (isW1P2Boss(e)) {
     const dir3 = (e.dying ? e.deathDir : e.dir) >= 0
     if (e.dying) {
       return dir3
-        ? { rw: 267, rh: 259, rxOff: -61, ryOff: -21 }  // Death_right
-        : { rw: 268, rh: 260, rxOff: -62, ryOff: -22 }  // Death_left
+        ? { rw: 446, rh: 432, rxOff: -142, ryOff: -36 }  // Death_right
+        : { rw: 447, rh: 433, rxOff: -144, ryOff: -37 }  // Death_left
     }
     if (e.spinTimer > 0 || (e.sa > 0 && e.phase >= 2)) {
       // Atack_2: giro del martillo
       return dir3
-        ? { rw: 264, rh: 281, rxOff: -35, ryOff:   0 }  // right
-        : { rw: 277, rh: 298, rxOff: -67, ryOff: -41 }  // left
+        ? { rw: 440, rh: 468, rxOff:  -99, ryOff:   0 }  // right
+        : { rw: 462, rh: 497, rxOff: -151, ryOff: -69 }  // left
     }
-    if (e.sa > 0 && !e.spinTimer) {
-      // Atack_1: golpe de piso (simétrico)
-      return { rw: 277, rh: 320, rxOff: -67, ryOff: -52 }
+    if (e.sa > 0 && e.spinTimer <= 0) {
+      // Atack_1: golpe de piso
+      return dir3
+        ? { rw: 462, rh: 534, rxOff: -151, ryOff: -87 }  // right
+        : { rw: 462, rh: 534, rxOff: -151, ryOff: -87 }  // left (simétrico)
     }
     if (e.phase >= 2) {
       // Rage_Walk
       return dir3
-        ? { rw: 200, rh: 249, rxOff: -28, ryOff:  -4 }  // right
-        : { rw: 199, rh: 247, rxOff: -27, ryOff: -15 }  // left
+        ? { rw: 334, rh: 415, rxOff:  -86, ryOff:  -7 }  // right
+        : { rw: 331, rh: 411, rxOff:  -86, ryOff: -25 }  // left
     }
     // Walk
     return dir3
-      ? { rw: 169, rh: 229, rxOff:  -7, ryOff:  -5 }  // right
-      : { rw: 170, rh: 231, rxOff: -13, ryOff:  -8 }  // left
+      ? { rw: 282, rh: 382, rxOff:  -52, ryOff:  -9 }  // right
+      : { rw: 283, rh: 384, rxOff:  -62, ryOff: -12 }  // left
   }
 
   // ── W1 First Section Boss (eW=64, eH=84) ─────────────────────────
@@ -7419,17 +7450,25 @@ function drawToolMounds(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       ctx.fillRect(sx + 4, sy + 4, m.w - 8, m.h - 8)
     }
   }
-  // Herramientas voladoras
+  // Herramientas voladoras con rotación propia
   for (const ft of g.flyingTools) {
     if (!ft.active) continue
     const sx = ft.x - g.cx, sy = ft.y - g.cy
+    if (sx < -60 || sx > CW + 60 || sy < -60 || sy > CH + 60) continue
     ctx.save()
-    ctx.fillStyle = "#C0C0C0"
     ctx.translate(sx, sy)
-    ctx.rotate(Math.atan2(ft.vy, ft.vx))
-    ctx.fillRect(-8, -3, 16, 6)
+    ctx.rotate(ft.rot)
+    // Cuerpo de la herramienta (llave/martillo)
+    ctx.fillStyle = "#C8C8C8"
+    ctx.fillRect(-10, -3, 20, 6)
     ctx.fillStyle = "#8B6914"
-    ctx.fillRect(-8, -3, 5, 6)
+    ctx.fillRect(-10, -3, 6, 6)
+    // Cabeza de la herramienta
+    ctx.fillStyle = "#B0B0B0"
+    ctx.fillRect(7, -5, 7, 10)
+    // Brillo metálico
+    ctx.fillStyle = "#E8E8E8"
+    ctx.fillRect(-9, -2, 3, 2)
     ctx.restore()
   }
 }
