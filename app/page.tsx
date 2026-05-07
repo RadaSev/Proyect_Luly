@@ -2564,13 +2564,14 @@ function tickEnemies(g: G, now: number) {
 
     if (e.boss) {
       if (!plSameRoom) {
-        // ── Boss inactivo: mantener posición centrada en la sala ──────
+        // ── Boss inactivo: snap al centro de la sala (no caminar → las paredes flotantes bloquean) ──
         const hr2 = homeRoom(e)
         const { x: bx0 } = ro(hr2.w, hr2.c, hr2.r)
         const centerX = bx0 + Math.floor(RW / 2) - Math.floor(e.w / 2)
-        const cdx = centerX - e.x
-        if (Math.abs(cdx) > 4) targetVx = (cdx > 0 ? 1 : -1) * e.spd * 0.5
-        e.dir = cdx >= 0 ? 1 : -1
+        e.x = centerX   // snap directo, sin física
+        e.vx = 0
+        targetVx = 0
+        e.dir = 1
         e.state = "patrol"
       } else {
         // ── Boss activo: perseguir al jugador ─────────────────────────
@@ -2588,6 +2589,7 @@ function tickEnemies(g: G, now: number) {
             g.bossArenaLocked.add(e.world + 10)
             triggerShake(g, 8, 0.5)
             spawnToolMounds(g, e)
+            e.ls2 = now   // iniciar timer de rage-walk desde que empieza el combate
           }
         }
         if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
@@ -2775,6 +2777,7 @@ function tickEnemies(g: G, now: number) {
       e.spd *= 1.5; e.cd = Math.floor(e.cd * 0.55)
       triggerShake(g, 12, 0.55)
       spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF0000", "#FF8800", "#FFFF00", "#FFFFFF", "#FF4400"], 24, 6, true)
+      if (isW1P2Boss(e)) e.ls2 = now  // reiniciar rage-walk al entrar en fase 2
     }
 
     // ── Disparo / Ataques ────────────────────────────────────────────
@@ -7199,7 +7202,7 @@ function drawDevMap(ctx: CanvasRenderingContext2D, g: G, hover: { w: number; c: 
   ctx.fillText("// MODO DESARROLLADOR — MAPA TELEPORT //", CW / 2, 20)
   ctx.fillStyle = "#1A6622"; ctx.font = "9px 'Courier New',monospace"
   ctx.fillText(
-    `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    STA: ${g.staDisplay === "circle" ? "● CIRC" : "▬ BAR"} [J]    ZOOM: ${g.mobileZoom === "close" ? "🔍 CLOSE" : "🌍 FAR"} [P]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
+    `GOD: ${g.godMode ? "■ ON" : "□ OFF"} [I]    AMMO∞: ${g.infiniteAmmo ? "■ ON" : "□ OFF"} [O]    NOENM: ${g.noEnemies ? "■ ON" : "□ OFF"} [K]    OHKO: ${g.ohko ? "■ ON" : "□ OFF"} [U]    KILLENM: [L]    STA: ${g.staDisplay === "circle" ? "● CIRC" : "▬ BAR"} [J]    ZOOM: ${g.mobileZoom === "close" ? "🔍 CLOSE" : "🌍 FAR"} [P]    [ESC/\`] cerrar    CLICK/A = teleport    LB/RB = mundo`,
     CW / 2, 36
   )
   ctx.textAlign = "left"
@@ -8364,6 +8367,22 @@ export default function ProyectoLuly() {
       if (g.devMode && k === "o") g.infiniteAmmo = !g.infiniteAmmo
       if (g.devMode && k === "k") g.noEnemies = !g.noEnemies
       if (g.devMode && k === "u") g.ohko = !g.ohko
+      if (g.devMode && k === "l") {
+        // Matar todos los enemigos no-boss de la sección actual (para testear jefes rápido)
+        const pRow = Math.floor(g.pl.y / RH)
+        const pSec = pRow < TROW ? "f" : "s"
+        const pWld = Math.floor(g.pl.x / (NC * RW))
+        for (const en of g.enemies) {
+          if (!en.active || en.boss || en.dying || en.world !== pWld) continue
+          const eRow = Math.floor(en.y / RH)
+          const eSec = eRow < TROW ? "f" : "s"
+          if (eSec !== pSec) continue
+          en.active = false
+          const parts = en.originalId.split("_")
+          if (parts.length >= 4) g.dead.add(parts.slice(0, 4).join("_"))
+          g.dead.add(en.originalId); g.dead.add(en.id)
+        }
+      }
       if (g.devMode && k === "j") g.staDisplay = g.staDisplay === "circle" ? "bar" : "circle"
       if (g.devMode && k === "p") g.mobileZoom = g.mobileZoom === "far" ? "close" : "far"
       if (g.devMode && k === "g") {
