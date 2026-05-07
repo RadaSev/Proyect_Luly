@@ -24,8 +24,8 @@ const CHAIN_REACH = 85    // alcance del ataque de cadena del enemigo W1S2 (px)
 const W1P1_BW = 64, W1P1_BH = 84   // Jefe W1 Sección 1: hitbox (un poco más grande que Luly)
 const WHIP1_REACH = 105   // alcance del látigo Ataque 1 del jefe W1P1 (px)
 const WHIP2_REACH = 148   // alcance del látigo Ataque 2 del jefe W1P1 (px, más fuerte)
-const WHIP1_DMG   = 1     // daño Ataque 1
-const WHIP2_DMG   = 2     // daño Ataque 2
+const WHIP1_DMG   = 2     // daño Ataque 1 (1 corazón completo en escala ×2)
+const WHIP2_DMG   = 4     // daño Ataque 2 (2 corazones en escala ×2)
 const WHIP1_CD    = 1800  // cooldown Ataque 1 (ms)
 const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
 const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
@@ -33,7 +33,7 @@ const WHIP_KB_VY  = -3.5  // componente vertical del repulsión
 const W1P2_BW = 140, W1P2_BH = 220   // Boss W1 Segunda Sección: ~3× Luly (3×72=216)
 const SLAM_REACH = 180    // alcance del golpe de piso (px) frente al boss
 const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
-const SLAM_DMG   = 1      // daño del slam
+const SLAM_DMG   = 2      // daño del slam (1 corazón completo en escala ×2)
 const SPIN_DURATION = 4.5 // 2 ciclos × 25 frames × 90 ms = 4500 ms exactos
 const SPIN_STUN  = 3.0    // segundos de parálisis post-giro (vulnerable, esperar 3s)
 const SPIN_DMG   = 2      // daño del giro al jugador
@@ -1200,7 +1200,7 @@ function getWorldCrateDefs(w: number) {
 // ══════════════════════════════════════════════════════════════
 function mkPlayer(): Player {
   const [sw, sc, sr] = PLAYER_START; const { x: x0, y: y0 } = ro(sw, sc, sr)
-  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 3, maxHp: 3, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0 }
+  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 10, maxHp: 10, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0 }
 }
 
 // Devuelve los rangos X que corresponden a shafts verticales en una sala
@@ -1809,8 +1809,8 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
         g.abilityNotif = { text: "SALTO EN PARED  [← / → + SALTO]", timer: 4.0 }
       } else if (originalWorld === 2 && !g.abilities.has("hpup")) {
         g.abilities.add("hpup")
-        g.pl.maxHp = Math.min(g.pl.maxHp + 1, 6)
-        g.pl.hp = Math.min(g.pl.hp + 1, g.pl.maxHp)
+        g.pl.maxHp = Math.min(g.pl.maxHp + 2, 12)  // +1 corazón (escala ×2), máx 6 corazones
+        g.pl.hp    = Math.min(g.pl.hp    + 2, g.pl.maxHp)
         g.abilityNotif = { text: "VIDA MÁXIMA +1  ❤", timer: 4.0 }
       }
     }
@@ -3086,7 +3086,7 @@ function tickProjs(g: G) {
       if (p.inv <= 0 && pr.x > phx && pr.x < phx + phw && pr.y > phy && pr.y < phy + phh) {
         pr.active = false
         spawnExplosion(g, pr.x, pr.y, ["#FF4400", "#FF8800", "#FFCC00", "#FF2200"], 12, 4.5, true)
-        dmgPlayer(g, 1); continue
+        dmgPlayer(g, 2); continue  // ataque 2 (proyectil) = 1 corazón completo
       }
     }
     if (pr.pl) {
@@ -7570,7 +7570,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   // ── Panel izquierdo ───────────────────────────────────────────────────────
   const panX = 6, panY = 6, panW = 192
   // Dimensiones de cada fila
-  const HS = 28, HSP = 34, HY0 = panY + 14          // corazones
+  const HS = 24, HSP = 28, HY0 = panY + 16          // corazones (6 slots: 5 activos + 1 bloqueado)
   const EY0 = HY0 + HS + 12, ESIZE = 22, ESTP = 26  // enemigos
   const BY0 = EY0 + ESIZE + 12, BSIZE = 18, BSTP = 11 // huesos
   const BONES_PER_ROW = 11                            // cuántos caben en la 1ª fila
@@ -7582,22 +7582,53 @@ function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   ctx.beginPath(); ctx.roundRect(panX, panY, panW, panH, 10); ctx.stroke()
 
   // ── Corazones ─────────────────────────────────────────────────────────────
+  // Escala ×2: 1 corazón = 2 hp, medio corazón = 1 hp
+  // 6 slots: 5 activos iniciales + 1 bloqueado (se desbloquea con hpup del último jefe)
   const HX0 = panX + 12
   const heartSpr = sprs["hud_heart"]
-  for (let i = 0; i < p.maxHp; i++) {
-    const hx = HX0 + i * HSP
+  const hpupUnlocked = g.abilities.has("hpup")
+  // Dibuja el sprite/forma de corazón (sin alpha — el llamador lo gestiona)
+  const drawHeartAt = (hx: number, hy: number, s: number) => {
     if (heartSpr && heartSpr.complete && heartSpr.naturalWidth > 0) {
-      if (i >= p.hp) { ctx.save(); ctx.globalAlpha = 0.18 }
-      ctx.drawImage(heartSpr, hx, HY0, HS, HS)
-      if (i >= p.hp) ctx.restore()
+      ctx.drawImage(heartSpr, hx, hy, s, s)
     } else {
-      // Fallback procedural
-      ctx.fillStyle = i < p.hp ? "#FF1744" : "#333"
+      ctx.fillStyle = "#FF1744"
       ctx.beginPath()
-      ctx.moveTo(hx+HS/2,HY0+HS*.8); ctx.bezierCurveTo(hx+HS/2,HY0+HS*.6,hx,HY0+HS*.3,hx,HY0+HS*.5)
-      ctx.bezierCurveTo(hx,HY0+HS*.2,hx+HS*.3,HY0,hx+HS/2,HY0+HS*.3)
-      ctx.bezierCurveTo(hx+HS*.7,HY0,hx+HS,HY0+HS*.2,hx+HS,HY0+HS*.5)
-      ctx.bezierCurveTo(hx+HS,HY0+HS*.3,hx+HS/2,HY0+HS*.6,hx+HS/2,HY0+HS*.8); ctx.fill()
+      ctx.moveTo(hx+s/2,hy+s*.8); ctx.bezierCurveTo(hx+s/2,hy+s*.6,hx,hy+s*.3,hx,hy+s*.5)
+      ctx.bezierCurveTo(hx,hy+s*.2,hx+s*.3,hy,hx+s/2,hy+s*.3)
+      ctx.bezierCurveTo(hx+s*.7,hy,hx+s,hy+s*.2,hx+s,hy+s*.5)
+      ctx.bezierCurveTo(hx+s,hy+s*.3,hx+s/2,hy+s*.6,hx+s/2,hy+s*.8); ctx.fill()
+    }
+  }
+  for (let i = 0; i < 6; i++) {
+    const hx = HX0 + i * HSP
+    const isLocked  = i >= 5 && !hpupUnlocked   // 6º slot bloqueado hasta hpup
+    const hpLeft    = p.hp - i * 2              // hp restante en este slot (0..2)
+    const isFull    = !isLocked && hpLeft >= 2
+    const isHalf    = !isLocked && hpLeft === 1
+    if (isLocked) {
+      // Corazón bloqueado: muy tenue + candado encima
+      ctx.save(); ctx.globalAlpha = 0.12; drawHeartAt(hx, HY0, HS); ctx.restore()
+      const cx2 = hx + HS * 0.5, arcY = HY0 + HS * 0.38
+      ctx.save()
+      ctx.strokeStyle = "#888"; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(cx2, arcY, HS * 0.16, Math.PI, 0); ctx.stroke()
+      ctx.fillStyle = "#555"
+      ctx.fillRect(cx2 - HS * 0.20, arcY, HS * 0.40, HS * 0.32)
+      ctx.restore()
+    } else if (isFull) {
+      drawHeartAt(hx, HY0, HS)
+    } else if (isHalf) {
+      // Fondo vacío
+      ctx.save(); ctx.globalAlpha = 0.18; drawHeartAt(hx, HY0, HS); ctx.restore()
+      // Mitad izquierda llena con clip
+      ctx.save()
+      ctx.beginPath(); ctx.rect(hx, HY0, HS / 2, HS); ctx.clip()
+      drawHeartAt(hx, HY0, HS)
+      ctx.restore()
+    } else {
+      // Vacío
+      ctx.save(); ctx.globalAlpha = 0.18; drawHeartAt(hx, HY0, HS); ctx.restore()
     }
   }
 
