@@ -2610,7 +2610,14 @@ function tickEnemies(g: G, now: number) {
           targetVx = 0
           e.vx = 0
         }
-        // Durante el giro el boss sigue moviéndose (targetVx ya viene del chase arriba)
+        // W1P2 giro: movimiento sólo en frames 6-15 del ciclo de 25
+        //   frames  0-5  → quieto (preparación)
+        //   frames  6-15 → avanza (giro visible)
+        //   frames 16-24 → quieto (espera segundo movimiento)
+        if (isW1P2Boss(e) && e.spinTimer > 0 && (e.ef < 6 || e.ef >= 16)) {
+          targetVx = 0
+          e.vx = 0
+        }
       }
 
     } else if (e.state === "chase" && plSameRoom) {
@@ -5806,8 +5813,8 @@ function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
       // Giro del Blacksmith → Atack_2
       banim = "atack2"
     } else if (isW1P2Boss(e) && e.stunTimer > 0) {
-      // Parálisis post-giro → Walk (quieto)
-      banim = "walk"
+      // Parálisis post-giro → sprite mareado (cansado/aturdido)
+      banim = "mareado"
     } else if (e.sa > 0) {
       banim = e.phase >= 2 ? "atack2" : "atack1"
     } else if (e.phase >= 2) {
@@ -5892,12 +5899,13 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
   // Walk_right:      fw=303,fh=411, cW=263,cH=387,padL=10, padB=14  scale=0.5685
   // Walk_left:       fw=303,fh=411, cW=247,cH=385,padL=28, padB=13  scale=0.5714
   // Atack_1_(both):  fw=494,fh=571, cW=247,cH=385,padL=124,padB=93  scale=0.5714
-  // Atack_2_right:   fw=494,fh=525, cW=259,cH=404,padL=71, padB=121 scale=0.5446
-  // Atack_2_left:    fw=494,fh=531, cW=247,cH=385,padL=124,padB=73  scale=0.5714
+  // Atack_2 (sprite actualizado 533×441):  min_padB=26, ref_frame cH=384 → scale=0.5729
+  //   rw=305  rh=253  rxOff=-83  ryOff=-18  (simétrico: mismo valor para right y left)
   // Death_right:     fw=478,fh=463, cW=247,cH=386,padL=115,padB=39  scale=0.5699
   // Death_left:      fw=478,fh=463, cW=247,cH=385,padL=116,padB=39  scale=0.5714
-  // Rage_Walk_right: fw=354,fh=440, cW=325,cH=382,padL=14, padB=51  scale=0.5759
-  // Rage_Walk_left:  fw=354,fh=440, cW=248,cH=385,padL=53, padB=28  scale=0.5714
+  // Rage_Walk (354×440): min_padB=25, cH=385 → scale=0.5714  rw=202 rh=251 ryOff=-17
+  //   right: rxOff=-32   left: rxOff=-31
+  // Mareado (374×424): min_padB=20, cH=385 → scale=0.5714  rw=214 rh=242 rxOff=-37 ryOff=-11
   if (isW1P2Boss(e)) {
     const dir3 = (e.dying ? e.deathDir : e.dir) >= 0
     if (e.dying) {
@@ -5905,23 +5913,25 @@ function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: number; r
         ? { rw: 272, rh: 264, rxOff: -66, ryOff: -22 }  // Death_right
         : { rw: 273, rh: 265, rxOff: -67, ryOff: -23 }  // Death_left
     }
+    if (e.stunTimer > 0) {
+      // Mareado: aturdido post-giro (simétrico)
+      return { rw: 214, rh: 242, rxOff: -37, ryOff: -11 }
+    }
     if (e.spinTimer > 0 || (e.sa > 0 && e.phase >= 2)) {
-      // Atack_2: giro del martillo
-      return dir3
-        ? { rw: 269, rh: 286, rxOff: -39, ryOff:   0 }  // right
-        : { rw: 282, rh: 303, rxOff: -71, ryOff: -41 }  // left
+      // Atack_2: giro del martillo — sprite recalculado (533×441, min_padB=26)
+      return { rw: 305, rh: 253, rxOff: -83, ryOff: -18 }
     }
     if (e.sa > 0 && e.spinTimer <= 0) {
-      // Atack_1: golpe de piso (el martillo baja hasta el suelo intencionalmente)
+      // Atack_1: golpe de piso
       return dir3
         ? { rw: 282, rh: 326, rxOff: -71, ryOff: -53 }  // right
         : { rw: 282, rh: 326, rxOff: -71, ryOff: -53 }  // left (simétrico)
     }
     if (e.phase >= 2) {
-      // Rage_Walk (en llamas)
+      // Rage_Walk — corregido con min_padB=25
       return dir3
-        ? { rw: 204, rh: 253, rxOff: -32, ryOff:  -4 }  // right
-        : { rw: 202, rh: 251, rxOff: -31, ryOff: -15 }  // left
+        ? { rw: 202, rh: 251, rxOff: -32, ryOff: -17 }  // right
+        : { rw: 202, rh: 251, rxOff: -31, ryOff: -17 }  // left
     }
     // Walk normal
     return dir3
@@ -8166,6 +8176,9 @@ export default function ProyectoLuly() {
     L("kennel_blue",   "/assets/Enviroment/Kennel/Kennel_blue.png")    // W2 Los Tubos
     L("kennel_violet",    "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
     L("monticulo_herramientas", "/assets/Enviroment/monticulo_herramientas/monticulo_herramientas.png")
+    // W1P2 Boss — sprites exclusivos (no comparten loop general de boss anims)
+    L("boss_w1_ss_mareado_right", "/assets/boos/World_1/Second_Section/mareado_right.png")
+    L("boss_w1_ss_mareado_left",  "/assets/boos/World_1/Second_Section/mareado_left.png")
     L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
     L("floor_w1_base",          "/assets/Enviroment/World_1/Floor/F-1.png")
