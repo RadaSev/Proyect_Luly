@@ -2563,7 +2563,10 @@ function tickEnemies(g: G, now: number) {
     }
 
     if (e.boss) {
-      if (!plSameRoom) {
+      // W1P2: una vez cerrada la arena el boss NO resetea a patrol aunque el jugador
+      // suba fuera de la fila del cuarto (las plataformas laterales cruzan la fila de arriba).
+      const w1p2ArenaLocked = isW1P2Boss(e) && g.bossArenaLocked.has(e.world + 10)
+      if (!plSameRoom && !w1p2ArenaLocked) {
         // ── Boss inactivo: snap al centro de la sala (no caminar → las paredes flotantes bloquean) ──
         const hr2 = homeRoom(e)
         const { x: bx0 } = ro(hr2.w, hr2.c, hr2.r)
@@ -2574,10 +2577,11 @@ function tickEnemies(g: G, now: number) {
         e.dir = 1
         e.state = "patrol"
       } else {
-        // ── Boss activo: perseguir al jugador ─────────────────────────
+        // ── Boss activo (mismo cuarto, o arena W1P2 ya cerrada): perseguir al jugador ─
         if (e.state !== "chase") {
           e.state = "chase"
-          if (!isW1P1Boss(e)) triggerShake(g, 10, 0.45)
+          // W1P1 shake de entrada; W1P2 shake solo la primera vez (antes del cierre de arena)
+          if (!isW1P1Boss(e) && !isW1P2Boss(e)) triggerShake(g, 10, 0.45)
           // Cerrar la arena del jefe P1 al entrar en combate
           if (isW1P1Boss(e) && !g.bossArenaLocked.has(e.world)) {
             g.bossArenaLocked.add(e.world)
@@ -2601,8 +2605,8 @@ function tickEnemies(g: G, now: number) {
           if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
           if (playerBelow && eOnGround2) { e.y += 4; (e as any).onGround = false }
         }
-        // W1P2: paralizar solo durante stun; durante el giro el boss avanza normalmente
-        if (isW1P2Boss(e) && e.stunTimer > 0) {
+        // W1P2: parar durante stun y durante slam (atack_1 no tiene frames de caminata)
+        if (isW1P2Boss(e) && (e.stunTimer > 0 || (e.sa > 0 && e.spinTimer <= 0))) {
           targetVx = 0
           e.vx = 0
         }
@@ -2775,7 +2779,7 @@ function tickEnemies(g: G, now: number) {
     if (e.boss && e.phase === 1 && e.state === "chase" && e.hp <= Math.ceil(e.mhp * 0.5) && !e.dying) {
       e.phase = 2
       e.spd *= 1.5; e.cd = Math.floor(e.cd * 0.55)
-      triggerShake(g, 12, 0.55)
+      if (!isW1P2Boss(e)) triggerShake(g, 12, 0.55)  // W1P2: sin shake dentro de la arena
       spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF0000", "#FF8800", "#FFFF00", "#FFFFFF", "#FF4400"], 24, 6, true)
       if (isW1P2Boss(e)) e.ls2 = now  // reiniciar rage-walk al entrar en fase 2
     }
@@ -2900,7 +2904,7 @@ function tickEnemies(g: G, now: number) {
             e.spinHitMound = true
             launchToolsFromMound(g, nearMound, e.dir)
             spawnExplosion(g, nearMound.x + nearMound.w / 2, nearMound.y, ["#FF6600", "#FFAA00", "#CC8800", "#FF4400", "#DDDDDD"], 24, 6.0)
-            triggerShake(g, 9, 0.35)
+            // sin shake — después de cerrar la arena ya no vibra nada
           }
         }
         if (e.spinTimer <= 0) {
@@ -2909,7 +2913,7 @@ function tickEnemies(g: G, now: number) {
           e.spinTimer = 0
           e.sa = 0
           spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF6600", "#FFAA00", "#FF0000"], 10, 3.5)
-          triggerShake(g, 5, 0.25)
+          // sin shake post-giro
         }
 
       // ── 2. Tick del stun post-giro ─────────────────────────────────────
@@ -2946,8 +2950,7 @@ function tickEnemies(g: G, now: number) {
       if (e.sa > 0 && e.sa <= 1200 && e.spinTimer <= 0 && e.stunTimer <= 0 && e.chainHit === null && !e.dying) {
         e.chainHit = { dir: e.dir, life: 0.40, dealt: false }
         spawnExplosion(g, e.x + (e.dir >= 0 ? e.w + SLAM_REACH * 0.5 : -SLAM_REACH * 0.5), e.y + e.h, ["#FF6600", "#FFAA00", "#FFFFFF"], 12, 3.5)
-        // Solo vibración de piso pequeña (no pantalla completa)
-        triggerShake(g, 2, 0.12)
+        // sin shake — ya no vibra nada después de cerrarse la arena
       }
 
       // ── 5. Tick del hitbox del slam ────────────────────────────────────
