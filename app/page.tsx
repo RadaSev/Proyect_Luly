@@ -249,7 +249,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.13"
+const GAME_VERSION = "0.2.14"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -2042,6 +2042,18 @@ function breakCrate(g: G, c: Crate) {
 //  TICKS
 // ══════════════════════════════════════════════════════════════
 function tickPlayer(g: G) {
+  // ── Freeze de movimiento: shop abierto O animación de entrega de Bolkha ──────
+  if (g.bolkhaShopOpen || g.bolkhaState === "giving") {
+    const k2 = g.keys
+    k2["a"] = false; k2["arrowleft"]  = false
+    k2["d"] = false; k2["arrowright"] = false
+    k2[" "] = false; k2["arrowup"] = false; k2["w"] = false
+    k2["shift"] = false
+    g.pl.vx = 0
+    g.pl.runMode = false
+    // Seguir aplicando física vertical (gravedad/colisión) para no flotar
+  }
+
   const k = g.keys, p = g.pl, now = performance.now()
   const STA_RED = 8, STA_DRAIN = 36, STA_RCH_WALK = 22, STA_RCH_IDLE = 40
   // STA_DRAIN=36: agota en ~2.8s corriendo en suelo (antes 17→5.9s demasiado lento)
@@ -8632,7 +8644,11 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
     return  // no procesar movimiento de jugador
   }
 
-  // ── Tienda Bolkha abierta ─────────────────────────────────────────
+  // ── Tienda Bolkha abierta O animación de entrega ─────────────────
+  if (g.bolkhaState === "giving") {
+    _gpBPrev = btn(GP.B)
+    return  // no procesar movimiento de jugador durante animación de entrega
+  }
   if (g.bolkhaShopOpen) {
     _gpStickNavCd = Math.max(0, _gpStickNavCd - 16)
     if (_gpStickNavCd <= 0) {
@@ -9005,6 +9021,9 @@ export default function ProyectoLuly() {
         if (k === "y" || k === "escape")     { g.showRealMap = false; return }
         return  // bloquear resto de teclas mientras el mapa real está abierto
       }
+
+      // ── Animación de entrega de Bolkha: bloquear todo movimiento ───────────
+      if (g.bolkhaState === "giving") return
 
       // ── TP menu abierto: interceptar ANTES de g.keys para que no muevan al player ──
       if (g.bolkhaShopOpen) {
@@ -10160,9 +10179,11 @@ export default function ProyectoLuly() {
                   const x = e.clientX - rect.left, y = e.clientY - rect.top
                   const dir = getDir(x, y)
                   if (!dir) return
-                  if (g.bolkhaShopOpen) {
-                    if (dir === "up")   g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1)
-                    if (dir === "down") g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1)
+                  if (g.bolkhaShopOpen || g.bolkhaState === "giving") {
+                    if (g.bolkhaShopOpen) {
+                      if (dir === "up")   g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1)
+                      if (dir === "down") g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1)
+                    }
                     return  // no mover jugador
                   }
                   if (g.tpMenu?.open) {
@@ -10178,7 +10199,7 @@ export default function ProyectoLuly() {
                   const x = e.clientX - rect.left, y = e.clientY - rect.top
                   const dir = getDir(x, y)
                   if (!dir) { releaseAll(); return }
-                  if (g.bolkhaShopOpen || g.tpMenu?.open) return
+                  if (g.bolkhaShopOpen || g.bolkhaState === "giving" || g.tpMenu?.open) return
                   applyDir(dir, false)
                 }}
                 onPointerUp={releaseAll}
@@ -10228,7 +10249,9 @@ export default function ProyectoLuly() {
             const ox = rawOx * scale, oy = rawOy * scale
             setJstickThumb({ x: ox, y: oy })
 
-            // ── Modo Shop Bolkha: joystick navega cursor, no mueve al personaje ──
+            // ── Modo Shop Bolkha / animación de entrega: bloquear movimiento ───
+            if (g.bolkhaState === "giving") return  // freeze durante animación
+
             if (g.bolkhaShopOpen) {
               const NAV_CD = 300, nowMs = performance.now()
               const vZone = Math.abs(oy) > DEAD ? (oy > 0 ? 1 : -1) : 0
