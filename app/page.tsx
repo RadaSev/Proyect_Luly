@@ -252,7 +252,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.16"
+const GAME_VERSION = "0.2.17"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -477,8 +477,9 @@ const BOLKHA_POS = {
   x: _VDX + Math.floor(RW * 0.55),   // interior de la casa, a la derecha de Rex sin tapar el cartel
   y: _VDY + RH - WT - BOLKHA_H,      // hitbox bottom = piso exacto
 }
-const BOLKHA_TALK_R  = 120
-const BOLKHA_CALLOUT_R = 210
+const BOLKHA_TALK_R     = 120
+const BOLKHA_CALLOUT_R  = 210
+const BOLKHA_DISCOVER_R = 180  // rango al que el jugador debe llegar para "descubrir" a Bolkha
 const BOLKHA_APPEAR_DUR = 2.0   // segundos del efecto de aparición
 // Precios en puntos (g.score) — la moneda que muestra el HUD (ícono croqueta)
 const BOLKHA_PRICE_HEART = 1000   // +1 corazón completo (+2 hp)
@@ -3238,8 +3239,15 @@ function tickBolkha(g: G) {
   // Solo aparece tras matar al P1 boss de W0 Y que Rex haya mencionado a Bolkha
   if (!isPart1BossDead(g, 0) || !g.bolkhaRexTold) return
 
+  // Distancia al jugador (necesaria también para el gate de descubrimiento)
+  const _bdx = p.x + BOLKHA_W / 2 - BOLKHA_POS.x
+  const _bdy = p.y + BOLKHA_H / 2 - BOLKHA_POS.y
+  const _bdist = Math.sqrt(_bdx * _bdx + _bdy * _bdy)
+
   if (g.bolkhaState === "hidden") {
-    // Primera vez que se detecta: iniciar aparición
+    // Solo aparece cuando el jugador camina hasta su posición (descubrimiento por proximidad)
+    if (_bdist > BOLKHA_DISCOVER_R) return
+    // El jugador llegó hasta Bolkha → iniciar animación de aparición
     g.bolkhaState = "appearing"
     g.bolkhaGivingTimer = BOLKHA_APPEAR_DUR
     if (!g.bolkhaAppearedOnce) {
@@ -3283,12 +3291,10 @@ function tickBolkha(g: G) {
     return
   }
 
-  // Distancia al jugador
-  const dx = p.x + BOLKHA_W / 2 - BOLKHA_POS.x
-  const dy = p.y + BOLKHA_H / 2 - BOLKHA_POS.y
-  const dist = Math.sqrt(dx * dx + dy * dy)
+  // Reusar la distancia calculada al inicio de la función
+  const dist = _bdist
   // Bolkha siempre mira hacia el jugador
-  g.bolkhaFacing = dx >= 0 ? 1 : -1
+  g.bolkhaFacing = _bdx >= 0 ? 1 : -1
 
   if (g.bolkhaShopOpen) {
     g.bolkhaState = "talking"
@@ -5394,18 +5400,27 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       "¡Vuelve y búscalo!",
       "¡No te vayas sin él! 🪄",
     ]]}
-  } else if (!g.bolkhaMetDialogSeen && g.bolkhaAppearedOnce &&
-      (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" ||
-       g.viejoDogState === "p2_warning" || g.viejoDogState === "baton_delivered" ||
-       g.viejoDogState === "ultra_hint" || g.viejoDogState === "ultra_done" ||
-       g.viejoDogState === "world2_ready")) {
-    // Una sola vez: Rex comenta que Bolkha ya apareció y la jugadora lo conoció
-    dlg = { headers: ["◈ YA LO CONOCISTE ◈"], colors: ["#88DDFF"], pages: [[
-      "Entonces ya conociste",
-      "a Bolkha. Es uno de",
-      "nuestros mejores aliados.",
-      "Vende de todo. Recuérdalo,",
-      "te será muy útil, Luly.",
+  } else if (g.bolkhaRexTold && !g.bolkhaAppearedOnce &&
+      (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")) {
+    // Recordatorio: Rex mencionó a Bolkha pero el jugador aún no lo ha descubierto
+    dlg = { headers: ["◈ ¡BÚSCALO! ◈"], colors: ["#88DDFF"], pages: [[
+      "Aún no descubriste",
+      "a Bolkha. Búscalo,",
+      "está ahí cerca del",
+      "cartel de mi casa.",
+      "¡Ve a buscarlo, Luly!",
+    ]]}
+  } else if (g.bolkhaRexTold && g.bolkhaAppearedOnce &&
+      (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")) {
+    // Confirmación permanente: ya encontró a Bolkha. Este mensaje se queda hasta que
+    // la progresión del juego lo reemplace (p2_warning / baton_delivered / etc.)
+    dlg = { headers: ["◈ ¡BIEN HECHO! ◈"], colors: ["#88DDFF"], pages: [[
+      "Bien, lo descubriste.",
+      "Es uno de nuestros",
+      "mejores aliados. Vende",
+      "de todo. Luego seguro",
+      "tendrás más cosas que",
+      "comprar. Ahora... sigue abajo.",
     ]]}
   } else if (g.viejoDogState === "reward_lives") {
     dlg = {
@@ -5556,18 +5571,18 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
 
   // ── Clave de estado para el typewriter ───────────────────────────────────
-  // Añadir "_bm" cuando se muestra el diálogo de intercepción "ya conociste a Bolkha"
-  // para evitar que herede el puntero de página del estado base y se salte sin mostrarse.
-  const _bolkhaMetIntercept = !g.bolkhaMetDialogSeen && g.bolkhaAppearedOnce &&
-    (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" ||
-     g.viejoDogState === "p2_warning"   || g.viejoDogState === "baton_delivered" ||
-     g.viejoDogState === "ultra_hint"   || g.viejoDogState === "ultra_done" ||
-     g.viejoDogState === "world2_ready")
+  // Sufijos para los diálogos de intercepción de Bolkha — evitan heredar el puntero
+  // de página del diálogo base (que ya fue leído) y mostrarse instantáneamente.
+  const _bolkhaInReward = g.bolkhaRexTold &&
+    (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")
+  const _bolkhaSuffix = _bolkhaInReward
+    ? (g.bolkhaAppearedOnce ? "_bm" : "_bs")   // _bm = bien descubierto · _bs = búscalo
+    : ""
   const dlgKey = g.viejoDogState
     + (g.rexBallFirstSeen ? "_s" : "")
     + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
     + (p2Dead_dlg ? "_p2d" : "")
-    + (_bolkhaMetIntercept ? "_bm" : "")
+    + _bolkhaSuffix
 
   // ── Re-entrada al rango: mostrar instantáneo si ya fue leído, sino reiniciar ──
   const nowInRange = dist < VIEJO_DOG_TALK_R
@@ -5648,21 +5663,15 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         g.rexIntroLeft = true
         saveGame(g)
       }
-      // ── Tarea 5: Rex mencionó a Bolkha (última página de reward) ───────────
+      // ── Tarea 5: Rex mencionó a Bolkha (última página de reward_lives/full) ─
+      // El sufijo _bs/_bm en dlgKey hace que esta página sólo dispare cuando el diálogo
+      // base (3 páginas de reward) está activo — el sufijo cambia la clave cuando hay
+      // intercepción, por lo que "reward_lives" sin sufijo = diálogo base todavía en curso.
       if (!g.bolkhaRexTold &&
-          (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")) {
+          (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full") &&
+          !_bolkhaInReward) {
+        // Solo se activa al leer la última página del diálogo BASE (con la página BOLKHA)
         g.bolkhaRexTold = true
-        saveGame(g)
-      }
-      // ── Tarea 7: jugadora ya leyó el diálogo "entonces ya lo conociste" ────
-      if (!g.bolkhaMetDialogSeen && g.bolkhaAppearedOnce &&
-          (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" ||
-           g.viejoDogState === "p2_warning" || g.viejoDogState === "baton_delivered" ||
-           g.viejoDogState === "ultra_hint" || g.viejoDogState === "ultra_done" ||
-           g.viejoDogState === "world2_ready")) {
-        // This fires when on the last page of the bolkha_met intercept dialog
-        // (the dialog is only shown when !bolkhaMetDialogSeen, see selection below)
-        g.bolkhaMetDialogSeen = true
         saveGame(g)
       }
     }
@@ -8192,22 +8201,14 @@ function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
   if (g.bossArenaPlats.length === 0) return
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
   const th = THEMES[curW]
+  // Dibuja exactamente igual que las plataformas traversables generales del mundo:
+  // cuerpo sólido en platC (color de plataforma del tema) + overlay de drawTraversableTile
   const drawArenaPlatform = (sx: number, sy: number, w: number, h: number, alpha: number) => {
     ctx.globalAlpha = alpha
-    // Cuerpo principal: usa colores de plataforma del tema (más visibles que drawTraversableTile solo)
-    ctx.fillStyle = th.platHi; ctx.fillRect(sx, sy, w, h)
-    // Borde superior brillante
-    ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.fillRect(sx, sy, w, 2)
-    // Borde inferior oscuro (sombra)
-    ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(sx, sy + h - 3, w, 3)
-    // Tinte de acento del mundo
-    ctx.fillStyle = th.accent + "28"; ctx.fillRect(sx, sy, w, h)
-    // Detalles de textura (gfx >= 1)
-    if (g.gfx >= 1) {
-      for (let bx = sx + 8; bx < sx + w - 4; bx += 18) {
-        ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.fillRect(bx, sy + 5, 3, h - 8)
-      }
-    }
+    // 1. Cuerpo sólido visible (platC = color base de plataforma del tema)
+    ctx.fillStyle = th.platC; ctx.fillRect(sx, sy, w, h)
+    // 2. Mismo overlay decorativo que usan las plataformas generales del juego
+    drawTraversableTile(ctx, sx, sy, w, h, curW, g.gfx, "p1")
     ctx.globalAlpha = 1
   }
   for (const mp of g.bossArenaPlats) {
