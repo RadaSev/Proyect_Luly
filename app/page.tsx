@@ -249,7 +249,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.12"
+const GAME_VERSION = "0.2.13"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -471,10 +471,10 @@ const BOLKHA_POS = {
 const BOLKHA_TALK_R  = 120
 const BOLKHA_CALLOUT_R = 210
 const BOLKHA_APPEAR_DUR = 2.0   // segundos del efecto de aparición
-// Precios en croquetas
-const BOLKHA_PRICE_HEART = 20   // +1 corazón completo (+2 hp)
-const BOLKHA_PRICE_BONES = 25   // +10 huesos de munición
-const BOLKHA_PRICE_TBALL = 40   // +3 pelotas de tenis
+// Precios en puntos (g.score) — la moneda que muestra el HUD (ícono croqueta)
+const BOLKHA_PRICE_HEART = 1000   // +1 corazón completo (+2 hp)
+const BOLKHA_PRICE_BONES = 1500   // +10 huesos de munición
+const BOLKHA_PRICE_TBALL = 2500   // +3 pelotas de tenis
 let _rexNameAlpha = 1.0                  // fade suave del nombre: 1=visible, 0=oculto
 let _rexDlgKey    = ""                   // clave de estado — cambio = reinicio de tipografía
 let _rexDlgMs     = 0                    // timestamp en que empezó la página actual
@@ -3264,7 +3264,7 @@ function tickBolkha(g: G) {
         g.pl.ammo < 15 ||
         (g.abilities.has("tball") && g.tballAmmo === 0)
       if (needsSomething) {
-        g.bolkhaTalkText = "Ahora sí te puedo vender.\nEntra y compra,\n¡quiero croquetas!"
+        g.bolkhaTalkText = "Ahora sí te puedo vender.\nEntra y compra,\n¡págame con tus puntos!"
         g.bolkhaTalkTimer = 4.5
       } else {
         g.bolkhaTalkText = "Luly, no puedo venderte nada,\ntienes de todo… aunque\npuedes entrar a ver qué vendo."
@@ -3304,8 +3304,8 @@ function bolkhaDoInteract(g: G) {
   ]
   const sel = bItems[cur2]
   if (sel && sel.canBuy) {
-    if (g.croquetas >= sel.price) {
-      g.croquetas -= sel.price
+    if (g.score >= sel.price) {
+      g.score -= sel.price
       sel.buy()
       g.bolkhaGivingItem = sel.givingItem
       g.bolkhaGivingTimer = 1.8
@@ -3316,7 +3316,7 @@ function bolkhaDoInteract(g: G) {
     } else {
       // No alcanza: feedback de error
       g.bolkhaAffordTimer = 1.5
-      g.bolkhaTalkText = `¡No tienes suficientes\ncroquetas! Necesitas ${sel.price},\ntú tienes ${g.croquetas}.`
+      g.bolkhaTalkText = `¡No tienes suficientes\npuntos! Necesitas ${sel.price},\ntú tienes ${g.score}.`
       g.bolkhaTalkTimer = 3.0
     }
   }
@@ -4831,7 +4831,7 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
 
   // Croquetas disponibles
   const croquetaSpr = ok2("hud_croqueta")
-  const cqTxt = `${g.croquetas} croquetas`
+  const cqTxt = `${g.score} pts`
   ctx.font = "bold 10px 'Courier New',monospace"
   const cqW2 = ctx.measureText(cqTxt).width
   const cqX2 = PNX + PNW / 2 - (cqW2 + (croquetaSpr ? 17 : 0)) / 2
@@ -4849,7 +4849,7 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
   items.forEach((item, idx) => {
     const iy = PNY + HEADER_H + idx * ITEM_H
     const selected = idx === cur
-    const canBuy  = item.canBuy && g.croquetas >= item.price
+    const canBuy  = item.canBuy && g.score >= item.price
     const isAffordError = selected && affordFlash
 
     // Divider
@@ -4946,10 +4946,21 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
     ctx.font = "9px 'Courier New',monospace"
     const descLW = Math.max(...descLines.map(l => ctx.measureText(l).width))
     const DBW = descLW + 22, DBH = descLines.length * 13 + 18
-    // Intentar poner a la izquierda del panel; si no cabe, a la derecha
-    let DBX = PNX - DBW - 12
-    let tailOnRight = true  // la cola está en el lado derecho del globo (apunta al panel)
-    if (DBX < 4) { DBX = PNX + PNW + 12; tailOnRight = false }
+    // El globo va al lado desde donde el jugador se acercó:
+    //   bolkhaFacing=1  → jugador viene de la derecha → globo va a la DERECHA del panel
+    //   bolkhaFacing=-1 → jugador viene de la izquierda → globo va a la IZQUIERDA del panel
+    // Con fallback si no hay espacio suficiente en el lado preferido.
+    const preferRight = g.bolkhaFacing === 1
+    let DBX: number, tailOnRight: boolean
+    const rightX = PNX + PNW + 12
+    const leftX  = PNX - DBW - 12
+    if (preferRight) {
+      if (rightX + DBW + 4 <= CW) { DBX = rightX; tailOnRight = false }
+      else                         { DBX = leftX;  tailOnRight = true  }
+    } else {
+      if (leftX >= 4)              { DBX = leftX;  tailOnRight = true  }
+      else                         { DBX = rightX; tailOnRight = false }
+    }
     // Centrar verticalmente respecto al ítem seleccionado
     const selIY = PNY + HEADER_H + cur * ITEM_H
     let DBY = selIY + Math.round((ITEM_H - DBH) / 2)
