@@ -252,7 +252,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.15"
+const GAME_VERSION = "0.2.16"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -1820,8 +1820,9 @@ function dmgEnemy(g: G, e: Enemy, dmg: number) {
     e.hurtTimer = 0.32; e.ef = 0; e.eft = 0
     return
   }
-  // Si el enemigo está en el aire (cayendo), entrar en fase deathFalling primero
-  const isAirborne = (e as any).onGround !== true && e.vy > 0.8
+  // Si el enemigo está en el aire (no en suelo), caer antes de morir
+  // Bosses mueren directamente (tienen animación de muerte especial)
+  const isAirborne = !e.boss && (e as any).onGround !== true
   e.deathFalling = isAirborne
   e.dying = !isAirborne
   e.deathTimer = 0; e.deathDir = e.dir; e.ef = 0; e.eft = 0
@@ -5265,8 +5266,8 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
   if (g.viejoDogState === "intro") {
     dlg = {
-      headers: ["◈ ¡BIENVENIDA, LULY! ◈", "◈ MI PROBLEMA ◈", "◈ TU MISIÓN ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`],
-      colors:  ["#E8D8C0",                "#FFCC88",         "#FFDD44",        "#FFCC66"],
+      headers: ["◈ ¡BIENVENIDA, LULY! ◈", "◈ MI PROBLEMA ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`],
+      colors:  ["#E8D8C0",                "#FFCC88",          "#FFCC66"],
       pages: [
         [
           "Hola, soy Rex. Veo que",
@@ -5283,14 +5284,6 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           "primera parte, pero algún",
           "perro malo tiene la otra.",
           "¡Necesito que me ayudes! 🗝",
-        ],
-        [
-          "Ve al piso de arriba y",
-          "derrota a esos perros.",
-          "Uno de ellos lleva la",
-          "otra mitad de mi llave.",
-          "¡Derrótalo y tráemela,",
-          "Luly! 🐾",
         ],
         [
           "Recuerda: alguno de ellos",
@@ -5563,10 +5556,18 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
 
   // ── Clave de estado para el typewriter ───────────────────────────────────
+  // Añadir "_bm" cuando se muestra el diálogo de intercepción "ya conociste a Bolkha"
+  // para evitar que herede el puntero de página del estado base y se salte sin mostrarse.
+  const _bolkhaMetIntercept = !g.bolkhaMetDialogSeen && g.bolkhaAppearedOnce &&
+    (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" ||
+     g.viejoDogState === "p2_warning"   || g.viejoDogState === "baton_delivered" ||
+     g.viejoDogState === "ultra_hint"   || g.viejoDogState === "ultra_done" ||
+     g.viejoDogState === "world2_ready")
   const dlgKey = g.viejoDogState
     + (g.rexBallFirstSeen ? "_s" : "")
     + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
     + (p2Dead_dlg ? "_p2d" : "")
+    + (_bolkhaMetIntercept ? "_bm" : "")
 
   // ── Re-entrada al rango: mostrar instantáneo si ya fue leído, sino reiniciar ──
   const nowInRange = dist < VIEJO_DOG_TALK_R
@@ -8190,20 +8191,36 @@ function drawToolMounds(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
   if (g.bossArenaPlats.length === 0) return
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
-  // El boss P1 siempre está en la Part 1 del mundo → zona "p1"
+  const th = THEMES[curW]
+  const drawArenaPlatform = (sx: number, sy: number, w: number, h: number, alpha: number) => {
+    ctx.globalAlpha = alpha
+    // Cuerpo principal: usa colores de plataforma del tema (más visibles que drawTraversableTile solo)
+    ctx.fillStyle = th.platHi; ctx.fillRect(sx, sy, w, h)
+    // Borde superior brillante
+    ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.fillRect(sx, sy, w, 2)
+    // Borde inferior oscuro (sombra)
+    ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(sx, sy + h - 3, w, 3)
+    // Tinte de acento del mundo
+    ctx.fillStyle = th.accent + "28"; ctx.fillRect(sx, sy, w, h)
+    // Detalles de textura (gfx >= 1)
+    if (g.gfx >= 1) {
+      for (let bx = sx + 8; bx < sx + w - 4; bx += 18) {
+        ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.fillRect(bx, sy + 5, 3, h - 8)
+      }
+    }
+    ctx.globalAlpha = 1
+  }
   for (const mp of g.bossArenaPlats) {
     const sx = mp.x - g.cx, sy = mp.y - g.cy
     if (!mp.visible) {
-      // Destello tenue los últimos 0.6s antes de reaparecer — aviso visual
+      // Destello los últimos 0.6s antes de reaparecer — aviso visual
       if (mp.hiddenTimer < 0.6) {
-        ctx.globalAlpha = ((0.6 - mp.hiddenTimer) / 0.6) * 0.4
-        drawTraversableTile(ctx, sx, sy, mp.w, mp.h, curW, g.gfx, "p1")
-        ctx.globalAlpha = 1
+        const fadeFrac = (0.6 - mp.hiddenTimer) / 0.6
+        drawArenaPlatform(sx, sy, mp.w, mp.h, fadeFrac * 0.45)
       }
       continue
     }
-    // Plataforma visible: usa el sprite de plataforma atravesable del mundo
-    drawTraversableTile(ctx, sx, sy, mp.w, mp.h, curW, g.gfx, "p1")
+    drawArenaPlatform(sx, sy, mp.w, mp.h, 1)
   }
 }
 
