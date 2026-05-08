@@ -81,7 +81,7 @@ type Player = {
 
 type Enemy = {
   id: string; x: number; originalId: string; y: number; w: number; h: number; vx: number; vy: number; hp: number; mhp: number; dir: number; p0: number; p1: number; spd: number; cd: number; ls: number; sa: number; active: boolean; boss: boolean; ef: number; eft: number; world: number; state: "patrol" | "guard" | "chase"; alert: boolean; alertT: number; guardX: number; idleT: number; jumpCd: number;
-  dying: boolean; deathTimer: number; deathDir: number
+  dying: boolean; deathTimer: number; deathDir: number; deathFalling: boolean
   hurtTimer: number
   isMoving: boolean
   alertDelay: number
@@ -193,6 +193,9 @@ type G = {
   bolkhaGreetedThisVisit: boolean  // ya saludó en esta aproximación
   bolkhaAffordTimer: number        // flash "sin croquetas" al intentar comprar sin fondos
   bolkhaShopDescCursor: number     // cursor del último ítem cuya desc se mostró
+  bolkhaRexTold: boolean           // Rex mencionó a Bolkha en su diálogo → puede aparecer
+  bolkhaMetDialogSeen: boolean     // jugadora ya vio el diálogo "entonces ya lo conociste..."
+  rexKeyAnimTimer: number          // segundos restantes de animación pre-explosión al entregar llave
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -249,7 +252,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.14"
+const GAME_VERSION = "0.2.15"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -273,6 +276,9 @@ interface LulySave {
   ultraBossRexSeen?: boolean
   croquetas?: number
   bolkhaAppearedOnce?: boolean
+  bolkhaRexTold?: boolean
+  bolkhaMetDialogSeen?: boolean
+  rexKeyAnimTimer?: number
 }
 
 function saveGame(g: G): void {
@@ -299,6 +305,9 @@ function saveGame(g: G): void {
       ultraBossRexSeen: g.ultraBossRexSeen,
       croquetas: g.croquetas,
       bolkhaAppearedOnce: g.bolkhaAppearedOnce,
+      bolkhaRexTold: g.bolkhaRexTold,
+      bolkhaMetDialogSeen: g.bolkhaMetDialogSeen,
+      rexKeyAnimTimer: g.rexKeyAnimTimer,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -1417,7 +1426,7 @@ function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         active: true, boss, ef: 0, eft: 0, world: w,
         state: "patrol", alert: false, alertT: 0, guardX: boss ? (x0 + Math.floor(RW / 2) - Math.floor(eW / 2)) : -1,
         idleT: Math.floor(rand() * 500), jumpCd: 0,
-        dying: false, deathTimer: 0, deathDir: 1,
+        dying: false, deathTimer: 0, deathDir: 1, deathFalling: false,
         hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1,
         ls2: 0, chainHit: null,
         spinTimer: 0, stunTimer: 0, spinHitMound: false,
@@ -1532,6 +1541,9 @@ function mkG_lazy(): G {
     bolkhaGreetedThisVisit: false,
     bolkhaAffordTimer: 0,
     bolkhaShopDescCursor: -1,
+    bolkhaRexTold: false,
+    bolkhaMetDialogSeen: false,
+    rexKeyAnimTimer: 0,
   } as G
 }
 
@@ -1801,24 +1813,22 @@ function dmgPlayer(g: G, dmg: number) {
 }
 
 function dmgEnemy(g: G, e: Enemy, dmg: number) {
-  if (e.dying) return
+  if (e.dying || e.deathFalling) return
   const finalDmg = g.ohko ? e.hp : dmg
   e.hp -= finalDmg
   if (e.hp > 0) {
     e.hurtTimer = 0.32; e.ef = 0; e.eft = 0
     return
   }
-  e.dying = true; e.deathTimer = 0; e.deathDir = e.dir; e.ef = 0; e.eft = 0
+  // Si el enemigo está en el aire (cayendo), entrar en fase deathFalling primero
+  const isAirborne = (e as any).onGround !== true && e.vy > 0.8
+  e.deathFalling = isAirborne
+  e.dying = !isAirborne
+  e.deathTimer = 0; e.deathDir = e.dir; e.ef = 0; e.eft = 0
   e.vx = 0; e.alert = false; e.sa = 0; e.chainHit = null
 
-  // FIX: extraer el ID spawn original del originalId antes de registrar
-  // El originalId tiene formato "w_c_r_i" o puede haber sido corrompido.
-  // Normalizar: tomar solo los primeros 4 segmentos del originalId.
+  // Normalizar el ID spawn original (w_c_r_i = exactamente 4 segmentos)
   const parts = e.originalId.split("_")
-  const normalizedOriginal = parts.slice(0, 4).join("_")  // "w_c_r_i"
-  console.log("murió:", e.id, "| original:", e.originalId, "| world:", e.world)
-  e.dying = true; e.deathTimer = 0; e.deathDir = e.dir; e.ef = 0; e.eft = 0
-  e.vx = 0; e.alert = false; e.sa = 0; e.chainHit = null
 
   // Siempre registrar el ID spawn original limpio (w_c_r_i = exactamente 4 segmentos)
   const origParts = e.originalId.split("_")
@@ -2262,6 +2272,21 @@ function tickEnemies(g: G, now: number) {
   for (const e of g.enemies) {
     if (!e.active) continue
     if (g.noEnemies && !e.boss) continue  // noEnemies: solo tickean bosses
+
+    // ── Caída pre-muerte (murió en el aire → toca suelo primero) ────
+    if (e.deathFalling) {
+      e.vy += e.vy < 0 ? GUP : GDN; if (e.vy > GMAX) e.vy = GMAX
+      const ehx = e.x + EN_HBX, ehy = e.y + EN_HBT, ehw = e.w - 2 * EN_HBX, ehh = e.h - EN_HBT
+      const res = resolve(ehx, ehy, ehw, ehh, 0, e.vy, g)
+      e.x = res.x - EN_HBX; e.y = res.y - EN_HBT; e.vy = res.vy
+      if (res.og) {
+        // Tocó el suelo → pequeño impacto y empezar animación de muerte real
+        spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#CC4400", "#FF6600", "#FFAA44", "#FFFFFF"], 7, 2.5, false)
+        e.deathFalling = false
+        e.dying = true; e.deathTimer = 0
+      }
+      continue
+    }
 
     // ── Animación de muerte ──────────────────────────────────────────
     if (e.dying) {
@@ -3209,8 +3234,8 @@ function countP1KillsW0(dead: Set<string>): number {
 
 function tickBolkha(g: G) {
   const p = g.pl
-  // Solo aparece tras matar al P1 boss de W0
-  if (!isPart1BossDead(g, 0)) return
+  // Solo aparece tras matar al P1 boss de W0 Y que Rex haya mencionado a Bolkha
+  if (!isPart1BossDead(g, 0) || !g.bolkhaRexTold) return
 
   if (g.bolkhaState === "hidden") {
     // Primera vez que se detecta: iniciar aparición
@@ -3247,6 +3272,9 @@ function tickBolkha(g: G) {
   if (g.bolkhaState === "giving") {
     g.bolkhaGivingTimer = Math.max(0, g.bolkhaGivingTimer - 1 / 60)
     if (g.bolkhaGivingTimer <= 0) {
+      // Efecto de entrega: pequeño destello de partículas
+      spawnExplosion(g, BOLKHA_POS.x, BOLKHA_POS.y - 20,
+        ["#AAFFEE", "#88DDFF", "#FFD700", "#FFFFFF", "#AAFFAA"], 10, 3.0, false)
       g.bolkhaGivingItem = null
       g.bolkhaState = "shop"
       g.bolkhaShopOpen = true
@@ -3343,6 +3371,19 @@ function tickViejoDog(g: G) {
   const dy = p.y + PH / 2 - VIEJO_DOG_POS.y
   const dist = Math.sqrt(dx * dx + dy * dy)
 
+  // ── Temporizador de animación llave (corre siempre, dentro o fuera del rango) ─
+  if (g.rexKeyAnimTimer > 0) {
+    g.rexKeyAnimTimer = Math.max(0, g.rexKeyAnimTimer - STEP)
+    if (g.rexKeyAnimTimer <= 0 && g.viejoDogState === "key_held" && !g.tballKeyHeld) {
+      // Animación terminada → explotar y abrir la jaula
+      g.viejoDogState = "cage_opened"
+      spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FFD700", "#FFA500", "#FFFFFF", "#FFEE88"], 28, 5, true)
+      triggerShake(g, 9, 0.55)
+      g.abilityNotif = { text: "¡Rex tiene la otra mitad! La jaula de su pelota está abierta", timer: 6.0 }
+      saveGame(g)
+    }
+  }
+
   // Detectar cuando el jugador sale del rango de diálogo
   if (dist > VIEJO_DOG_TALK_R) {
     if (g.viejoDogState === "intro") g.rexIntroLeft = true
@@ -3436,14 +3477,11 @@ function tickViejoDog(g: G) {
     triggerShake(g, 7, 0.4)
     g.abilityNotif = { text: "¡PELOTA MEJORADA! +2 balas • +4 rebotes  🎾", timer: 6.0 }
     saveGame(g)
-  } else if (g.viejoDogState === "key_held" && g.tballKeyHeld) {
+  } else if (g.viejoDogState === "key_held" && g.tballKeyHeld && g.rexKeyAnimTimer === 0) {
     // El jugador lleva la media llave y se acerca a Rex
-    // Rex tiene la otra mitad → juntas abren la jaula
-    g.viejoDogState = "cage_opened"
+    // Consumir la llave y empezar animación rex_mitad_llave (2 s) antes de explotar
     g.tballKeyHeld = false
-    spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FFD700", "#FFA500", "#FFFFFF", "#FFEE88"], 28, 5, true)
-    triggerShake(g, 9, 0.55)
-    g.abilityNotif = { text: "¡Rex tiene la otra mitad! La jaula de su pelota está abierta", timer: 6.0 }
+    g.rexKeyAnimTimer = 2.0   // drawViejoDog mostrará rex_mitad_llave durante este tiempo
     saveGame(g)
   }
 }
@@ -3763,6 +3801,9 @@ function applyLoad(g: G, s: LulySave): void {
   g.ultraBossRexSeen       = s.ultraBossRexSeen        ?? false
   g.croquetas              = s.croquetas               ?? 0
   g.bolkhaAppearedOnce     = s.bolkhaAppearedOnce      ?? false
+  g.bolkhaRexTold          = s.bolkhaRexTold           ?? false
+  g.bolkhaMetDialogSeen    = s.bolkhaMetDialogSeen     ?? false
+  g.rexKeyAnimTimer        = s.rexKeyAnimTimer         ?? 0
   g.rexPhoneNotif          = null
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
@@ -5360,6 +5401,19 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       "¡Vuelve y búscalo!",
       "¡No te vayas sin él! 🪄",
     ]]}
+  } else if (!g.bolkhaMetDialogSeen && g.bolkhaAppearedOnce &&
+      (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" ||
+       g.viejoDogState === "p2_warning" || g.viejoDogState === "baton_delivered" ||
+       g.viejoDogState === "ultra_hint" || g.viejoDogState === "ultra_done" ||
+       g.viejoDogState === "world2_ready")) {
+    // Una sola vez: Rex comenta que Bolkha ya apareció y la jugadora lo conoció
+    dlg = { headers: ["◈ YA LO CONOCISTE ◈"], colors: ["#88DDFF"], pages: [[
+      "Entonces ya conociste",
+      "a Bolkha. Es uno de",
+      "nuestros mejores aliados.",
+      "Vende de todo. Recuérdalo,",
+      "te será muy útil, Luly.",
+    ]]}
   } else if (g.viejoDogState === "reward_lives") {
     dlg = {
       headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈"],
@@ -5586,6 +5640,28 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
         g.ultraBossRexSeen = true
         triggerShake(g, 18, 2.2)
         g.abilityNotif = { text: "¡La sala del Torturado ha sido desbloqueada! ⚡", timer: 5.0 }
+        saveGame(g)
+      }
+      // ── Tarea 2: intro leída completa → activar quest sin salir del rango ──
+      if (g.viejoDogState === "intro" && !g.rexIntroLeft) {
+        g.rexIntroLeft = true
+        saveGame(g)
+      }
+      // ── Tarea 5: Rex mencionó a Bolkha (última página de reward) ───────────
+      if (!g.bolkhaRexTold &&
+          (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full")) {
+        g.bolkhaRexTold = true
+        saveGame(g)
+      }
+      // ── Tarea 7: jugadora ya leyó el diálogo "entonces ya lo conociste" ────
+      if (!g.bolkhaMetDialogSeen && g.bolkhaAppearedOnce &&
+          (g.viejoDogState === "reward_lives" || g.viejoDogState === "reward_full" ||
+           g.viejoDogState === "p2_warning" || g.viejoDogState === "baton_delivered" ||
+           g.viejoDogState === "ultra_hint" || g.viejoDogState === "ultra_done" ||
+           g.viejoDogState === "world2_ready")) {
+        // This fires when on the last page of the bolkha_met intercept dialog
+        // (the dialog is only shown when !bolkhaMetDialogSeen, see selection below)
+        g.bolkhaMetDialogSeen = true
         saveGame(g)
       }
     }
@@ -6400,7 +6476,7 @@ function isW1P2Boss(e: Enemy): boolean {
 //   3. Variante de la dirección opuesta (si solo existe un lado)
 // Los jefes usan el nuevo sistema: boss_w{N}_{fs|ss|fb}_{anim}_{right|left}
 function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
-  const dir = (e.dying ? e.deathDir : e.dir) >= 0 ? "right" : "left"
+  const dir = (e.dying || e.deathFalling ? e.deathDir : e.dir) >= 0 ? "right" : "left"
   const opp = dir === "right" ? "left" : "right"
   const ok  = (k: string) => { const s = sprs[k]; return s?.complete && s.naturalWidth > 0 ? s : null }
 
@@ -6434,6 +6510,9 @@ function resolveEnemySpr(e: Enemy, sprs: SprBank): HTMLImageElement | null {
   let keys: string[]
   if (e.dying) {
     keys = [`${pk}death_${dir}`, `${pk}death_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
+  } else if (e.deathFalling) {
+    // Cayendo tras recibir golpe mortal — usar hurt como transición
+    keys = [`${pk}hurt_${dir}`, `${pk}hurt_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
   } else if (e.hurtTimer > 0) {
     keys = [`${pk}hurt_${dir}`, `${pk}hurt_${opp}`, `${pk}idle_${dir}`, `${pk}idle`]
   } else if (e.sa > 0) {
@@ -7213,7 +7292,7 @@ function _drawMapWorldGrid(
     const tbPk=g.pickups.find(pk=>pk.id==="tball_w0"), tbc=TBALL_SECRET_C, tbr2=TBALL_SECRET_R
     const tbRx=gx+tbc*(rW+gap), tbRy=gy+tbr2*(rH+gap)
     const questRevealed=g.viejoDogState==="cage_opened"||g.viejoDogState==="quest_done"||g.viejoDogState==="surprised"
-    const cageHinted=g.viejoDogState==="key_dropped"||g.viejoDogState==="key_held"
+    const cageHinted=false  // no revelar ubicación hasta que Rex entregue la otra mitad
     if (!tbPk?.active) {
       // Pelota ya recogida
       ctx.fillStyle="#556655"; ctx.font="9px 'Courier New',monospace"; ctx.textAlign="center"; ctx.fillText("🎾✓",tbRx+rW/2,tbRy+rH/2+4); ctx.textAlign="left"
@@ -8728,9 +8807,10 @@ export default function ProyectoLuly() {
   // Diferir la lectura de localStorage al cliente para evitar hydration mismatch
   const [hasSave, setHasSave] = useState(false)
   const [saveChecked, setSaveChecked] = useState(false)  // true tras primer check de localStorage
-  useEffect(() => { setHasSave(loadSaveData() !== null); setSaveChecked(true) }, [])
   // "start" = menú inicio  |  "playing" = partida activa
   const [screen, setScreen] = useState<"start" | "playing">("start")
+  // Recheck localStorage whenever returning to start screen (catches newly-saved games)
+  useEffect(() => { setHasSave(loadSaveData() !== null); setSaveChecked(true) }, [screen])
   const gameActiveRef = useRef(false)
   // ── UI adicional ────────────────────────────────────────────────
   const [menuSel, setMenuSel] = useState(0)          // ítem seleccionado en menú inicio
