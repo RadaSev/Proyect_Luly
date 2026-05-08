@@ -458,9 +458,12 @@ const VIEJO_DOG_TALK_R = 115              // radio para diálogo automático
 const VIEJO_DOG_CALLOUT_R = 230          // radio para el "¡Psst!"
 // ── Bolkha the Merchant ──
 const BOLKHA_W = 48, BOLKHA_H = 64
+// Render dimensions (idle: frame 223×270, content 215×256, padB=7 → content_bot_frac=0.9741)
+const BOLKHA_RENDER_W = 68, BOLKHA_RENDER_H = 82
+const BOLKHA_FEET_OFF = Math.round(BOLKHA_RENDER_H * 0.9741)  // = 80 px from render top to feet
 const BOLKHA_POS = {
-  x: _VDX + Math.floor(RW * 0.72),
-  y: _VDY + RH - WT - BOLKHA_H - 4,
+  x: _VDX + Math.floor(RW * 0.55),   // interior de la casa, a la derecha de Rex sin tapar el cartel
+  y: _VDY + RH - WT - BOLKHA_H,      // hitbox bottom = piso exacto
 }
 const BOLKHA_TALK_R  = 120
 const BOLKHA_CALLOUT_R = 210
@@ -3237,7 +3240,7 @@ function tickBolkha(g: G) {
   const dy = p.y + BOLKHA_H / 2 - BOLKHA_POS.y
   const dist = Math.sqrt(dx * dx + dy * dy)
   // Bolkha siempre mira hacia el jugador
-  g.bolkhaFacing = dx >= 0 ? -1 : 1
+  g.bolkhaFacing = dx >= 0 ? 1 : -1
 
   if (g.bolkhaShopOpen) {
     g.bolkhaState = "talking"
@@ -4574,24 +4577,27 @@ function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   // Renderizar sprite (5×5, 25 frames)
   const sx = Math.round(BOLKHA_POS.x - g.cx)
   const sy = Math.round(BOLKHA_POS.y - g.cy)
-  const BW2 = 80, BH2 = 96  // tamaño render
+  // floorY = sy + BOLKHA_H; drawY anchors feet (BOLKHA_FEET_OFF from render top) to floor
+  const floorY = sy + BOLKHA_H
+  const drawX = sx + Math.round((BOLKHA_W - BOLKHA_RENDER_W) / 2)
+  const drawY = floorY - BOLKHA_FEET_OFF
 
   if (spr) {
     const fw = spr.naturalWidth / 5, fh = spr.naturalHeight / 5
     const col = g.bolkhaEf % 5, row2 = Math.floor(g.bolkhaEf / 5)
-    ctx.drawImage(spr, col * fw, row2 * fh, fw, fh, sx - (BW2 - BOLKHA_W) / 2, sy - (BH2 - BOLKHA_H), BW2, BH2)
+    ctx.drawImage(spr, col * fw, row2 * fh, fw, fh, drawX, drawY, BOLKHA_RENDER_W, BOLKHA_RENDER_H)
   } else {
     // Fallback: rectángulo azul
     ctx.fillStyle = "#00AACC"
     ctx.fillRect(sx, sy, BOLKHA_W, BOLKHA_H)
   }
 
-  // ── Sombra ──────────────────────────────────────────────────────────────────
+  // ── Sombra (al nivel del piso) ───────────────────────────────────────────────
   ctx.save()
   ctx.globalAlpha = 0.22
   ctx.fillStyle = "#000"
   ctx.beginPath()
-  ctx.ellipse(sx + BOLKHA_W / 2, sy + BOLKHA_H + 2, BOLKHA_W * 0.42, 5, 0, 0, Math.PI * 2)
+  ctx.ellipse(sx + BOLKHA_W / 2, floorY, BOLKHA_W * 0.42, 5, 0, 0, Math.PI * 2)
   ctx.fill()
   ctx.restore()
 
@@ -4600,10 +4606,13 @@ function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const dy2 = g.pl.y + 36 - BOLKHA_POS.y
   const dist = Math.sqrt(dx2 * dx2 + dy2 * dy2)
 
+  // sprTopY = drawY (top of rendered sprite)
+  const sprTopY = drawY
+
   if (!g.bolkhaShopOpen && g.bolkhaState !== "giving") {
     if (dist < BOLKHA_CALLOUT_R) {
       const bx2 = sx + BOLKHA_W / 2
-      const bubY = sy - (BH2 - BOLKHA_H) - 12
+      const bubY = sprTopY - 12
       ctx.save()
       const alpha = Math.min(1, (BOLKHA_CALLOUT_R - dist) / 60)
       ctx.globalAlpha = alpha
@@ -4630,7 +4639,7 @@ function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   // ── Burbuja de diálogo (post-compra) ────────────────────────────────────────
   if (g.bolkhaTalkTimer > 0 && g.bolkhaTalkText) {
     const bx2 = sx + BOLKHA_W / 2
-    const bubY2 = sy - (BH2 - BOLKHA_H) - 36
+    const bubY2 = sprTopY - 36
     ctx.save()
     ctx.globalAlpha = Math.min(1, g.bolkhaTalkTimer / 0.5)
     ctx.font = "9px 'Courier New',monospace"
@@ -4648,13 +4657,13 @@ function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ctx.restore()
   }
 
-  // ── Shop menu overlay ────────────────────────────────────────────────────────
+  // ── Shop: panel flotante (sin oscurecer pantalla) ────────────────────────────
   if (g.bolkhaShopOpen) {
-    drawBolkhaShop(ctx, g, sprs)
+    drawBolkhaShop(ctx, g, sprs, sx, sprTopY)
   }
 }
 
-function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
+function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx: number, bsprTopY: number) {
   const CW = ctx.canvas.width, CH = ctx.canvas.height
   const ok2  = (k: string) => { const s = sprs[k]; return s?.complete && s.naturalWidth > 0 ? s : null }
 
@@ -4698,134 +4707,134 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     },
   ]
 
-  // ── Fondo semi-transparente full-screen ──────────────────────────────────
-  ctx.fillStyle = "rgba(0,0,0,0.62)"
-  ctx.fillRect(0, 0, CW, CH)
-
-  // ── Panel central ─────────────────────────────────────────────────────────
-  const PNW = 340, ITEM_H = 62, HEADER_H = 64, FOOTER_H = 44
+  // ── Panel flotante anclado sobre Bolkha (sin oscurecer la pantalla) ───────
+  const PNW = 230, ITEM_H = 54, HEADER_H = 52, FOOTER_H = 28
   const PNH = HEADER_H + items.length * ITEM_H + FOOTER_H
-  const PNX = Math.floor((CW - PNW) / 2)
-  const PNY = Math.floor((CH - PNH) / 2)
+
+  // Anclar: bottom del panel = 12px sobre el sprite top de Bolkha
+  // Left del panel: centrado horizontalmente respecto al sprite
+  const bCenterX = bsx + BOLKHA_W / 2
+  let PNX = Math.round(bCenterX - PNW / 2)
+  let PNY = Math.round(bsprTopY - PNH - 12)
+  // Clamp dentro del canvas con margen de 6px
+  PNX = Math.max(6, Math.min(CW - PNW - 6, PNX))
+  PNY = Math.max(6, Math.min(CH - PNH - 6, PNY))
+
+  // ── Triángulo apuntador al sprite ─────────────────────────────────────────
+  const tipX = Math.round(bCenterX)
+  const tipY = Math.round(bsprTopY - 4)
+  const tailY = PNY + PNH
+  if (tipY > tailY) {
+    ctx.fillStyle = "rgba(4,16,22,0.97)"
+    ctx.beginPath()
+    ctx.moveTo(tipX - 6, tailY); ctx.lineTo(tipX + 6, tailY); ctx.lineTo(tipX, tipY)
+    ctx.closePath(); ctx.fill()
+  }
 
   // Panel background
   ctx.fillStyle = "rgba(4,16,22,0.97)"
-  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, PNH, 12); ctx.fill()
+  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, PNH, 10); ctx.fill()
   ctx.strokeStyle = "#00BBAA"
-  ctx.lineWidth = 2
-  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, PNH, 12); ctx.stroke()
-
-  // Panel inner glow line
+  ctx.lineWidth = 1.5
+  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, PNH, 10); ctx.stroke()
+  // Inner glow line
   ctx.strokeStyle = "#00DDCC22"
   ctx.lineWidth = 1
-  ctx.beginPath(); ctx.roundRect(PNX + 3, PNY + 3, PNW - 6, PNH - 6, 10); ctx.stroke()
+  ctx.beginPath(); ctx.roundRect(PNX + 3, PNY + 3, PNW - 6, PNH - 6, 8); ctx.stroke()
 
   // ── Header ───────────────────────────────────────────────────────────────
-  ctx.fillStyle = "#00BBAA"
-  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, HEADER_H, [12, 12, 0, 0]); ctx.fill()
+  ctx.fillStyle = "#007766"
+  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, HEADER_H, [10, 10, 0, 0]); ctx.fill()
 
-  ctx.font = "bold 16px 'Courier New',monospace"
+  ctx.font = "bold 13px 'Courier New',monospace"
   ctx.textAlign = "center"
   ctx.fillStyle = "#EEFFEE"
-  ctx.fillText("◈  BOLKHA  ◈", PNX + PNW / 2, PNY + 22)
-  ctx.font = "9px 'Courier New',monospace"
+  ctx.fillText("◈ BOLKHA ◈", PNX + PNW / 2, PNY + 17)
+  ctx.font = "8px 'Courier New',monospace"
   ctx.fillStyle = "#AAFFEE"
-  ctx.fillText("— El Mercader Insecto —", PNX + PNW / 2, PNY + 37)
+  ctx.fillText("El Mercader Insecto", PNX + PNW / 2, PNY + 30)
 
   // Croquetas disponibles
   const croquetaSpr = ok2("hud_croqueta")
   const cqTxt = `${g.croquetas} croquetas`
-  ctx.font = "bold 12px 'Courier New',monospace"
-  const cqW = ctx.measureText(cqTxt).width
-  const cqX = PNX + PNW / 2 - (cqW + (croquetaSpr ? 20 : 0)) / 2
-  if (croquetaSpr) ctx.drawImage(croquetaSpr, cqX - 2, PNY + 46, 16, 16)
+  ctx.font = "bold 10px 'Courier New',monospace"
+  const cqW2 = ctx.measureText(cqTxt).width
+  const cqX2 = PNX + PNW / 2 - (cqW2 + (croquetaSpr ? 17 : 0)) / 2
+  if (croquetaSpr) ctx.drawImage(croquetaSpr, cqX2 - 1, PNY + 37, 13, 13)
   ctx.fillStyle = "#FFE066"
   ctx.textAlign = "left"
-  ctx.fillText(cqTxt, cqX + (croquetaSpr ? 18 : 0), PNY + 58)
+  ctx.fillText(cqTxt, cqX2 + (croquetaSpr ? 15 : 0), PNY + 48)
 
   // ── Items ─────────────────────────────────────────────────────────────────
   const cur = Math.max(0, Math.min(g.bolkhaShopCursor, items.length - 1))
   g.bolkhaShopCursor = cur
+  const croquetaSpr2 = croquetaSpr
 
   items.forEach((item, idx) => {
     const iy = PNY + HEADER_H + idx * ITEM_H
     const selected = idx === cur
     const canBuy  = item.canBuy && g.croquetas >= item.price
 
-    // Row background
-    if (selected) {
-      ctx.fillStyle = "rgba(0,180,160,0.18)"
-      ctx.fillRect(PNX + 2, iy + 2, PNW - 4, ITEM_H - 4)
-      ctx.strokeStyle = "#00DDCC"
-      ctx.lineWidth = 1.5
-      ctx.strokeRect(PNX + 4, iy + 4, PNW - 8, ITEM_H - 8)
-    }
-
     // Divider
     if (idx > 0) {
-      ctx.strokeStyle = "#00BBAA22"
-      ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(PNX + 12, iy); ctx.lineTo(PNX + PNW - 12, iy); ctx.stroke()
+      ctx.strokeStyle = "#00BBAA22"; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(PNX + 10, iy); ctx.lineTo(PNX + PNW - 10, iy); ctx.stroke()
+    }
+
+    // Row highlight
+    if (selected) {
+      ctx.fillStyle = "rgba(0,180,160,0.15)"
+      ctx.fillRect(PNX + 2, iy + 1, PNW - 4, ITEM_H - 2)
+      ctx.strokeStyle = "#00DDCC88"; ctx.lineWidth = 1
+      ctx.strokeRect(PNX + 3, iy + 2, PNW - 6, ITEM_H - 4)
+    }
+
+    // Selector arrow
+    if (selected) {
+      ctx.fillStyle = "#00DDCC"; ctx.font = "bold 11px monospace"; ctx.textAlign = "left"
+      ctx.fillText("▶", PNX + 5, iy + ITEM_H / 2 + 4)
     }
 
     // Item icon
     const iconSpr = ok2(item.sprKey)
-    const iconX = PNX + 16, iconY = iy + (ITEM_H - 28) / 2
+    const iconX = PNX + 18, iconY = iy + Math.round((ITEM_H - 22) / 2)
     if (iconSpr) {
       ctx.save()
-      if (!canBuy && !item.canBuy) ctx.globalAlpha = 0.35
-      ctx.drawImage(iconSpr, iconX, iconY, 28, 28)
+      if (!canBuy) ctx.globalAlpha = 0.35
+      ctx.drawImage(iconSpr, iconX, iconY, 22, 22)
       ctx.restore()
     } else {
-      ctx.fillStyle = canBuy ? "#00AACC" : "#334"
-      ctx.fillRect(iconX, iconY, 28, 28)
+      ctx.fillStyle = canBuy ? "#00AACC" : "#334"; ctx.fillRect(iconX, iconY, 22, 22)
     }
 
-    // Item name + sublabel
+    // Item label
     ctx.textAlign = "left"
-    const nameColor = canBuy ? "#EEFFEE" : (!item.canBuy ? "#445" : "#664")
-    ctx.font = `bold 11px 'Courier New',monospace`
-    ctx.fillStyle = nameColor
-    ctx.fillText(item.label, PNX + 54, iy + 22)
-
-    ctx.font = "9px 'Courier New',monospace"
+    ctx.font = `bold 10px 'Courier New',monospace`
+    ctx.fillStyle = canBuy ? "#EEFFEE" : (!item.canBuy ? "#445" : "#664")
+    ctx.fillText(item.label, PNX + 46, iy + 19)
+    ctx.font = "8px 'Courier New',monospace"
     ctx.fillStyle = canBuy ? "#88CCBB" : "#445566"
-    ctx.fillText(item.subLabel, PNX + 54, iy + 36)
+    ctx.fillText(item.subLabel, PNX + 46, iy + 31)
 
-    // Price or reason
+    // Price / reason
     if (item.reason) {
-      ctx.font = "bold 9px 'Courier New',monospace"
-      ctx.fillStyle = "#336655"
-      ctx.textAlign = "right"
-      ctx.fillText(item.reason, PNX + PNW - 14, iy + 32)
+      ctx.font = "bold 8px 'Courier New',monospace"; ctx.fillStyle = "#336655"
+      ctx.textAlign = "right"; ctx.fillText(item.reason, PNX + PNW - 8, iy + 26)
     } else {
-      // Price tag
-      const priceTxt = `${item.price}`
-      ctx.font = `bold 13px 'Courier New',monospace`
-      ctx.textAlign = "right"
+      ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "right"
       ctx.fillStyle = canBuy ? (selected ? "#FFE066" : "#CCAA33") : "#664422"
-      ctx.fillText(priceTxt, PNX + PNW - 14, iy + 36)
-      if (croquetaSpr) ctx.drawImage(croquetaSpr, PNX + PNW - 14 - 16, iy + 22, 14, 14)
+      ctx.fillText(`${item.price}`, PNX + PNW - 8, iy + 33)
+      if (croquetaSpr2) ctx.drawImage(croquetaSpr2, PNX + PNW - 8 - ctx.measureText(`${item.price}`).width - 15, iy + 20, 12, 12)
     }
   })
 
   // ── Footer / instrucciones ─────────────────────────────────────────────────
-  const footY = PNY + HEADER_H + items.length * ITEM_H
-  ctx.strokeStyle = "#00BBAA44"
-  ctx.lineWidth = 1
-  ctx.beginPath(); ctx.moveTo(PNX + 12, footY); ctx.lineTo(PNX + PNW - 12, footY); ctx.stroke()
-
-  ctx.font = "8px 'Courier New',monospace"
-  ctx.fillStyle = "#336655"
+  const footY = PNY + HEADER_H + items.length * ITEM_H + 2
+  ctx.strokeStyle = "#00BBAA33"; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(PNX + 10, footY); ctx.lineTo(PNX + PNW - 10, footY); ctx.stroke()
+  ctx.font = "7px 'Courier New',monospace"; ctx.fillStyle = "#447766"
   ctx.textAlign = "center"
-  ctx.fillText("[↑↓] navegar   [E] comprar   [ESC] salir", PNX + PNW / 2, footY + 16)
-
-  // ── Selector arrow ─────────────────────────────────────────────────────────
-  const iy2 = PNY + HEADER_H + cur * ITEM_H + ITEM_H / 2
-  ctx.fillStyle = "#00DDCC"
-  ctx.textAlign = "left"
-  ctx.font = "bold 14px monospace"
-  ctx.fillText("▶", PNX + 6, iy2 + 5)
+  ctx.fillText("[↑↓] navegar  [E] comprar  [ESC] salir", PNX + PNW / 2, footY + 14)
 }
 
 // ── Perrito Viejo NPC — placeholder gráfico + sistema de misiones/diálogo ──────
@@ -8821,6 +8830,8 @@ export default function ProyectoLuly() {
       if (g.bolkhaShopOpen) {
         if (k === "arrowup"   || k === "w") { g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1); return }
         if (k === "arrowdown" || k === "s") { g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1); return }
+        // Permitir escape (cierra shop) y e (comprar); bloquear todo lo demás (movimiento, salto, etc.)
+        if (k !== "escape" && k !== "e") return
       }
       if (g.tpMenu?.open) {
         if (k === "arrowup"    || k === "w") { tpNavCP(g, -1);    return }
