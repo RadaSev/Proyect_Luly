@@ -190,6 +190,9 @@ type G = {
   bolkhaAppearedOnce: boolean  // efecto de aparición ya ocurrió
   bolkhaTalkText: string       // texto de burbuja de diálogo
   bolkhaTalkTimer: number      // tiempo restante para mostrar burbuja
+  bolkhaGreetedThisVisit: boolean  // ya saludó en esta aproximación
+  bolkhaAffordTimer: number        // flash "sin croquetas" al intentar comprar sin fondos
+  bolkhaShopDescCursor: number     // cursor del último ítem cuya desc se mostró
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1526,6 +1529,9 @@ function mkG_lazy(): G {
     bolkhaAppearedOnce: false,
     bolkhaTalkText: "",
     bolkhaTalkTimer: 0,
+    bolkhaGreetedThisVisit: false,
+    bolkhaAffordTimer: 0,
+    bolkhaShopDescCursor: -1,
   } as G
 }
 
@@ -3221,8 +3227,9 @@ function tickBolkha(g: G) {
     g.bolkhaEf = (g.bolkhaEf + 1) % 25
   }
 
-  // Talk timer
+  // Talk timer + afford-error timer
   if (g.bolkhaTalkTimer > 0) g.bolkhaTalkTimer = Math.max(0, g.bolkhaTalkTimer - 1 / 60)
+  if (g.bolkhaAffordTimer > 0) g.bolkhaAffordTimer = Math.max(0, g.bolkhaAffordTimer - 1 / 60)
 
   // Giving animation
   if (g.bolkhaState === "giving") {
@@ -3247,10 +3254,71 @@ function tickBolkha(g: G) {
     return
   }
 
+  // ── Saludo de bienvenida al entrar en rango ──────────────────────────────
   if (dist < BOLKHA_TALK_R) {
     g.bolkhaState = "talking"
+    if (!g.bolkhaGreetedThisVisit) {
+      g.bolkhaGreetedThisVisit = true
+      const needsSomething =
+        g.pl.hp < g.pl.maxHp ||
+        g.pl.ammo < 15 ||
+        (g.abilities.has("tball") && g.tballAmmo === 0)
+      if (needsSomething) {
+        g.bolkhaTalkText = "Ahora sí te puedo vender.\nEntra y compra,\n¡quiero croquetas!"
+        g.bolkhaTalkTimer = 4.5
+      } else {
+        g.bolkhaTalkText = "Luly, no puedo venderte nada,\ntienes de todo… aunque\npuedes entrar a ver qué vendo."
+        g.bolkhaTalkTimer = 4.5
+      }
+    }
   } else {
     if (g.bolkhaState === "talking") g.bolkhaState = "idle"
+    // Resetear saludo al alejarse del rango de callout
+    if (dist >= BOLKHA_CALLOUT_R) g.bolkhaGreetedThisVisit = false
+  }
+}
+
+/** Lógica unificada de interacción con Bolkha (abrir tienda / comprar).
+ *  Llamada desde keydown "E", botón A móvil y botón A gamepad. */
+function bolkhaDoInteract(g: G) {
+  if (g.bolkhaState === "talking" && !g.bolkhaShopOpen) {
+    g.bolkhaShopOpen = true; g.paused = false
+    return
+  }
+  if (!g.bolkhaShopOpen) return
+  const cur2 = Math.max(0, Math.min(g.bolkhaShopCursor, 2))
+  const bItems = [
+    { price: BOLKHA_PRICE_HEART, canBuy: g.pl.hp < g.pl.maxHp,
+      buy: () => { g.pl.hp = Math.min(g.pl.maxHp, g.pl.hp + 2) },
+      givingItem: "hearts" as const,
+      talkText: "Estos… los extraigo de\nlos caídos. Enemigos\ny amigos. Son muy\nimportantes. Pero\nveo que los necesitas." },
+    { price: BOLKHA_PRICE_BONES, canBuy: g.pl.ammo < 15,
+      buy: () => { g.pl.ammo = Math.min(15, g.pl.ammo + 10) },
+      givingItem: "bones" as const,
+      talkText: "Estos son especiales.\nLos consigo en lugares\nque no nombraré.\nNo son tan baratos." },
+    { price: BOLKHA_PRICE_TBALL,
+      canBuy: g.abilities.has("tball") && g.tballAmmo === 0,
+      buy: () => { g.tballAmmo = Math.min(g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT, g.tballAmmo + 3) },
+      givingItem: "tball" as const,
+      talkText: "Estas son muy buenas.\nLas extraigo de las\ntiendas de los altos.\nNo puedo revelar quiénes." },
+  ]
+  const sel = bItems[cur2]
+  if (sel && sel.canBuy) {
+    if (g.croquetas >= sel.price) {
+      g.croquetas -= sel.price
+      sel.buy()
+      g.bolkhaGivingItem = sel.givingItem
+      g.bolkhaGivingTimer = 1.8
+      g.bolkhaState = "giving"
+      g.bolkhaShopOpen = false
+      g.bolkhaTalkText = sel.talkText
+      g.bolkhaTalkTimer = 4.0
+    } else {
+      // No alcanza: feedback de error
+      g.bolkhaAffordTimer = 1.5
+      g.bolkhaTalkText = `¡No tienes suficientes\ncroquetas! Necesitas ${sel.price},\ntú tienes ${g.croquetas}.`
+      g.bolkhaTalkTimer = 3.0
+    }
   }
 }
 
@@ -4621,7 +4689,9 @@ function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
 
       if (dist < BOLKHA_TALK_R) {
         // Instrucción de interacción
-        const txt = g.bolkhaState === "talking" ? "[E] Ver tienda" : "BOLKHA"
+        const isKB = !g.isMobile && g.gpadType === "keyboard"
+        const openKey = isKB ? "[E]" : "[B]"
+        const txt = g.bolkhaState === "talking" ? `${openKey} Ver tienda` : "BOLKHA"
         const tw2 = ctx.measureText(txt).width + 16
         ctx.fillStyle = "rgba(0,20,30,0.88)"
         ctx.beginPath(); ctx.roundRect(bx2 - tw2 / 2, bubY - 18, tw2, 22, 5); ctx.fill()
@@ -4636,8 +4706,9 @@ function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     }
   }
 
-  // ── Burbuja de diálogo (post-compra) ────────────────────────────────────────
-  if (g.bolkhaTalkTimer > 0 && g.bolkhaTalkText) {
+  // ── Burbuja de diálogo (saludo / post-compra / afford-error) ────────────────
+  // Solo se muestra cuando la tienda NO está abierta (dentro de la tienda usa el globo desc)
+  if (g.bolkhaTalkTimer > 0 && g.bolkhaTalkText && !g.bolkhaShopOpen) {
     const bx2 = sx + BOLKHA_W / 2
     const bubY2 = sprTopY - 36
     ctx.save()
@@ -4672,6 +4743,7 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
     id: string; label: string; subLabel: string
     price: number; sprKey: string
     canBuy: boolean; reason: string
+    desc: string   // descripción de Bolkha (globo lateral)
   }
   const items: ShopItem[] = [
     {
@@ -4682,6 +4754,7 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
       sprKey: "hud_heart",
       canBuy: g.pl.hp < g.pl.maxHp,
       reason: g.pl.hp >= g.pl.maxHp ? "VIDA LLENA" : "",
+      desc: "Estos… los extraigo de\nlos caídos. Enemigos\ny amigos. Son muy\nimportantes.",
     },
     {
       id: "bones",
@@ -4691,6 +4764,7 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
       sprKey: "hud_bone",
       canBuy: g.pl.ammo < 15,
       reason: g.pl.ammo >= 15 ? "MUNICIÓN LLENA" : "",
+      desc: "Especiales. Los consigo\nen lugares que no\nnombraré. No son\ntan baratos.",
     },
     {
       id: "tball",
@@ -4704,6 +4778,7 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
       reason: !g.abilities.has("tball") ? "BLOQUEADO"
             : g.tballAmmo > 0           ? "YA TIENES"
             : "",
+      desc: "Muy buenas. Las extraigo\nde tiendas de los altos.\nNo puedo revelar\nquiénes me las dan.",
     },
   ]
 
@@ -4769,11 +4844,13 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
   const cur = Math.max(0, Math.min(g.bolkhaShopCursor, items.length - 1))
   g.bolkhaShopCursor = cur
   const croquetaSpr2 = croquetaSpr
+  const affordFlash = g.bolkhaAffordTimer > 0  // flash de error de fondos
 
   items.forEach((item, idx) => {
     const iy = PNY + HEADER_H + idx * ITEM_H
     const selected = idx === cur
     const canBuy  = item.canBuy && g.croquetas >= item.price
+    const isAffordError = selected && affordFlash
 
     // Divider
     if (idx > 0) {
@@ -4781,17 +4858,26 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
       ctx.beginPath(); ctx.moveTo(PNX + 10, iy); ctx.lineTo(PNX + PNW - 10, iy); ctx.stroke()
     }
 
-    // Row highlight
+    // Row highlight / afford-error flash
     if (selected) {
-      ctx.fillStyle = "rgba(0,180,160,0.15)"
-      ctx.fillRect(PNX + 2, iy + 1, PNW - 4, ITEM_H - 2)
-      ctx.strokeStyle = "#00DDCC88"; ctx.lineWidth = 1
-      ctx.strokeRect(PNX + 3, iy + 2, PNW - 6, ITEM_H - 4)
+      if (isAffordError) {
+        const pulse = Math.sin(g.bolkhaAffordTimer * 18) * 0.5 + 0.5
+        ctx.fillStyle = `rgba(200,60,30,${0.10 + pulse * 0.18})`
+        ctx.fillRect(PNX + 2, iy + 1, PNW - 4, ITEM_H - 2)
+        ctx.strokeStyle = `rgba(255,80,40,${0.5 + pulse * 0.5})`; ctx.lineWidth = 1.5
+        ctx.strokeRect(PNX + 3, iy + 2, PNW - 6, ITEM_H - 4)
+      } else {
+        ctx.fillStyle = "rgba(0,180,160,0.15)"
+        ctx.fillRect(PNX + 2, iy + 1, PNW - 4, ITEM_H - 2)
+        ctx.strokeStyle = "#00DDCC88"; ctx.lineWidth = 1
+        ctx.strokeRect(PNX + 3, iy + 2, PNW - 6, ITEM_H - 4)
+      }
     }
 
     // Selector arrow
     if (selected) {
-      ctx.fillStyle = "#00DDCC"; ctx.font = "bold 11px monospace"; ctx.textAlign = "left"
+      ctx.fillStyle = isAffordError ? "#FF6644" : "#00DDCC"
+      ctx.font = "bold 11px monospace"; ctx.textAlign = "left"
       ctx.fillText("▶", PNX + 5, iy + ITEM_H / 2 + 4)
     }
 
@@ -4807,10 +4893,10 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
       ctx.fillStyle = canBuy ? "#00AACC" : "#334"; ctx.fillRect(iconX, iconY, 22, 22)
     }
 
-    // Item label
+    // Item label + sublabel
     ctx.textAlign = "left"
     ctx.font = `bold 10px 'Courier New',monospace`
-    ctx.fillStyle = canBuy ? "#EEFFEE" : (!item.canBuy ? "#445" : "#664")
+    ctx.fillStyle = canBuy ? "#EEFFEE" : (!item.canBuy ? "#445" : "#887744")
     ctx.fillText(item.label, PNX + 46, iy + 19)
     ctx.font = "8px 'Courier New',monospace"
     ctx.fillStyle = canBuy ? "#88CCBB" : "#445566"
@@ -4822,9 +4908,22 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
       ctx.textAlign = "right"; ctx.fillText(item.reason, PNX + PNW - 8, iy + 26)
     } else {
       ctx.font = "bold 11px 'Courier New',monospace"; ctx.textAlign = "right"
-      ctx.fillStyle = canBuy ? (selected ? "#FFE066" : "#CCAA33") : "#664422"
+      const priceColor = isAffordError ? "#FF6644"
+                       : canBuy ? (selected ? "#FFE066" : "#CCAA33")
+                       : "#664422"
+      ctx.fillStyle = priceColor
       ctx.fillText(`${item.price}`, PNX + PNW - 8, iy + 33)
       if (croquetaSpr2) ctx.drawImage(croquetaSpr2, PNX + PNW - 8 - ctx.measureText(`${item.price}`).width - 15, iy + 20, 12, 12)
+    }
+
+    // "¡SIN FONDOS!" overlay cuando intenta comprar sin croquetas
+    if (isAffordError) {
+      ctx.save()
+      ctx.globalAlpha = Math.min(1, g.bolkhaAffordTimer / 0.3)
+      ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillStyle = "#FF8855"
+      ctx.fillText("¡SIN CROQUETAS!", PNX + PNW / 2, iy + ITEM_H / 2 + 3)
+      ctx.restore()
     }
   })
 
@@ -4834,7 +4933,58 @@ function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank, bsx:
   ctx.beginPath(); ctx.moveTo(PNX + 10, footY); ctx.lineTo(PNX + PNW - 10, footY); ctx.stroke()
   ctx.font = "7px 'Courier New',monospace"; ctx.fillStyle = "#447766"
   ctx.textAlign = "center"
-  ctx.fillText("[↑↓] navegar  [E] comprar  [ESC] salir", PNX + PNW / 2, footY + 14)
+  const _isKB2 = !g.isMobile && g.gpadType === "keyboard"
+  const _buyKey = _isKB2 ? "E" : "A"
+  const _closeKey = _isKB2 ? "X" : "B"
+  ctx.fillText(`[↑↓] navegar  [${_buyKey}] comprar  [${_closeKey}] salir`, PNX + PNW / 2, footY + 14)
+
+  // ── Burbuja de descripción del ítem seleccionado (sale de Bolkha) ──────────
+  const selItem = items[cur]
+  if (selItem?.desc) {
+    const descLines = selItem.desc.split("\n")
+    ctx.save()
+    ctx.font = "9px 'Courier New',monospace"
+    const descLW = Math.max(...descLines.map(l => ctx.measureText(l).width))
+    const DBW = descLW + 22, DBH = descLines.length * 13 + 18
+    // Intentar poner a la izquierda del panel; si no cabe, a la derecha
+    let DBX = PNX - DBW - 12
+    let tailOnRight = true  // la cola está en el lado derecho del globo (apunta al panel)
+    if (DBX < 4) { DBX = PNX + PNW + 12; tailOnRight = false }
+    // Centrar verticalmente respecto al ítem seleccionado
+    const selIY = PNY + HEADER_H + cur * ITEM_H
+    let DBY = selIY + Math.round((ITEM_H - DBH) / 2)
+    DBY = Math.max(6, Math.min(CH - DBH - 6, DBY))
+
+    // Fondo del globo
+    ctx.fillStyle = "rgba(2,18,24,0.97)"
+    ctx.beginPath(); ctx.roundRect(DBX, DBY, DBW, DBH, 8); ctx.fill()
+    ctx.strokeStyle = "#00BBAA"
+    ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.roundRect(DBX, DBY, DBW, DBH, 8); ctx.stroke()
+
+    // Cola horizontal hacia el panel de la tienda
+    const tailMidY = Math.round(DBY + DBH / 2)
+    const tailTipX = tailOnRight ? DBX + DBW + 10 : DBX - 10
+    const tailBaseX = tailOnRight ? DBX + DBW : DBX
+    ctx.fillStyle = "rgba(2,18,24,0.97)"
+    ctx.beginPath()
+    ctx.moveTo(tailBaseX, tailMidY - 5)
+    ctx.lineTo(tailBaseX, tailMidY + 5)
+    ctx.lineTo(tailTipX, tailMidY)
+    ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = "#00BBAA"; ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.moveTo(tailBaseX, tailMidY - 5)
+    ctx.lineTo(tailTipX, tailMidY)
+    ctx.lineTo(tailBaseX, tailMidY + 5)
+    ctx.stroke()
+
+    // Texto de la descripción
+    ctx.fillStyle = "#CCFFEE"
+    ctx.textAlign = "left"
+    descLines.forEach((l, li) => ctx.fillText(l, DBX + 10, DBY + 13 + li * 13))
+    ctx.restore()
+  }
 }
 
 // ── Perrito Viejo NPC — placeholder gráfico + sistema de misiones/diálogo ──────
@@ -8471,6 +8621,21 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
     return  // no procesar movimiento de jugador
   }
 
+  // ── Tienda Bolkha abierta ─────────────────────────────────────────
+  if (g.bolkhaShopOpen) {
+    _gpStickNavCd = Math.max(0, _gpStickNavCd - 16)
+    if (_gpStickNavCd <= 0) {
+      const ly = ax(1)
+      const THRESH = 0.55
+      if (ly < -THRESH || btn(GP.UP))    { g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1); _gpStickNavCd = 220 }
+      else if (ly > THRESH || btn(GP.DOWN))  { g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1); _gpStickNavCd = 220 }
+    }
+    if (edgeDown(GP.A)) bolkhaDoInteract(g)
+    if (edgeDown(GP.B) || edgeDown(GP.START)) { g.bolkhaShopOpen = false; g.bolkhaState = "idle" }
+    _gpBPrev = btn(GP.B)
+    return  // no procesar movimiento de jugador
+  }
+
   // ── Menú de teletransporte abierto ───────────────────────────────
   if (g.tpMenu?.open) {
     _gpStickNavCd = Math.max(0, _gpStickNavCd - 16)
@@ -8514,9 +8679,13 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   // LB = teletransporte (menú de CPs)
   if (edgeDown(GP.LB) && !g.tpAnim) tpOpenMenu(g)
   const bNow = btn(GP.B)
-  if (bNow && !_gpBPrev) { if (g.showMap) { g.showMap = false; g.paused = false } else { onCheckpoint() } }
+  if (bNow && !_gpBPrev) {
+    if (g.showMap)                      { g.showMap = false; g.paused = false }
+    else if (g.bolkhaState === "talking") bolkhaDoInteract(g)  // abre la tienda
+    else onCheckpoint()
+  }
   _gpBPrev = bNow
-  g.keys["e"] = !g.showMap && bNow && _gpBPrev
+  g.keys["e"] = !g.showMap && !g.bolkhaShopOpen && bNow && _gpBPrev
   if (btn(GP.L3) && btn(GP.R3)) { onFullscreen() }
 }
 
@@ -8830,8 +8999,10 @@ export default function ProyectoLuly() {
       if (g.bolkhaShopOpen) {
         if (k === "arrowup"   || k === "w") { g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1); return }
         if (k === "arrowdown" || k === "s") { g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1); return }
-        // Permitir escape (cierra shop) y e (comprar); bloquear todo lo demás (movimiento, salto, etc.)
-        if (k !== "escape" && k !== "e") return
+        // X cierra la tienda (no ESC — ESC sale del fullscreen del navegador)
+        if (k === "x") { g.bolkhaShopOpen = false; g.bolkhaState = "idle"; return }
+        // Solo permitir e (comprar); bloquear movimiento/salto/todo lo demás
+        if (k !== "e") return
       }
       if (g.tpMenu?.open) {
         if (k === "arrowup"    || k === "w") { tpNavCP(g, -1);    return }
@@ -8912,45 +9083,14 @@ export default function ProyectoLuly() {
       }
       if (k === "f") handleToggleFS()
       if (k === "escape") {
-        if (g.bolkhaShopOpen) { g.bolkhaShopOpen = false; g.bolkhaState = "idle"; return }
         if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g); return }
         if (g.showMap) { g.showMap = false; g.paused = false }
         if (g.showDevMap) { g.showDevMap = false; g.paused = false }
       }
       if (k === "e" && !g.tpAnim) {
         // Bolkha shop: abrir o comprar
-        if (g.bolkhaState === "talking" && !g.bolkhaShopOpen) {
-          g.bolkhaShopOpen = true; g.paused = false
-          return
-        }
-        if (g.bolkhaShopOpen) {
-          const cur2 = Math.max(0, Math.min(g.bolkhaShopCursor, 2))
-          const bItems = [
-            { id: "heart", price: BOLKHA_PRICE_HEART, canBuy: g.pl.hp < g.pl.maxHp,
-              buy: () => { g.pl.hp = Math.min(g.pl.maxHp, g.pl.hp + 2) },
-              givingItem: "hearts" as const,
-              talkText: "Estos… los extraigo de\nlos caídos. Enemigos\ny amigos. Son muy\nimportantes. Pero\nveo que los necesitas." },
-            { id: "bones", price: BOLKHA_PRICE_BONES, canBuy: g.pl.ammo < 15,
-              buy: () => { g.pl.ammo = Math.min(15, g.pl.ammo + 10) },
-              givingItem: "bones" as const,
-              talkText: "Estos son especiales.\nLos consigo en lugares\nque no nombraré.\nNo son tan baratos." },
-            { id: "tball", price: BOLKHA_PRICE_TBALL,
-              canBuy: g.abilities.has("tball") && g.tballAmmo === 0,
-              buy: () => { g.tballAmmo = Math.min(g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT, g.tballAmmo + 3) },
-              givingItem: "tball" as const,
-              talkText: "Estas son muy buenas.\nLas extraigo de las\ntiendas de los altos.\nNo puedo revelar quiénes." },
-          ]
-          const sel = bItems[cur2]
-          if (sel && sel.canBuy && g.croquetas >= sel.price) {
-            g.croquetas -= sel.price
-            sel.buy()
-            g.bolkhaGivingItem = sel.givingItem
-            g.bolkhaGivingTimer = 1.8
-            g.bolkhaState = "giving"
-            g.bolkhaShopOpen = false
-            g.bolkhaTalkText = sel.talkText
-            g.bolkhaTalkTimer = 4.0
-          }
+        if (g.bolkhaState === "talking" || g.bolkhaShopOpen) {
+          bolkhaDoInteract(g)
           return
         }
         ; (g as any)._gfxMsg = false
@@ -9112,7 +9252,18 @@ export default function ProyectoLuly() {
   const isFullscreenEffective = isFullscreen || isPseudoFS
 
   useEffect(() => {
-    const onChange = () => setIsFullscreen(!!getFSElement())
+    const onChange = () => {
+      const inFS = !!getFSElement()
+      setIsFullscreen(inFS)
+      // Trampa de fullscreen: si el juego está activo y el usuario salió con ESC,
+      // volvemos a entrar automáticamente después de un breve instante.
+      if (!inFS && gameActiveRef.current) {
+        setTimeout(() => {
+          if (!getFSElement() && gameActiveRef.current)
+            tryFullscreen(containerRef.current || document.documentElement)
+        }, 150)
+      }
+    }
     document.addEventListener("fullscreenchange", onChange)
     document.addEventListener("webkitfullscreenchange", onChange)
     document.addEventListener("mozfullscreenchange", onChange)
@@ -9998,6 +10149,11 @@ export default function ProyectoLuly() {
                   const x = e.clientX - rect.left, y = e.clientY - rect.top
                   const dir = getDir(x, y)
                   if (!dir) return
+                  if (g.bolkhaShopOpen) {
+                    if (dir === "up")   g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1)
+                    if (dir === "down") g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1)
+                    return  // no mover jugador
+                  }
                   if (g.tpMenu?.open) {
                     if (dir === "left") navTPWorld(-1); else if (dir === "right") navTPWorld(1)
                     else if (dir === "up") navTP(-1);  else if (dir === "down")  navTP(1)
@@ -10011,7 +10167,7 @@ export default function ProyectoLuly() {
                   const x = e.clientX - rect.left, y = e.clientY - rect.top
                   const dir = getDir(x, y)
                   if (!dir) { releaseAll(); return }
-                  if (g.tpMenu?.open) return
+                  if (g.bolkhaShopOpen || g.tpMenu?.open) return
                   applyDir(dir, false)
                 }}
                 onPointerUp={releaseAll}
@@ -10060,6 +10216,20 @@ export default function ProyectoLuly() {
             const scale = dist > JBASE ? JBASE / dist : 1
             const ox = rawOx * scale, oy = rawOy * scale
             setJstickThumb({ x: ox, y: oy })
+
+            // ── Modo Shop Bolkha: joystick navega cursor, no mueve al personaje ──
+            if (g.bolkhaShopOpen) {
+              const NAV_CD = 300, nowMs = performance.now()
+              const vZone = Math.abs(oy) > DEAD ? (oy > 0 ? 1 : -1) : 0
+              if (vZone !== tpJoyNavRef.current.wasV) {
+                tpJoyNavRef.current.wasV = vZone as -1|0|1
+                if (vZone !== 0 && nowMs - tpJoyNavRef.current.lastV > NAV_CD) {
+                  g.bolkhaShopCursor = Math.max(0, Math.min(2, g.bolkhaShopCursor + vZone))
+                  tpJoyNavRef.current.lastV = nowMs
+                }
+              }
+              return
+            }
 
             // ── Modo TP: el joystick navega el menú, no mueve al personaje ──────
             if (ui.tpMenuOpen) {
@@ -10207,22 +10377,34 @@ export default function ProyectoLuly() {
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.X, "X", "DISPARO",
               ()=>pressKey("n"), ()=>releaseKey("n"))}
           </div>
-          {/* B — derecha (checkpoint / siguiente diálogo / cerrar tpMenu) */}
+          {/* B — derecha (checkpoint / siguiente diálogo / cerrar tpMenu / cerrar shop) */}
           <div style={{ position:"absolute", right:0, top:"50%", transform:"translateY(-55%)" }}>
             {xbCircle(Math.round(ACT_H*0.33), XB_COL.B, "B",
-              g.tpMenu?.open ? "CERRAR" : _rexPageWaiting ? "SIGUIENTE" : "GUARDAR",
+              g.tpMenu?.open       ? "CERRAR"
+              : g.bolkhaShopOpen   ? "SALIR"
+              : g.bolkhaState === "talking" ? "TIENDA"
+              : _rexPageWaiting    ? "SIGUIENTE"
+              : "GUARDAR",
               () => {
-                if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g) }
-                else if (_rexPageWaiting) { pressKey("e"); setTimeout(() => releaseKey("e"), 120) }
+                if (g.tpMenu?.open)               { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g) }
+                else if (g.bolkhaShopOpen)         { g.bolkhaShopOpen = false; g.bolkhaState = "idle" }
+                else if (g.bolkhaState === "talking") { bolkhaDoInteract(g) }
+                else if (_rexPageWaiting)          { pressKey("e"); setTimeout(() => releaseKey("e"), 120) }
                 else activateCheckpoint()
               }, () => {})}
           </div>
-          {/* A — abajo (saltar / confirmar tpMenu) — más grande */}
+          {/* A — abajo (saltar / confirmar tpMenu / comprar en shop) — más grande */}
           <div style={{ position:"absolute", bottom:0, left:"50%", transform:"translateX(-50%)" }}>
             {xbCircle(Math.round(ACT_H*0.40), XB_COL.A, "A",
-              g.tpMenu?.open ? "CONFIRMAR" : "SALTAR",
-              () => { if (g.tpMenu?.open) confirmTP(); else pressKey(" ") },
-              () => { if (!g.tpMenu?.open) releaseKey(" ") })}
+              g.tpMenu?.open     ? "CONFIRMAR"
+              : g.bolkhaShopOpen ? "COMPRAR"
+              : "SALTAR",
+              () => {
+                if (g.tpMenu?.open)     confirmTP()
+                else if (g.bolkhaShopOpen) bolkhaDoInteract(g)
+                else pressKey(" ")
+              },
+              () => { if (!g.tpMenu?.open && !g.bolkhaShopOpen) releaseKey(" ") })}
           </div>
           {/* PAUSA — esquina inferior-derecha del panel, icono solo */}
           <div
