@@ -177,6 +177,19 @@ type G = {
   bossArenaPlats: MovingPlat[]
   toolMounds: ToolMound[]
   flyingTools: FlyingTool[]
+  // ── Bolkha the Merchant (NPC flea, aparece tras matar P1 boss W0) ──────────
+  croquetas: number            // moneda de cambio
+  bolkhaState: "hidden" | "appearing" | "idle" | "talking" | "giving" | "shop"
+  bolkhaFacing: 1 | -1
+  bolkhaEf: number             // frame de animación actual (0-24)
+  bolkhaEft: number            // acumulador de tiempo para animación
+  bolkhaGivingTimer: number    // cuenta regresiva del sprite de entrega
+  bolkhaGivingItem: "hearts" | "bones" | "tball" | null
+  bolkhaShopOpen: boolean      // menú de compra visible
+  bolkhaShopCursor: number     // item seleccionado (0-2)
+  bolkhaAppearedOnce: boolean  // efecto de aparición ya ocurrió
+  bolkhaTalkText: string       // texto de burbuja de diálogo
+  bolkhaTalkTimer: number      // tiempo restante para mostrar burbuja
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -233,7 +246,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.11"
+const GAME_VERSION = "0.2.12"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -255,6 +268,8 @@ interface LulySave {
   p1BossRexSeen?: boolean
   p2BossRexSeen?: boolean
   ultraBossRexSeen?: boolean
+  croquetas?: number
+  bolkhaAppearedOnce?: boolean
 }
 
 function saveGame(g: G): void {
@@ -279,6 +294,8 @@ function saveGame(g: G): void {
       p1BossRexSeen: g.p1BossRexSeen,
       p2BossRexSeen: g.p2BossRexSeen,
       ultraBossRexSeen: g.ultraBossRexSeen,
+      croquetas: g.croquetas,
+      bolkhaAppearedOnce: g.bolkhaAppearedOnce,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
@@ -439,6 +456,19 @@ const VIEJO_DOG_POS = {
 }
 const VIEJO_DOG_TALK_R = 115              // radio para diálogo automático
 const VIEJO_DOG_CALLOUT_R = 230          // radio para el "¡Psst!"
+// ── Bolkha the Merchant ──
+const BOLKHA_W = 48, BOLKHA_H = 64
+const BOLKHA_POS = {
+  x: _VDX + Math.floor(RW * 0.72),
+  y: _VDY + RH - WT - BOLKHA_H - 4,
+}
+const BOLKHA_TALK_R  = 120
+const BOLKHA_CALLOUT_R = 210
+const BOLKHA_APPEAR_DUR = 2.0   // segundos del efecto de aparición
+// Precios en croquetas
+const BOLKHA_PRICE_HEART = 20   // +1 corazón completo (+2 hp)
+const BOLKHA_PRICE_BONES = 25   // +10 huesos de munición
+const BOLKHA_PRICE_TBALL = 40   // +3 pelotas de tenis
 let _rexNameAlpha = 1.0                  // fade suave del nombre: 1=visible, 0=oculto
 let _rexDlgKey    = ""                   // clave de estado — cambio = reinicio de tipografía
 let _rexDlgMs     = 0                    // timestamp en que empezó la página actual
@@ -1482,6 +1512,17 @@ function mkG_lazy(): G {
     bossArenaPlats: [],
     toolMounds: [],
     flyingTools: [],
+    croquetas: 0,
+    bolkhaState: "hidden",
+    bolkhaFacing: -1,
+    bolkhaEf: 0, bolkhaEft: 0,
+    bolkhaGivingTimer: 0,
+    bolkhaGivingItem: null,
+    bolkhaShopOpen: false,
+    bolkhaShopCursor: 0,
+    bolkhaAppearedOnce: false,
+    bolkhaTalkText: "",
+    bolkhaTalkTimer: 0,
   } as G
 }
 
@@ -1965,7 +2006,7 @@ function breakCrate(g: G, c: Crate) {
     g.bones.push({ x: cx2 + (Math.random() - .5) * 20, y: cy2, w: 11, h: 11, vx: Math.cos(a) * spd, vy: -Math.abs(Math.sin(a) * spd) - 1, active: true, life: 12 })
   }
 
-  const drop = (k: "h" | "a" | "tba") =>
+  const drop = (k: "h" | "a" | "tba" | "c") =>
     g.drops.push({ x: cx2 + (Math.random() - .5) * 24, y: cy2 - 4, vx: (Math.random() - .5) * 2, vy: -3.5 - Math.random() * 1.2, active: true, life: 20, kind: k })
 
   // Drop aleatorio puro:
@@ -1978,6 +2019,9 @@ function breakCrate(g: G, c: Crate) {
   else if (roll < 0.70) { drop("a") }
   else if (roll < 0.85) { drop("h"); drop("a") }
   // else: solo fragmentos
+
+  // 65 % de chance de soltar 1 croqueta (independiente del drop principal)
+  if (Math.random() < 0.65) drop("c")
 
   // Bonus: si el jugador tiene tball y le falta munición, 25 % de chance extra
   if (g.abilities.has("tball") && g.tballAmmo < (g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT) && Math.random() < 0.25) {
@@ -3142,6 +3186,71 @@ function countP1KillsW0(dead: Set<string>): number {
   return count
 }
 
+function tickBolkha(g: G) {
+  const p = g.pl
+  // Solo aparece tras matar al P1 boss de W0
+  if (!isPart1BossDead(g, 0)) return
+
+  if (g.bolkhaState === "hidden") {
+    // Primera vez que se detecta: iniciar aparición
+    g.bolkhaState = "appearing"
+    g.bolkhaGivingTimer = BOLKHA_APPEAR_DUR
+    if (!g.bolkhaAppearedOnce) {
+      spawnExplosion(g, BOLKHA_POS.x, BOLKHA_POS.y, ["#88DDFF","#00FFCC","#FFFFFF","#AAFFEE"], 22, 5, true)
+    }
+    return
+  }
+
+  if (g.bolkhaState === "appearing") {
+    g.bolkhaGivingTimer -= 1 / 60
+    if (g.bolkhaGivingTimer <= 0) {
+      g.bolkhaState = "idle"
+      g.bolkhaAppearedOnce = true
+      g.bolkhaGivingTimer = 0
+    }
+    return
+  }
+
+  // Animación continua (10 fps)
+  g.bolkhaEft += 1 / 60
+  if (g.bolkhaEft >= 0.10) {
+    g.bolkhaEft = 0
+    g.bolkhaEf = (g.bolkhaEf + 1) % 25
+  }
+
+  // Talk timer
+  if (g.bolkhaTalkTimer > 0) g.bolkhaTalkTimer = Math.max(0, g.bolkhaTalkTimer - 1 / 60)
+
+  // Giving animation
+  if (g.bolkhaState === "giving") {
+    g.bolkhaGivingTimer = Math.max(0, g.bolkhaGivingTimer - 1 / 60)
+    if (g.bolkhaGivingTimer <= 0) {
+      g.bolkhaGivingItem = null
+      g.bolkhaState = "shop"
+      g.bolkhaShopOpen = true
+    }
+    return
+  }
+
+  // Distancia al jugador
+  const dx = p.x + BOLKHA_W / 2 - BOLKHA_POS.x
+  const dy = p.y + BOLKHA_H / 2 - BOLKHA_POS.y
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  // Bolkha siempre mira hacia el jugador
+  g.bolkhaFacing = dx >= 0 ? -1 : 1
+
+  if (g.bolkhaShopOpen) {
+    g.bolkhaState = "talking"
+    return
+  }
+
+  if (dist < BOLKHA_TALK_R) {
+    g.bolkhaState = "talking"
+  } else {
+    if (g.bolkhaState === "talking") g.bolkhaState = "idle"
+  }
+}
+
 function tickViejoDog(g: G) {
   // Solo aplica en World 0
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
@@ -3468,7 +3577,7 @@ function tickDrops(g: G) {
       if (d.kind === "h") p.hp = Math.min(p.maxHp, p.hp + 1)
       else if (d.kind === "a") p.ammo = Math.min(15, p.ammo + 10)
       else if (d.kind === "tba") g.tballAmmo = Math.min(g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT, g.tballAmmo + TB_AMMO_DROP)
-      else if (d.kind === "c") g.score += 50
+      else if (d.kind === "c") { g.score += 50; g.croquetas++ }
       d.active = false
     }
   }
@@ -3569,6 +3678,8 @@ function applyLoad(g: G, s: LulySave): void {
   g.p1BossRexSeen          = s.p1BossRexSeen          ?? false
   g.p2BossRexSeen          = s.p2BossRexSeen          ?? false
   g.ultraBossRexSeen       = s.ultraBossRexSeen        ?? false
+  g.croquetas              = s.croquetas               ?? 0
+  g.bolkhaAppearedOnce     = s.bolkhaAppearedOnce      ?? false
   g.rexPhoneNotif          = null
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
@@ -3727,7 +3838,7 @@ function tick(g: G) {
     g.pl.vx = 0
     g.pl.crouching = false
   }
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0); tickToolMounds(g)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickBolkha(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0); tickToolMounds(g)
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -4424,6 +4535,299 @@ function drawTBalls(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   }
 }
 
+function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
+  if (g.bolkhaState === "hidden") return
+  const CW = ctx.canvas.width, CH = ctx.canvas.height
+
+  // ── Aparición: efecto de teletransporte (parpadeo) ─────────────────────────
+  if (g.bolkhaState === "appearing") {
+    const prog = 1 - g.bolkhaGivingTimer / BOLKHA_APPEAR_DUR  // 0→1
+    if (prog < 0.7 && Math.floor(prog * 30) % 2 === 0) {
+      // Parpadeo rápido durante la materialización
+      ctx.save()
+      ctx.globalAlpha = 0.5 + prog * 0.5
+      ctx.fillStyle = "#00FFCC"
+      ctx.fillRect(
+        BOLKHA_POS.x - g.cx - 8, BOLKHA_POS.y - g.cy - 8,
+        BOLKHA_W + 16, BOLKHA_H + 16
+      )
+      ctx.restore()
+    }
+    return
+  }
+
+  const dir = g.bolkhaFacing >= 0 ? "right" : "left"
+  const opp = dir === "right" ? "left" : "right"
+  const ok  = (k: string) => { const s = sprs[k]; return s?.complete && s.naturalWidth > 0 ? s : null }
+
+  // Seleccionar sprite
+  let sprKey: string
+  if (g.bolkhaState === "giving" && g.bolkhaGivingItem) {
+    sprKey = `bolkha_giving_${g.bolkhaGivingItem}_${dir}`
+  } else if (g.bolkhaState === "talking" || g.bolkhaState === "shop") {
+    sprKey = `bolkha_talk_${dir}`
+  } else {
+    sprKey = `bolkha_idle_${dir}`
+  }
+  const spr = ok(sprKey) ?? ok(sprKey.replace(`_${dir}`, `_${opp}`))
+
+  // Renderizar sprite (5×5, 25 frames)
+  const sx = Math.round(BOLKHA_POS.x - g.cx)
+  const sy = Math.round(BOLKHA_POS.y - g.cy)
+  const BW2 = 80, BH2 = 96  // tamaño render
+
+  if (spr) {
+    const fw = spr.naturalWidth / 5, fh = spr.naturalHeight / 5
+    const col = g.bolkhaEf % 5, row2 = Math.floor(g.bolkhaEf / 5)
+    ctx.drawImage(spr, col * fw, row2 * fh, fw, fh, sx - (BW2 - BOLKHA_W) / 2, sy - (BH2 - BOLKHA_H), BW2, BH2)
+  } else {
+    // Fallback: rectángulo azul
+    ctx.fillStyle = "#00AACC"
+    ctx.fillRect(sx, sy, BOLKHA_W, BOLKHA_H)
+  }
+
+  // ── Sombra ──────────────────────────────────────────────────────────────────
+  ctx.save()
+  ctx.globalAlpha = 0.22
+  ctx.fillStyle = "#000"
+  ctx.beginPath()
+  ctx.ellipse(sx + BOLKHA_W / 2, sy + BOLKHA_H + 2, BOLKHA_W * 0.42, 5, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  // ── Nombre/callout (solo si el shop no está abierto) ────────────────────────
+  const dx2 = g.pl.x + 20 - BOLKHA_POS.x
+  const dy2 = g.pl.y + 36 - BOLKHA_POS.y
+  const dist = Math.sqrt(dx2 * dx2 + dy2 * dy2)
+
+  if (!g.bolkhaShopOpen && g.bolkhaState !== "giving") {
+    if (dist < BOLKHA_CALLOUT_R) {
+      const bx2 = sx + BOLKHA_W / 2
+      const bubY = sy - (BH2 - BOLKHA_H) - 12
+      ctx.save()
+      const alpha = Math.min(1, (BOLKHA_CALLOUT_R - dist) / 60)
+      ctx.globalAlpha = alpha
+      ctx.font = "bold 11px 'Courier New',monospace"
+      ctx.textAlign = "center"
+
+      if (dist < BOLKHA_TALK_R) {
+        // Instrucción de interacción
+        const txt = g.bolkhaState === "talking" ? "[E] Ver tienda" : "BOLKHA"
+        const tw2 = ctx.measureText(txt).width + 16
+        ctx.fillStyle = "rgba(0,20,30,0.88)"
+        ctx.beginPath(); ctx.roundRect(bx2 - tw2 / 2, bubY - 18, tw2, 22, 5); ctx.fill()
+        ctx.strokeStyle = "#00DDCC44"; ctx.lineWidth = 1
+        ctx.beginPath(); ctx.roundRect(bx2 - tw2 / 2, bubY - 18, tw2, 22, 5); ctx.stroke()
+        ctx.fillStyle = "#88FFEE"; ctx.fillText(txt, bx2, bubY - 2)
+      } else {
+        // Nombre flotante
+        ctx.fillStyle = "#88DDFF"; ctx.fillText("Bolkha", bx2, bubY)
+      }
+      ctx.restore()
+    }
+  }
+
+  // ── Burbuja de diálogo (post-compra) ────────────────────────────────────────
+  if (g.bolkhaTalkTimer > 0 && g.bolkhaTalkText) {
+    const bx2 = sx + BOLKHA_W / 2
+    const bubY2 = sy - (BH2 - BOLKHA_H) - 36
+    ctx.save()
+    ctx.globalAlpha = Math.min(1, g.bolkhaTalkTimer / 0.5)
+    ctx.font = "9px 'Courier New',monospace"
+    ctx.textAlign = "center"
+    const lines2 = g.bolkhaTalkText.split("\n")
+    const maxW2 = Math.max(...lines2.map(l => ctx.measureText(l).width)) + 20
+    const bubH2 = lines2.length * 13 + 14
+    ctx.fillStyle = "rgba(0,20,30,0.92)"
+    ctx.beginPath(); ctx.roundRect(bx2 - maxW2 / 2, bubY2 - bubH2, maxW2, bubH2, 7); ctx.fill()
+    ctx.strokeStyle = "#00DDCC"
+    ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.roundRect(bx2 - maxW2 / 2, bubY2 - bubH2, maxW2, bubH2, 7); ctx.stroke()
+    ctx.fillStyle = "#CCFFEE"
+    lines2.forEach((l, li) => ctx.fillText(l, bx2, bubY2 - bubH2 + 13 + li * 13))
+    ctx.restore()
+  }
+
+  // ── Shop menu overlay ────────────────────────────────────────────────────────
+  if (g.bolkhaShopOpen) {
+    drawBolkhaShop(ctx, g, sprs)
+  }
+}
+
+function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
+  const CW = ctx.canvas.width, CH = ctx.canvas.height
+  const ok2  = (k: string) => { const s = sprs[k]; return s?.complete && s.naturalWidth > 0 ? s : null }
+
+  // ── Items disponibles ─────────────────────────────────────────────────────
+  type ShopItem = {
+    id: string; label: string; subLabel: string
+    price: number; sprKey: string
+    canBuy: boolean; reason: string
+  }
+  const items: ShopItem[] = [
+    {
+      id: "heart",
+      label: "Vida",
+      subLabel: `+1 corazón  (${g.pl.hp / 2}/${g.pl.maxHp / 2})`,
+      price: BOLKHA_PRICE_HEART,
+      sprKey: "hud_heart",
+      canBuy: g.pl.hp < g.pl.maxHp,
+      reason: g.pl.hp >= g.pl.maxHp ? "VIDA LLENA" : "",
+    },
+    {
+      id: "bones",
+      label: "Munición (huesos)",
+      subLabel: `+10 balas  (${g.pl.ammo}/15)`,
+      price: BOLKHA_PRICE_BONES,
+      sprKey: "hud_bone",
+      canBuy: g.pl.ammo < 15,
+      reason: g.pl.ammo >= 15 ? "MUNICIÓN LLENA" : "",
+    },
+    {
+      id: "tball",
+      label: "Pelotas de tenis",
+      subLabel: g.abilities.has("tball")
+        ? `+3 pelotas  (${g.tballAmmo}/${g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT})`
+        : "— BLOQUEADO —",
+      price: BOLKHA_PRICE_TBALL,
+      sprKey: "tennis_ball",
+      canBuy: g.abilities.has("tball") && g.tballAmmo === 0,
+      reason: !g.abilities.has("tball") ? "BLOQUEADO"
+            : g.tballAmmo > 0           ? "YA TIENES"
+            : "",
+    },
+  ]
+
+  // ── Fondo semi-transparente full-screen ──────────────────────────────────
+  ctx.fillStyle = "rgba(0,0,0,0.62)"
+  ctx.fillRect(0, 0, CW, CH)
+
+  // ── Panel central ─────────────────────────────────────────────────────────
+  const PNW = 340, ITEM_H = 62, HEADER_H = 64, FOOTER_H = 44
+  const PNH = HEADER_H + items.length * ITEM_H + FOOTER_H
+  const PNX = Math.floor((CW - PNW) / 2)
+  const PNY = Math.floor((CH - PNH) / 2)
+
+  // Panel background
+  ctx.fillStyle = "rgba(4,16,22,0.97)"
+  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, PNH, 12); ctx.fill()
+  ctx.strokeStyle = "#00BBAA"
+  ctx.lineWidth = 2
+  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, PNH, 12); ctx.stroke()
+
+  // Panel inner glow line
+  ctx.strokeStyle = "#00DDCC22"
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.roundRect(PNX + 3, PNY + 3, PNW - 6, PNH - 6, 10); ctx.stroke()
+
+  // ── Header ───────────────────────────────────────────────────────────────
+  ctx.fillStyle = "#00BBAA"
+  ctx.beginPath(); ctx.roundRect(PNX, PNY, PNW, HEADER_H, [12, 12, 0, 0]); ctx.fill()
+
+  ctx.font = "bold 16px 'Courier New',monospace"
+  ctx.textAlign = "center"
+  ctx.fillStyle = "#EEFFEE"
+  ctx.fillText("◈  BOLKHA  ◈", PNX + PNW / 2, PNY + 22)
+  ctx.font = "9px 'Courier New',monospace"
+  ctx.fillStyle = "#AAFFEE"
+  ctx.fillText("— El Mercader Insecto —", PNX + PNW / 2, PNY + 37)
+
+  // Croquetas disponibles
+  const croquetaSpr = ok2("hud_croqueta")
+  const cqTxt = `${g.croquetas} croquetas`
+  ctx.font = "bold 12px 'Courier New',monospace"
+  const cqW = ctx.measureText(cqTxt).width
+  const cqX = PNX + PNW / 2 - (cqW + (croquetaSpr ? 20 : 0)) / 2
+  if (croquetaSpr) ctx.drawImage(croquetaSpr, cqX - 2, PNY + 46, 16, 16)
+  ctx.fillStyle = "#FFE066"
+  ctx.textAlign = "left"
+  ctx.fillText(cqTxt, cqX + (croquetaSpr ? 18 : 0), PNY + 58)
+
+  // ── Items ─────────────────────────────────────────────────────────────────
+  const cur = Math.max(0, Math.min(g.bolkhaShopCursor, items.length - 1))
+  g.bolkhaShopCursor = cur
+
+  items.forEach((item, idx) => {
+    const iy = PNY + HEADER_H + idx * ITEM_H
+    const selected = idx === cur
+    const canBuy  = item.canBuy && g.croquetas >= item.price
+
+    // Row background
+    if (selected) {
+      ctx.fillStyle = "rgba(0,180,160,0.18)"
+      ctx.fillRect(PNX + 2, iy + 2, PNW - 4, ITEM_H - 4)
+      ctx.strokeStyle = "#00DDCC"
+      ctx.lineWidth = 1.5
+      ctx.strokeRect(PNX + 4, iy + 4, PNW - 8, ITEM_H - 8)
+    }
+
+    // Divider
+    if (idx > 0) {
+      ctx.strokeStyle = "#00BBAA22"
+      ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(PNX + 12, iy); ctx.lineTo(PNX + PNW - 12, iy); ctx.stroke()
+    }
+
+    // Item icon
+    const iconSpr = ok2(item.sprKey)
+    const iconX = PNX + 16, iconY = iy + (ITEM_H - 28) / 2
+    if (iconSpr) {
+      ctx.save()
+      if (!canBuy && !item.canBuy) ctx.globalAlpha = 0.35
+      ctx.drawImage(iconSpr, iconX, iconY, 28, 28)
+      ctx.restore()
+    } else {
+      ctx.fillStyle = canBuy ? "#00AACC" : "#334"
+      ctx.fillRect(iconX, iconY, 28, 28)
+    }
+
+    // Item name + sublabel
+    ctx.textAlign = "left"
+    const nameColor = canBuy ? "#EEFFEE" : (!item.canBuy ? "#445" : "#664")
+    ctx.font = `bold 11px 'Courier New',monospace`
+    ctx.fillStyle = nameColor
+    ctx.fillText(item.label, PNX + 54, iy + 22)
+
+    ctx.font = "9px 'Courier New',monospace"
+    ctx.fillStyle = canBuy ? "#88CCBB" : "#445566"
+    ctx.fillText(item.subLabel, PNX + 54, iy + 36)
+
+    // Price or reason
+    if (item.reason) {
+      ctx.font = "bold 9px 'Courier New',monospace"
+      ctx.fillStyle = "#336655"
+      ctx.textAlign = "right"
+      ctx.fillText(item.reason, PNX + PNW - 14, iy + 32)
+    } else {
+      // Price tag
+      const priceTxt = `${item.price}`
+      ctx.font = `bold 13px 'Courier New',monospace`
+      ctx.textAlign = "right"
+      ctx.fillStyle = canBuy ? (selected ? "#FFE066" : "#CCAA33") : "#664422"
+      ctx.fillText(priceTxt, PNX + PNW - 14, iy + 36)
+      if (croquetaSpr) ctx.drawImage(croquetaSpr, PNX + PNW - 14 - 16, iy + 22, 14, 14)
+    }
+  })
+
+  // ── Footer / instrucciones ─────────────────────────────────────────────────
+  const footY = PNY + HEADER_H + items.length * ITEM_H
+  ctx.strokeStyle = "#00BBAA44"
+  ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(PNX + 12, footY); ctx.lineTo(PNX + PNW - 12, footY); ctx.stroke()
+
+  ctx.font = "8px 'Courier New',monospace"
+  ctx.fillStyle = "#336655"
+  ctx.textAlign = "center"
+  ctx.fillText("[↑↓] navegar   [E] comprar   [ESC] salir", PNX + PNW / 2, footY + 16)
+
+  // ── Selector arrow ─────────────────────────────────────────────────────────
+  const iy2 = PNY + HEADER_H + cur * ITEM_H + ITEM_H / 2
+  ctx.fillStyle = "#00DDCC"
+  ctx.textAlign = "left"
+  ctx.font = "bold 14px monospace"
+  ctx.fillText("▶", PNX + 6, iy2 + 5)
+}
+
 // ── Perrito Viejo NPC — placeholder gráfico + sistema de misiones/diálogo ──────
 // El NPC está diseñado para múltiples quests futuras.
 // Por ahora solo tiene la quest "tball". El sistema de slots permite añadir más.
@@ -4776,8 +5180,8 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ]]}
   } else if (g.viejoDogState === "reward_lives") {
     dlg = {
-      headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈"],
-      colors:  ["#FF8888",          "#C8A0FF"],
+      headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈"],
+      colors:  ["#FF8888",          "#C8A0FF",           "#88DDFF"],
       pages: [
         [
           "¡Muy bien hecho, Luly!",
@@ -4793,12 +5197,20 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           "Derrótalo y tráemelo,",
           "así podré caminar mejor.",
         ],
+        [
+          "Ah... y hay alguien en",
+          "mi casa. Un amigo.",
+          "Bolkha. Pocos saben",
+          "de él. Es... especial.",
+          "Cambia croquetas por",
+          "cosas útiles. Búscalo.",
+        ],
       ]
     }
   } else if (g.viejoDogState === "reward_full") {
     dlg = {
-      headers: ["◈ ¡IMPRESIONANTE! ◈", "◈ NUEVA MISIÓN ◈"],
-      colors:  ["#88FFCC",            "#C8A0FF"],
+      headers: ["◈ ¡IMPRESIONANTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈"],
+      colors:  ["#88FFCC",            "#C8A0FF",           "#88DDFF"],
       pages: [
         [
           "¡Luly, eres más fuerte",
@@ -4812,6 +5224,14 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
           "Él tiene mi bastón.",
           "Derrótalo y tráemelo,",
           "así podré caminar mejor.",
+        ],
+        [
+          "Ah... y hay alguien en",
+          "mi casa. Un amigo.",
+          "Bolkha. Pocos saben",
+          "de él. Es... especial.",
+          "Cambia croquetas por",
+          "cosas útiles. Búscalo.",
         ],
       ]
     }
@@ -7537,7 +7957,7 @@ function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w:
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
-  drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
+  drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawBolkha(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──
@@ -8210,6 +8630,17 @@ export default function ProyectoLuly() {
     // W1P2 Boss — sprites exclusivos (no comparten loop general de boss anims)
     L("boss_w1_ss_mareado_right", "/assets/boos/World_1/Second_Section/mareado_right.png")
     L("boss_w1_ss_mareado_left",  "/assets/boos/World_1/Second_Section/mareado_left.png")
+    // Bolkha the Merchant sprites
+    L("bolkha_idle_left",          "/assets/NPCs/Blokha_the_merchant/idle_left.png")
+    L("bolkha_idle_right",         "/assets/NPCs/Blokha_the_merchant/idle_right.png")
+    L("bolkha_talk_left",          "/assets/NPCs/Blokha_the_merchant/talk_left.png")
+    L("bolkha_talk_right",         "/assets/NPCs/Blokha_the_merchant/talk_right.png")
+    L("bolkha_giving_bones_left",  "/assets/NPCs/Blokha_the_merchant/Giving_Bones_left.png")
+    L("bolkha_giving_bones_right", "/assets/NPCs/Blokha_the_merchant/Giving_Bones_right.png")
+    L("bolkha_giving_hearts_left", "/assets/NPCs/Blokha_the_merchant/Giving_Hearts_left.png")
+    L("bolkha_giving_hearts_right","/assets/NPCs/Blokha_the_merchant/Giving_Hearts_right.png")
+    L("bolkha_giving_tball_left",  "/assets/NPCs/Blokha_the_merchant/Giving_Tennis_Ball_left.png")
+    L("bolkha_giving_tball_right", "/assets/NPCs/Blokha_the_merchant/Giving_Tennis_Ball_right.png")
     L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
     L("floor_w1_base",          "/assets/Enviroment/World_1/Floor/F-1.png")
@@ -8387,6 +8818,10 @@ export default function ProyectoLuly() {
       }
 
       // ── TP menu abierto: interceptar ANTES de g.keys para que no muevan al player ──
+      if (g.bolkhaShopOpen) {
+        if (k === "arrowup"   || k === "w") { g.bolkhaShopCursor = Math.max(0, g.bolkhaShopCursor - 1); return }
+        if (k === "arrowdown" || k === "s") { g.bolkhaShopCursor = Math.min(2, g.bolkhaShopCursor + 1); return }
+      }
       if (g.tpMenu?.open) {
         if (k === "arrowup"    || k === "w") { tpNavCP(g, -1);    return }
         if (k === "arrowdown"  || k === "s") { tpNavCP(g, 1);     return }
@@ -8466,11 +8901,47 @@ export default function ProyectoLuly() {
       }
       if (k === "f") handleToggleFS()
       if (k === "escape") {
+        if (g.bolkhaShopOpen) { g.bolkhaShopOpen = false; g.bolkhaState = "idle"; return }
         if (g.tpMenu?.open) { g.tpMenu = null; g.paused = false; _tpClearMvKeys(g); return }
         if (g.showMap) { g.showMap = false; g.paused = false }
         if (g.showDevMap) { g.showDevMap = false; g.paused = false }
       }
       if (k === "e" && !g.tpAnim) {
+        // Bolkha shop: abrir o comprar
+        if (g.bolkhaState === "talking" && !g.bolkhaShopOpen) {
+          g.bolkhaShopOpen = true; g.paused = false
+          return
+        }
+        if (g.bolkhaShopOpen) {
+          const cur2 = Math.max(0, Math.min(g.bolkhaShopCursor, 2))
+          const bItems = [
+            { id: "heart", price: BOLKHA_PRICE_HEART, canBuy: g.pl.hp < g.pl.maxHp,
+              buy: () => { g.pl.hp = Math.min(g.pl.maxHp, g.pl.hp + 2) },
+              givingItem: "hearts" as const,
+              talkText: "Estos… los extraigo de\nlos caídos. Enemigos\ny amigos. Son muy\nimportantes. Pero\nveo que los necesitas." },
+            { id: "bones", price: BOLKHA_PRICE_BONES, canBuy: g.pl.ammo < 15,
+              buy: () => { g.pl.ammo = Math.min(15, g.pl.ammo + 10) },
+              givingItem: "bones" as const,
+              talkText: "Estos son especiales.\nLos consigo en lugares\nque no nombraré.\nNo son tan baratos." },
+            { id: "tball", price: BOLKHA_PRICE_TBALL,
+              canBuy: g.abilities.has("tball") && g.tballAmmo === 0,
+              buy: () => { g.tballAmmo = Math.min(g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT, g.tballAmmo + 3) },
+              givingItem: "tball" as const,
+              talkText: "Estas son muy buenas.\nLas extraigo de las\ntiendas de los altos.\nNo puedo revelar quiénes." },
+          ]
+          const sel = bItems[cur2]
+          if (sel && sel.canBuy && g.croquetas >= sel.price) {
+            g.croquetas -= sel.price
+            sel.buy()
+            g.bolkhaGivingItem = sel.givingItem
+            g.bolkhaGivingTimer = 1.8
+            g.bolkhaState = "giving"
+            g.bolkhaShopOpen = false
+            g.bolkhaTalkText = sel.talkText
+            g.bolkhaTalkTimer = 4.0
+          }
+          return
+        }
         ; (g as any)._gfxMsg = false
         const p = g.pl
         for (const cp of ALL_CPS) {
