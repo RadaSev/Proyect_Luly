@@ -252,7 +252,7 @@ const THEMES_P2: Theme[] = [
 //  SISTEMA DE GUARDADO
 // ══════════════════════════════════════════════════════════════
 const SAVE_KEY = "proyecto_luly_v2"
-const GAME_VERSION = "0.2.17"
+const GAME_VERSION = "0.2.18"
 
 interface LulySave {
   version: 2; savedAt: number; score: number; lives: number; kills: number
@@ -3488,7 +3488,7 @@ function tickViejoDog(g: G) {
     // El jugador lleva la media llave y se acerca a Rex
     // Consumir la llave y empezar animación rex_mitad_llave (2 s) antes de explotar
     g.tballKeyHeld = false
-    g.rexKeyAnimTimer = 2.0   // drawViejoDog mostrará rex_mitad_llave durante este tiempo
+    g.rexKeyAnimTimer = 4.0   // drawViejoDog mostrará rex_mitad_llave durante este tiempo (4 s)
     saveGame(g)
   }
 }
@@ -5092,8 +5092,10 @@ function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   if (dist >= VIEJO_DOG_CALLOUT_R) {
     sprKey = "rex_idle"
   } else if (dist > VIEJO_DOG_TALK_R) {
-    sprKey = `rex_saludo_${dir}`
-  } else if (g.viejoDogState === "key_held") {
+    // En rango callout: si el jugador viene con la llave, mostrar mitad_llave ya desde aquí
+    sprKey = g.viejoDogState === "key_held" ? `rex_mitad_llave_${dir}` : `rex_saludo_${dir}`
+  } else if (g.viejoDogState === "key_held" || g.rexKeyAnimTimer > 0) {
+    // En rango diálogo: estado key_held (llave aún no entregada) O durante la animación post-entrega
     sprKey = `rex_mitad_llave_${dir}`
   } else {
     sprKey = `rex_talk_${dir}`
@@ -8803,13 +8805,15 @@ function pollGamepad(g: G, onMapToggle: () => void, onReset: () => void, onCheck
   // LB = teletransporte (menú de CPs)
   if (edgeDown(GP.LB) && !g.tpAnim) tpOpenMenu(g)
   const bNow = btn(GP.B)
-  if (bNow && !_gpBPrev) {
+  const bEdge = bNow && !_gpBPrev   // solo el primer frame del press (edge detector)
+  if (bEdge) {
     if (g.showMap)                      { g.showMap = false; g.paused = false }
     else if (g.bolkhaState === "talking") bolkhaDoInteract(g)  // abre la tienda
     else onCheckpoint()
   }
   _gpBPrev = bNow
-  g.keys["e"] = !g.showMap && !g.bolkhaShopOpen && bNow && _gpBPrev
+  // E solo se activa en el primer frame del press — evita auto-avance de páginas en diálogos
+  g.keys["e"] = !g.showMap && !g.bolkhaShopOpen && bEdge
   if (btn(GP.L3) && btn(GP.R3)) { onFullscreen() }
 }
 
@@ -9142,7 +9146,8 @@ export default function ProyectoLuly() {
         return  // bloquear cualquier otra tecla mientras el menú está abierto
       }
 
-      G.current.keys[k] = true; if (e.repeat) return
+      if (e.repeat) return   // teclas repetidas no re-activan (preserva "just pressed" para diálogos)
+      G.current.keys[k] = true
       const TAP_WIN = 280
       if (k === "a" || k === "arrowleft") { if (performance.now() - g.pl.tapLeft < TAP_WIN && g.pl.tapLeft > 0) g.pl.runMode = true; g.pl.tapLeft = performance.now() }
       if (k === "d" || k === "arrowright") { if (performance.now() - g.pl.tapRight < TAP_WIN && g.pl.tapRight > 0) g.pl.runMode = true; g.pl.tapRight = performance.now() }
