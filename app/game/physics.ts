@@ -279,6 +279,25 @@ export function dmgPlayer(g: G, dmg: number) {
     g.pl.hp = g.pl.maxHp
     g.pl.vx = 0; g.pl.vy = 0; g.pl.crouching = false; g.pl.h = PH
     g.pl.dash = false; g.pl.wallSliding = false; g.pl.inv = 2
+
+    // ── Abrir puertas de arenas de jefes vivos ───────────────────────────
+    // Solo limpiamos los bloqueos de puerta y los objetos de arena.
+    // El reset completo del jefe (HP, estado, posición) se hace de forma segura
+    // en tickEnemies cuando el jugador ya no está en la misma sala,
+    // evitando modificar campos del enemigo mientras el loop de ataque sigue corriendo.
+    for (const e of g.enemies) {
+      if (!e.boss || e.dying || e.deathFalling) continue
+      if (isW1P1Boss(e)) {
+        g.bossArenaLocked.delete(e.world)
+        g.bossArenaPlats = []
+      }
+      if (isW1P2Boss(e)) {
+        g.bossArenaLocked.delete(e.world + 10)
+        g.toolMounds = []
+        g.flyingTools = []
+      }
+    }
+
     // Reaparece en el último checkpoint con animación de teletransporte
     g.tpAnim = { timer: 0, phase: 0, destX: g.checkpoint.x, destY: g.checkpoint.y }
   }

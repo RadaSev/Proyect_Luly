@@ -454,13 +454,25 @@ export function tickEnemies(g: G, now: number) {
       if (!plSameRoom && !w1p2ArenaLocked) {
         // ── Boss inactivo: snap al centro de la sala (no caminar → las paredes flotantes bloquean) ──
         const hr2 = homeRoom(e)
-        const { x: bx0 } = ro(hr2.w, hr2.c, hr2.r)
+        const { x: bx0, y: by0 } = ro(hr2.w, hr2.c, hr2.r)
         const centerX = bx0 + Math.floor(RW / 2) - Math.floor(e.w / 2)
         e.x = centerX   // snap directo, sin física
         e.vx = 0
         targetVx = 0
         e.dir = 1
         e.state = "patrol"
+
+        // ── Reset completo cuando el jugador no está en la sala ──────────────
+        // Es seguro aquí: no hay ataque en curso (playerNotInRoom → sin chainHit activo)
+        // Así el jefe vuelve a HP completo y estados limpios para la próxima entrada.
+        if (e.hp < e.mhp) {
+          e.hp = e.mhp
+          e.phase = 1   // fase 1 de inicio (no rage)
+          e.sa = 0; e.hurtTimer = 0
+          e.spinTimer = 0; e.stunTimer = 0; e.chainHit = null
+          e.ls = 0; e.ls2 = 0; e.ef = 0; e.eft = 0
+          e.y = by0 + RH - WT - e.h   // reposicionar en el suelo de su sala
+        }
       } else {
         // ── Boss activo (mismo cuarto, o arena W1P2 ya cerrada): perseguir al jugador ─
         if (e.state !== "chase") {

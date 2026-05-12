@@ -504,7 +504,7 @@ export default function ProyectoLuly() {
               g.bossRewardedCPs.add(cp.id); spawnBossCPReward(g, cp)
             }
             const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
-            if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g) }
+            if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g); g.sessionStart = Date.now() }
             break
           }
         }
@@ -1046,7 +1046,7 @@ export default function ProyectoLuly() {
             g.bossRewardedCPs.add(cp.id); spawnBossCPReward(g, cp)
           }
           const changed = g.checkpoint.w !== cp.w || Math.abs(g.checkpoint.x - cp.x) > 40
-          if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g) }
+          if (changed) { g.checkpoint = { w: cp.w, x: cp.x, y: cp.y }; g.kennelMsg = 3; saveGame(g); g.sessionStart = Date.now() }
           break
         }
       }
