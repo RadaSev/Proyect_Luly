@@ -191,10 +191,45 @@ export function roomHash(w: number, c: number, r: number): number {
 // ══════════════════════════════════════════════════════════════
 //  POSICIÓN DE PUERTAS
 // ══════════════════════════════════════════════════════════════
+// ── Verifica si una sala tiene conexión vertical (arriba o abajo) en el laberinto ──
+// No llama a computeDoors para evitar dependencia circular.
+// Consulta V_CONN directamente + conexiones fijas de frontera TROW.
+function roomHasVertConn(w: number, c: number, r: number): boolean {
+  if (r === TROW) return true   // corredor de transición: siempre tiene conexiones verticales
+  const vc = V_CONN[w]
+  for (const [vc1, vr1] of vc) {
+    // Ignorar conexiones que cruzan la frontera TROW (gestionadas por TRANSIT_VERT_*)
+    if (vr1 === TROW - 1 || vr1 === TROW) continue
+    if (vc1 === c && vr1 === r)     return true   // puerta hacia abajo (D)
+    if (vc1 === c && vr1 === r - 1) return true   // puerta hacia arriba (U)
+  }
+  // Conexiones verticales fijas en la frontera con TROW
+  if (r === TROW - 1 && TRANSIT_VERT_UP.includes(c))   return true
+  if (r === TROW + 1 && TRANSIT_VERT_DOWN.includes(c)) return true
+  return false
+}
+
 export function lrDoorY_rel(w: number, leftC: number, r: number): number {
   // Corredor de transición: puerta siempre centrada (corredor horizontal limpio)
   if (r === TROW) return Math.floor((RH - DH) / 2)
   const h = roomHash(w, leftC, r)
+
+  // ★ Elevación de puertas SOLO en salas con conexiones verticales (secciones de laberinto
+  //   que requieren saltos). Salas sin conexión vertical (flujo horizontal puro) usan
+  //   únicamente slots cercanos al suelo para mantener el nivel a ras.
+  const needsJump = roomHasVertConn(w, leftC, r) || roomHasVertConn(w, leftC + 1, r)
+
+  if (!needsJump) {
+    // Salas horizontales puras: puerta entre 58 % y nivel de suelo
+    const groundSlots = [
+      Math.floor((RH - WT - DH) * 0.58),  // nivel medio-bajo — accesible sin saltar
+      Math.floor((RH - WT - DH) * 0.74),  // nivel bajo
+      RH - WT - DH,                         // ras del suelo
+    ]
+    return groundSlots[h % groundSlots.length]
+  }
+
+  // Salas con conexiones verticales: todos los slots disponibles (incluye elevados)
   const slots = [
     WT + 20,
     Math.floor((RH - WT - DH) * 0.28),
@@ -413,23 +448,31 @@ export function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
   //   sw 300+w → jefe P1 (bloqueado hasta matar enemigos normales de Part1)
   //   sw 400+w → jefe P2 (bloqueado hasta matar enemigos normales de Part2)
   //   sw 500+w → jefe P1 arena: se cierra al entrar, se abre al matar al boss
+  //
+  //   ★ SELLADO COMPLETO: cada panel de puerta se expande 1px en cada borde (P=1)
+  //   para solaparse con las paredes adyacentes y eliminar huecos sub-pixel físicos
+  //   y visuales en las esquinas del cubículo. Esto no afecta gameplay (los bloques
+  //   sólidos adyacentes siguen siendo los que detienen al jugador).
+  const P = 1  // solapamiento anti-hueco (px)
   const bossType = isBossRoom(w, c, r)
   if (bossType === "p1" || bossType === "p2") {
     const sw = bossType === "p1" ? 300 + w : 400 + w
-    if (d.L) result.push({ x: x0, y: y0 + lrDoorY_rel(w, c - 1, r), w: WT, h: DH, mode: "d", sw })
-    if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw })
-    if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1), y: y0, w: DW, h: WT, mode: "d", sw })
-    if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r), y: y0 + RH - WT, w: DW, h: WT, mode: "d", sw })
+    // Paneles laterales: expanden P px hacia interior de la pared y P px en alto
+    if (d.L) result.push({ x: x0 - P, y: y0 + lrDoorY_rel(w, c - 1, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw })
+    if (d.R && !d.Rx) result.push({ x: x0 + RW - WT - P, y: y0 + lrDoorY_rel(w, c, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw })
+    // Paneles verticales (techo / suelo): expanden P px hacia exterior + P px en ancho
+    if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1) - P, y: y0 - P, w: DW + 2 * P, h: WT + 2 * P, mode: "d", sw })
+    if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r) - P, y: y0 + RH - WT - P, w: DW + 2 * P, h: WT + 2 * P, mode: "d", sw })
     // Puerta de cierre de arena P1 (sw 500+w): sella entrada lateral
     if (bossType === "p1") {
       const swArena = 500 + w
-      if (d.L) result.push({ x: x0, y: y0 + lrDoorY_rel(w, c - 1, r), w: WT, h: DH, mode: "d", sw: swArena })
-      if (d.R && !d.Rx) result.push({ x: x0 + RW - WT, y: y0 + lrDoorY_rel(w, c, r), w: WT, h: DH, mode: "d", sw: swArena })
+      if (d.L) result.push({ x: x0 - P, y: y0 + lrDoorY_rel(w, c - 1, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw: swArena })
+      if (d.R && !d.Rx) result.push({ x: x0 + RW - WT - P, y: y0 + lrDoorY_rel(w, c, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw: swArena })
     }
     // Puerta de cierre de arena P2 (sw 510+w): sella entrada superior al entrar en batalla
     if (bossType === "p2") {
       const swArena2 = 510 + w
-      if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1), y: y0, w: DW, h: WT, mode: "d", sw: swArena2 })
+      if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1) - P, y: y0 - P, w: DW + 2 * P, h: WT + 2 * P, mode: "d", sw: swArena2 })
     }
   }
 

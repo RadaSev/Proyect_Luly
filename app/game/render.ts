@@ -1215,12 +1215,14 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   // PIL: 1536×1024, content(12,44,1528,934) → W=1516 H=890, pad=12/8/44/90
   // Scale 0.3596 → render 552×368, content 545×320
   // HRX: Rex al 27% del ancho del contenido → bx - 151
-  // HRY: base del contenido a ras de suelo (by+10) → by - 326
+  // HRY: base del contenido pegada al suelo (by+2) → by - 334
+  //   Cálculo: content-bot = 334px de offset → base queda 2px dentro del tile de suelo
+  //   (antes: by-326 = by+10; ahora: by-302 = by+2 → base casi exactamente a ras)
   {
     const RH_house = sprs["rex_house"]
     const HRW = 552, HRH = 368
     const HRX = bx - 151
-    const HRY = by - 326   // contenido apoyado en el suelo (by + 10 = suelo en pantalla)
+    const HRY = by - 302  // base del contenido a ras de suelo (by + 2)
     if (RH_house && RH_house.complete && RH_house.naturalWidth > 0) {
       // Animación 12fps — spritesheet 6×6 = 36 frames, frame=384×384px
       const RH_FPF   = 1000 / 12           // ≈83 ms/frame — velocidad natural
@@ -1975,52 +1977,54 @@ export function drawWalls(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {
       const isUltraGate   = p.sw !== undefined && p.sw >= 200 && p.sw < 300
       const isP1BossGate  = p.sw !== undefined && p.sw >= 300 && p.sw < 400
       const isP2BossGate  = p.sw !== undefined && p.sw >= 400 && p.sw < 500
+      // ★ SELLADO VISUAL COMPLETO: expandir 1px en cada borde para cubrir cualquier
+      //   seam sub-pixel entre el panel de puerta y las paredes adyacentes.
+      const vx = sx - 1, vy = sy - 1, vw = p.w + 2, vh = p.h + 2
       if (isP2BossGate) {
         // Puerta roja Jefe P2 — sellada hasta matar enemigos normales de Part2
-        ctx.fillStyle = "#280000CC"; ctx.fillRect(sx, sy, p.w, p.h)
-        ctx.fillStyle = `rgba(180,0,0,${0.45 + 0.35 * Math.sin(t * 1.6)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-        ctx.strokeStyle = "#CC0000"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = "#280000CC"; ctx.fillRect(vx, vy, vw, vh)
+        ctx.fillStyle = `rgba(180,0,0,${0.45 + 0.35 * Math.sin(t * 1.6)})`; ctx.fillRect(vx + 2, vy + 2, vw - 4, vh - 4)
+        ctx.strokeStyle = "#CC0000"; ctx.lineWidth = 2; ctx.strokeRect(vx, vy, vw, vh)
         ctx.fillStyle = `rgba(255,60,0,${0.8 + 0.2 * Math.sin(t * 2.2)})`
         ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚠", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
       } else if (isP1BossGate) {
         // Puerta verde Jefe P1 — sellada hasta matar enemigos normales de Part1
-        ctx.fillStyle = "#002800CC"; ctx.fillRect(sx, sy, p.w, p.h)
-        ctx.fillStyle = `rgba(0,160,60,${0.4 + 0.3 * Math.sin(t * 1.5)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-        ctx.strokeStyle = "#00AA44"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = "#002800CC"; ctx.fillRect(vx, vy, vw, vh)
+        ctx.fillStyle = `rgba(0,160,60,${0.4 + 0.3 * Math.sin(t * 1.5)})`; ctx.fillRect(vx + 2, vy + 2, vw - 4, vh - 4)
+        ctx.strokeStyle = "#00AA44"; ctx.lineWidth = 2; ctx.strokeRect(vx, vy, vw, vh)
         ctx.fillStyle = `rgba(0,220,90,${0.8 + 0.2 * Math.sin(t * 2)})`
         ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚔", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
       } else if (isUltraGate) {
         // Puerta ultra-boss — oscura/dorada, sellada hasta matar AMBOS jefes
-        ctx.fillStyle = "#1A1000CC"; ctx.fillRect(sx, sy, p.w, p.h)
-        ctx.fillStyle = `rgba(200,140,0,${0.4 + 0.3 * Math.sin(t * 1.2)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-        ctx.strokeStyle = "#FFB300"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = "#1A1000CC"; ctx.fillRect(vx, vy, vw, vh)
+        ctx.fillStyle = `rgba(200,140,0,${0.4 + 0.3 * Math.sin(t * 1.2)})`; ctx.fillRect(vx + 2, vy + 2, vw - 4, vh - 4)
+        ctx.strokeStyle = "#FFB300"; ctx.lineWidth = 2; ctx.strokeRect(vx, vy, vw, vh)
         const cx2 = sx + p.w / 2, cy2 = sy + p.h / 2
         ctx.fillStyle = `rgba(255,200,0,${0.8 + 0.2 * Math.sin(t * 2.5)})`
         ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚡", cx2, cy2 + 4); ctx.textAlign = "left"
       } else if (isCyanGate) {
         // Puerta cian — bloqueada hasta matar el boss de la Part1
-        ctx.fillStyle = "#003A3ABB"; ctx.fillRect(sx, sy, p.w, p.h)
-        ctx.fillStyle = `rgba(0,210,200,${0.35 + 0.3 * Math.sin(t * 1.4)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-        ctx.strokeStyle = "#00FFEE"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
-        // Pequeño símbolo de candado en el centro
+        ctx.fillStyle = "#003A3ABB"; ctx.fillRect(vx, vy, vw, vh)
+        ctx.fillStyle = `rgba(0,210,200,${0.35 + 0.3 * Math.sin(t * 1.4)})`; ctx.fillRect(vx + 2, vy + 2, vw - 4, vh - 4)
+        ctx.strokeStyle = "#00FFEE"; ctx.lineWidth = 2; ctx.strokeRect(vx, vy, vw, vh)
         const cx2 = sx + p.w / 2, cy2 = sy + p.h / 2
         ctx.fillStyle = `rgba(0,255,238,${0.7 + 0.3 * Math.sin(t * 2)})`
         ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("🔒", cx2, cy2 + 4); ctx.textAlign = "left"
       } else if (isBossEntrance) {
         // Puerta roja intensa — bloqueada hasta matar enemigos normales
-        ctx.fillStyle = "#3A0000BB"; ctx.fillRect(sx, sy, p.w, p.h)
-        ctx.fillStyle = `rgba(200,0,0,${0.5 + 0.4 * Math.sin(t * 1.8)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-        ctx.strokeStyle = "#FF2200"; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = "#3A0000BB"; ctx.fillRect(vx, vy, vw, vh)
+        ctx.fillStyle = `rgba(200,0,0,${0.5 + 0.4 * Math.sin(t * 1.8)})`; ctx.fillRect(vx + 2, vy + 2, vw - 4, vh - 4)
+        ctx.strokeStyle = "#FF2200"; ctx.lineWidth = 2; ctx.strokeRect(vx, vy, vw, vh)
         ctx.fillStyle = "#FF4400"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("⚠BOSS⚠", sx + p.w / 2, sy + p.h / 2 + 3); ctx.textAlign = "left"
       } else {
-        ctx.fillStyle = th.doorC + "BB"; ctx.fillRect(sx, sy, p.w, p.h)
-        ctx.fillStyle = `rgba(255,80,0,${0.3 + 0.3 * Math.sin(t)})`; ctx.fillRect(sx + 2, sy + 2, p.w - 4, p.h - 4)
-        ctx.strokeStyle = th.doorC; ctx.lineWidth = 2; ctx.strokeRect(sx, sy, p.w, p.h)
+        ctx.fillStyle = th.doorC + "BB"; ctx.fillRect(vx, vy, vw, vh)
+        ctx.fillStyle = `rgba(255,80,0,${0.3 + 0.3 * Math.sin(t)})`; ctx.fillRect(vx + 2, vy + 2, vw - 4, vh - 4)
+        ctx.strokeStyle = th.doorC; ctx.lineWidth = 2; ctx.strokeRect(vx, vy, vw, vh)
         ctx.fillStyle = "#FFF"; ctx.font = "bold 10px 'Courier New',monospace"; ctx.textAlign = "center"
         ctx.fillText("██SELLADO██", sx + p.w / 2, sy + p.h / 2 + 4); ctx.textAlign = "left"
       }
