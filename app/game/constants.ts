@@ -16,7 +16,7 @@ export const PL_HBX = 10, PL_HBT = 8
 export const EN_HBX = 14, EN_HBT = 10
 export const EW = 96, EH = 96, BW = 140, BH = 140
 export const WALK = 3, RUN = 6, JV = -12, GUP = 0.38, GDN = 0.62, GMAX = 13
-export const PSPD = 6, WLEN = 70, WDMG = 1, STEP = 1 / 60
+export const PSPD = 9, WLEN = 70, WDMG = 1, STEP = 1 / 60
 export const CHAIN_REACH = 85    // alcance del ataque de cadena del enemigo W1S2 (px)
 export const W1P1_BW = 64, W1P1_BH = 84   // Jefe W1 Sección 1: hitbox (un poco más grande que Luly)
 export const WHIP1_REACH = 105   // alcance del látigo Ataque 1 del jefe W1P1 (px)
@@ -217,7 +217,7 @@ export const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E5393
 
 // ── Salvar ──────────────────────────────────────────────────────────────────
 export const SAVE_KEY = "proyecto_luly_v2"
-export const GAME_VERSION = "0.3.5"
+export const GAME_VERSION = "0.3.6"
 
 // ── BG ──────────────────────────────────────────────────────────────────────
 export const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]
