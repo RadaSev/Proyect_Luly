@@ -149,6 +149,7 @@ export type G = {
   bolkhaRexTold: boolean           // Rex mencionó a Bolkha en su diálogo → puede aparecer
   bolkhaMetDialogSeen: boolean     // jugadora ya vio el diálogo "entonces ya lo conociste..."
   rexKeyAnimTimer: number          // segundos restantes de animación pre-explosión al entregar llave
+  sessionStart: number             // timestamp al iniciar sesión o al último guardado (para aviso de salida)
 }
 
 // SprBank: mapa de sprites cargados

@@ -291,5 +291,6 @@ export function mkG_lazy(): G {
     bolkhaRexTold: false,
     bolkhaMetDialogSeen: false,
     rexKeyAnimTimer: 0,
+    sessionStart: Date.now(),
   } as G
 }

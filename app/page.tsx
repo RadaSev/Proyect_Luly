@@ -52,6 +52,7 @@ export default function ProyectoLuly() {
   const [pauseSel, setPauseSel] = useState(0)        // ítem seleccionado en menú pausa
   const [showSettings, setShowSettings] = useState(false)  // overlay de configuración
   const [deleteConfirm, setDeleteConfirm] = useState(false) // doble confirmación borrar partida
+  const [exitWarning, setExitWarning] = useState(false)    // modal confirmación salir al menú
   // ── DEV-CELULAR: variante de D-PAD para pruebas en móvil ────────
   const [dpadMode, setDpadMode] = useState<"cross"|"joystick">("cross")
   useEffect(() => {
@@ -770,7 +771,7 @@ export default function ProyectoLuly() {
         if (edgeDown(pad, GP.A)) {
           const sel = pauseSelRef.current
           if (sel === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
-          else if (sel === 1) { G.current = mkG_lazy(); setUi({ paused: false, over: false, won: false, fps: 60, score: 0, showDevMap: false, showMap: false, devMode: false, tpMenuOpen: false, showRealMap: false }); setScreen("start"); gameActiveRef.current = false }
+          else if (sel === 1) { setExitWarning(true) }
         }
         if (edgeDown(pad, GP.B)) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
       }
@@ -2155,7 +2156,7 @@ export default function ProyectoLuly() {
                       onMouseEnter={() => { pauseSelRef.current = i; setPauseSel(i) }}
                       onClick={() => {
                         if (i === 0) { G.current.paused = false; setUi(u => ({ ...u, paused: false })) }
-                        else if (i === 1) handleRestart()
+                        else if (i === 1) { setExitWarning(true) }
                       }}
                       style={{
                         padding: "8px 20px",
@@ -2181,6 +2182,108 @@ export default function ProyectoLuly() {
                   <CtrlHint action="teleport"  label="teletransporte" size={13} />
                   <CtrlHint action="confirm"   label="confirmar" size={13} />
                   <CtrlHint action="cancel"    label="atrás" size={13} />
+                </div>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* ══════════════════════════════════════════════════
+            MODAL — Confirmación salir al menú principal
+        ══════════════════════════════════════════════════ */}
+        {exitWarning && (() => {
+          const g = G.current
+          const th = THEMES[Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))]
+          // Tiempo desde el último guardado (sessionStart se reinicia al guardar)
+          const diffMs  = Date.now() - g.sessionStart
+          const diffMin = Math.floor(diffMs / 60_000)
+          const diffH   = Math.floor(diffMs / 3_600_000)
+          const timeStr = diffH >= 1
+            ? `${diffH}h ${Math.floor((diffMs % 3_600_000) / 60_000)} min`
+            : diffMin >= 1 ? `${diffMin} min` : "menos de un minuto"
+          const accent  = th.accent
+          return (
+            <div style={{
+              position: "fixed", inset: 0, zIndex: 9999,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: "rgba(0,0,0,0.88)", backdropFilter: "blur(8px)",
+              fontFamily: "'Courier New', monospace",
+            }}
+              onClick={(e) => { if (e.target === e.currentTarget) setExitWarning(false) }}
+            >
+              <div style={{
+                width: "min(420px, 92vw)",
+                background: "#060A06",
+                border: `1px solid ${accent}55`,
+                borderRadius: 12,
+                boxShadow: `0 0 40px ${accent}22`,
+                overflow: "hidden",
+              }}>
+                {/* Cabecera */}
+                <div style={{
+                  padding: "16px 20px 12px",
+                  borderBottom: `1px solid ${accent}22`,
+                  display: "flex", alignItems: "center", gap: 10,
+                }}>
+                  <span style={{ fontSize: 20 }}>⚠</span>
+                  <span style={{ color: accent, fontSize: 13, letterSpacing: "0.18em", fontWeight: "bold" }}>
+                    SALIR AL MENÚ
+                  </span>
+                </div>
+
+                {/* Cuerpo */}
+                <div style={{ padding: "18px 20px 14px", color: "#AAAAAA", fontSize: 11, lineHeight: 1.7, letterSpacing: "0.06em" }}>
+                  <p style={{ marginBottom: 12, color: "#DDDDDD" }}>
+                    Guardaste hace{" "}
+                    <span style={{ color: diffMin >= 30 ? "#FF6666" : accent, fontWeight: "bold" }}>
+                      {timeStr}
+                    </span>
+                  </p>
+                  <p style={{ marginBottom: 0, color: "#888" }}>
+                    Si salís ahora, perderás todos los avances
+                    desde el <span style={{ color: "#CCC" }}>último checkpoint</span>.
+                  </p>
+                </div>
+
+                {/* Botones */}
+                <div style={{
+                  display: "flex", gap: 10, padding: "10px 20px 18px",
+                  justifyContent: "flex-end",
+                }}>
+                  {/* Cancelar → se queda en el juego */}
+                  <button
+                    onClick={() => setExitWarning(false)}
+                    style={{
+                      padding: "8px 18px", cursor: "pointer",
+                      background: "transparent",
+                      border: "1px solid #444",
+                      color: "#888",
+                      fontFamily: "'Courier New', monospace",
+                      fontSize: 11, letterSpacing: "0.15em",
+                      borderRadius: 6,
+                    }}
+                    onMouseEnter={e => { (e.target as HTMLElement).style.borderColor = "#666"; (e.target as HTMLElement).style.color = "#BBB" }}
+                    onMouseLeave={e => { (e.target as HTMLElement).style.borderColor = "#444"; (e.target as HTMLElement).style.color = "#888" }}
+                  >
+                    ▶ CONTINUAR
+                  </button>
+                  {/* Confirmar → ir al menú principal */}
+                  <button
+                    onClick={() => { setExitWarning(false); handleRestart() }}
+                    style={{
+                      padding: "8px 18px", cursor: "pointer",
+                      background: "rgba(180,30,30,0.18)",
+                      border: "1px solid #AA2222",
+                      color: "#FF8888",
+                      fontFamily: "'Courier New', monospace",
+                      fontSize: 11, letterSpacing: "0.15em",
+                      borderRadius: 6,
+                    }}
+                    onMouseEnter={e => { (e.target as HTMLElement).style.background = "rgba(180,30,30,0.35)"; (e.target as HTMLElement).style.color = "#FFAAAA" }}
+                    onMouseLeave={e => { (e.target as HTMLElement).style.background = "rgba(180,30,30,0.18)"; (e.target as HTMLElement).style.color = "#FF8888" }}
+                  >
+                    ↩ IR AL MENÚ
+                  </button>
                 </div>
               </div>
             </div>

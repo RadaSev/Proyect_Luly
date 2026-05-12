@@ -65,6 +65,7 @@ export function tickCheckpoints(g: G) {
       if (arrived) {
         g.checkpoint = { w: arrived.w, x: arrived.x, y: arrived.y }
         saveGame(g)
+        g.sessionStart = Date.now()   // reinicia el contador de sesión tras guardar
         g.kennelMsg = 3   // muestra el mensaje de guardado
       }
       g.tpAnim = null
