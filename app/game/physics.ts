@@ -394,15 +394,23 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
   }
   // ── Notificación de celular cuando el último enemigo de una sección muere ──
   const ew = e.world ?? 0
+  const _triggerPhoneAnim = (kind: "p1" | "p2" | "ultra") => {
+    const now_ms = Date.now()
+    g.rexPhoneNotif = { kind, timer: 20.0, setAt: now_ms }  // timer largo: la animación tarda ~8-9s
+    if (!g.pl.usingPhone) {
+      g.pl.usingPhone = true
+      g.pl.pf = 0   // reiniciar frame al inicio de la animación
+    }
+  }
   if (!e.boss) {
     if (areRegularP1EnemiesDead(g, ew) && !g.p1BossRexSeen && !g.rexPhoneNotif)
-      g.rexPhoneNotif = { kind: "p1", timer: 10.0 }
+      _triggerPhoneAnim("p1")
     else if (areRegularP2EnemiesDead(g, ew) && !g.p2BossRexSeen && !g.rexPhoneNotif)
-      g.rexPhoneNotif = { kind: "p2", timer: 10.0 }
+      _triggerPhoneAnim("p2")
   }
   // Ultra: cuando AMBOS jefes están muertos (puede ser tras matar a p1 o a p2)
   if (e.boss && isPart1BossDead(g, ew) && isPart2BossDead(g, ew) && !g.ultraBossRexSeen && !g.rexPhoneNotif)
-    g.rexPhoneNotif = { kind: "ultra", timer: 10.0 }
+    _triggerPhoneAnim("ultra")
 }
 
 // Helper global para saber si un spawn está muerto (tolerante a adopciones)
@@ -892,6 +900,6 @@ export function mkCratesForWorld(w: number, dead: Set<string>): Crate[] {
 // ── mkPlayer: estado inicial del jugador
 export function mkPlayer(): Player {
   const [sw, sc, sr] = PLAYER_START; const { x: x0, y: y0 } = ro(sw, sc, sr)
-  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 10, maxHp: 10, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0 }
+  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 10, maxHp: 10, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0, usingPhone: false }
 }
 

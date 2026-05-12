@@ -46,8 +46,12 @@ export function tickShake(g: G) {
     if (g.abilityNotif.timer <= 0) g.abilityNotif = null
   }
   if (g.rexPhoneNotif && g.rexPhoneNotif.timer > 0) {
-    g.rexPhoneNotif.timer -= STEP
-    if (g.rexPhoneNotif.timer <= 0) g.rexPhoneNotif = null
+    // No decrementar mientras el jugador está en la animación de celular
+    // (la limpieza del notif la hace page.tsx al terminar la animación)
+    if (!g.pl.usingPhone) {
+      g.rexPhoneNotif.timer -= STEP
+      if (g.rexPhoneNotif.timer <= 0) g.rexPhoneNotif = null
+    }
   }
   if (g.comboTimer > 0) {
     g.comboTimer -= STEP

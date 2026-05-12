@@ -88,6 +88,9 @@ export default function ProyectoLuly() {
     L("player_atack_bone_left",    "/assets/player/player_atack_bone_left.png")
     L("player_atack_correa",       "/assets/player/luly_atack_correa.png")
     L("player_atack_correa_left",  "/assets/player/luly_atack_correa_left.png")
+    // celular (mensaje de Rex)
+    L("player_celular_right", "/assets/player/player_celular_right.png")
+    L("player_celular_left",  "/assets/player/player_celular_left.png")
     // dash: cargados pero no usados hasta tener sprites 25fps
     L("player_dash_right", "/assets/player/player_dash_right.png")
     L("player_dash_left",  "/assets/player/player_dash_left.png")
@@ -220,22 +223,65 @@ export default function ProyectoLuly() {
       slow_walk: LULY_FPF, slow_walk_left: LULY_FPF,
       atack_bone: LULY_FPF, atack_bone_left: LULY_FPF,
       atack_correa: LULY_FPF, atack_correa_left: LULY_FPF,
+      celular_right: LULY_FPF, celular_left: LULY_FPF,
       // dash: desactivado hasta tener sprites 25fps
     }
     let raf: number, el = 0, last = performance.now()
+    // Constantes de la animación del celular (sincronizadas con render.ts)
+    const PHONE_FPF         = LULY_FPF          // 40ms/frame
+    const PHONE_PHASE0_DUR  = 20 * PHONE_FPF    // 800ms — frames 0→19
+    const PHONE_CHAR_DELAY  = 62                 // ms/carácter (lento y teatral)
+    const PHONE_WAIT_DUR    = 4200               // ms de espera tras tipear
+    const PHONE_PHASE3_DUR  = 5 * PHONE_FPF     // 200ms — frames 20→24
+
     // 5×5 spritesheet = 25 frames totales
-    // jump: cicla hasta frame 24 y lo congela mientras el jugador está en el aire
     const fn = (now: number) => {
       el += now - last; last = now
       const g = G.current, p = g.pl
-      const s = sp[p.pa] ?? LULY_FPF
-      if (el > s) {
-        el = 0
-        const isJump = p.pa === "jump" || p.pa === "jump_left"
-        if (isJump && !p.onGround && p.pf >= 24) {
-          // Congela en el último frame mientras está en el aire
+      const isPhone = p.pa === "celular_right" || p.pa === "celular_left"
+
+      if (isPhone && g.rexPhoneNotif?.setAt) {
+        // ── Animación celular: fases derivadas de setAt ──────────────────────
+        const notif   = g.rexPhoneNotif
+        const bossName = notif.kind === "p1" ? "Castigador" : notif.kind === "p2" ? "Herrero" : "Torturado"
+        const line1   = "📱 Rex: ¡Luly, ven a verme!"
+        const line2   = `Necesitas saber del ${bossName}`
+        const totalChars  = line1.length + line2.length
+        const typingStart = notif.setAt + PHONE_PHASE0_DUR
+        const typingEnd   = typingStart + totalChars * PHONE_CHAR_DELAY
+        const waitEnd     = typingEnd   + PHONE_WAIT_DUR
+        const phase3End   = waitEnd     + PHONE_PHASE3_DUR
+        const nowMs = Date.now()
+
+        if (nowMs < typingStart) {
+          // Fase 0: avanzar frames 0-19 a velocidad normal
+          if (el > PHONE_FPF) { el = 0; if (p.pf < 20) p.pf++ }
+        } else if (nowMs < waitEnd) {
+          // Fase 1 (tipeo) + Fase 2 (espera): congelar en frame 20
+          p.pf = 20; el = 0
+        } else if (nowMs < phase3End) {
+          // Fase 3: avanzar frames 20→24 a velocidad normal
+          if (el > PHONE_FPF) { el = 0; if (p.pf < 24) p.pf++ }
         } else {
-          p.pf = (p.pf + 1) % 25
+          // Fin: devolver control al jugador
+          p.usingPhone = false
+          p.pf = 0
+          g.rexPhoneNotif = null
+        }
+      } else if (isPhone) {
+        // Safety: sin setAt, salir inmediatamente
+        p.usingPhone = false; p.pf = 0
+      } else {
+        // ── Animación normal ─────────────────────────────────────────────────
+        const s = sp[p.pa] ?? LULY_FPF
+        if (el > s) {
+          el = 0
+          const isJump = p.pa === "jump" || p.pa === "jump_left"
+          if (isJump && !p.onGround && p.pf >= 24) {
+            // Congela en el último frame mientras está en el aire
+          } else {
+            p.pf = (p.pf + 1) % 25
+          }
         }
       }
       raf = requestAnimationFrame(fn)

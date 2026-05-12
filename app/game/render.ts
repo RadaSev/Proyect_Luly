@@ -2498,6 +2498,10 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       atack_correa_left: { rw: 126, rh:  76, ryOff:   0, rxOff: -79 },  // Luly dcha, correa extiende izq
       dash_right:        { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
       dash_left:         { rw:  PW, rh:  PH, ryOff:   0, rxOff:   0 },
+      // Celular: frame 170×262, contenido 9-161 × 4-260, target charH=68px
+      // scale = 69/262 ≈ 0.263 → rw=45 rh=69; charCenterX=22px → rxOff=-7
+      celular_right:     { rw:  45, rh:  69, ryOff:   3, rxOff:  -7 },
+      celular_left:      { rw:  45, rh:  69, ryOff:   3, rxOff:  -7 },
     }
     const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
     const rw = dim.rw, rh = dim.rh
@@ -4606,42 +4610,111 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ctx.restore()
   }
 
-  // ── Burbuja de celular de Luly (mensaje de Rex) ──────────────────────
-  if (g.rexPhoneNotif && g.rexPhoneNotif.timer > 0) {
+  // ── Burbuja de celular de Luly (mensaje de Rex) — tipeo animado ─────────
+  if (g.rexPhoneNotif && g.rexPhoneNotif.setAt) {
     const pn = g.rexPhoneNotif
-    const tLeft = pn.timer
-    const alpha = Math.min(1, tLeft * 2.5) * Math.min(1, (10.0 - tLeft) * 1.8)
     const bossName = pn.kind === "p1" ? "Castigador" : pn.kind === "p2" ? "Herrero" : "Torturado"
     const line1 = "📱 Rex: ¡Luly, ven a verme!"
     const line2 = `Necesitas saber del ${bossName}`
-    ctx.save(); ctx.globalAlpha = Math.max(0, alpha)
-    ctx.font = "bold 10px 'Courier New',monospace"
-    const w1 = ctx.measureText(line1).width, w2 = ctx.measureText(line2).width
-    const bw = Math.max(w1, w2) + 18, bh = 36
-    // Posición sobre Luly
-    const plSx = g.pl.x - g.cx + PW / 2
-    const plSy = g.pl.y - g.cy
-    const sc = g.mobileZoom === "close" ? 1.35 : 1.0
-    // plSx/plSy son coords en el espacio sin zoom → en canvas real el jugador aparece en plSx*sc, plSy*sc
-    const bx2 = Math.max(4, Math.min(CW - bw - 4, plSx * sc - bw / 2))
-    const by2 = Math.max(4, plSy * sc - bh - 28)
-    // Fondo cian oscuro (teléfono)
-    ctx.fillStyle = "rgba(0,30,40,0.94)"
-    ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 6); ctx.fill()
-    ctx.strokeStyle = "#00CCDD88"; ctx.lineWidth = 1.2
-    ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 6); ctx.stroke()
-    // Cola apuntando hacia Luly
-    const tailX = Math.max(bx2 + 12, Math.min(bx2 + bw - 12, plSx * sc))
-    ctx.fillStyle = "rgba(0,30,40,0.94)"
-    ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX + 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 8); ctx.closePath(); ctx.fill()
-    ctx.strokeStyle = "#00CCDD88"; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 8); ctx.lineTo(tailX + 5, by2 + bh); ctx.stroke()
-    // Texto
-    ctx.fillStyle = "#AAEEFF"; ctx.textAlign = "center"
-    ctx.fillText(line1, bx2 + bw / 2, by2 + 13)
-    ctx.fillStyle = "#66DDCC"
-    ctx.fillText(line2, bx2 + bw / 2, by2 + 27)
-    ctx.textAlign = "left"; ctx.restore()
+    const totalChars = line1.length + line2.length
+
+    // Mismas constantes que page.tsx
+    const PHONE_FPF        = 40
+    const PHONE_PHASE0_DUR = 20 * PHONE_FPF   // 800ms
+    const PHONE_CHAR_DELAY = 62                // ms/carácter
+    const PHONE_WAIT_DUR   = 4200              // ms espera
+    const PHONE_PHASE3_DUR = 5 * PHONE_FPF    // 200ms
+
+    const typingStart = pn.setAt + PHONE_PHASE0_DUR
+    const typingEnd   = typingStart + totalChars * PHONE_CHAR_DELAY
+    const waitEnd     = typingEnd   + PHONE_WAIT_DUR
+    const phase3End   = waitEnd     + PHONE_PHASE3_DUR
+    const nowMs       = Date.now()
+
+    // Calcular qué mostrar y con qué alpha
+    let line1Shown = "", line2Shown = ""
+    let bubbleAlpha = 0
+
+    if (nowMs < typingStart) {
+      // Fase 0: sin texto aún, pero la burbuja aparece ya (fade-in rápido)
+      const fadeIn = Math.min(1, (nowMs - pn.setAt) / 300)
+      bubbleAlpha = fadeIn * 0.55   // tenue en fase 0
+    } else if (nowMs < typingEnd) {
+      // Fase 1: tipeo carácter a carácter
+      const elapsed     = nowMs - typingStart
+      const charsShown  = Math.floor(elapsed / PHONE_CHAR_DELAY)
+      line1Shown = line1.slice(0, Math.min(charsShown, line1.length))
+      line2Shown = charsShown > line1.length
+        ? line2.slice(0, charsShown - line1.length)
+        : ""
+      bubbleAlpha = 1
+    } else if (nowMs < waitEnd) {
+      // Fase 2: texto completo, espera
+      line1Shown = line1; line2Shown = line2
+      bubbleAlpha = 1
+    } else if (nowMs < phase3End) {
+      // Fase 3: fade-out suave
+      line1Shown = line1; line2Shown = line2
+      bubbleAlpha = 1 - (nowMs - waitEnd) / PHONE_PHASE3_DUR
+    } else {
+      bubbleAlpha = 0
+    }
+
+    if (bubbleAlpha > 0.01) {
+      ctx.save(); ctx.globalAlpha = Math.max(0, bubbleAlpha)
+      ctx.font = "bold 10px 'Courier New',monospace"
+
+      // Ancho fijo del cuadro (usa las líneas completas para calcular tamaño estable)
+      const w1full = ctx.measureText(line1).width
+      const w2full = ctx.measureText(line2).width
+      const bw = Math.max(w1full, w2full) + 22
+      const bh = 40   // altura fija con dos líneas
+
+      const plSx = g.pl.x - g.cx + PW / 2
+      const plSy = g.pl.y - g.cy
+      const sc   = g.mobileZoom === "close" ? 1.35 : 1.0
+      const bx2  = Math.max(4, Math.min(CW - bw - 4, plSx * sc - bw / 2))
+      const by2  = Math.max(4, plSy * sc - bh - 32)
+
+      // Fondo
+      ctx.fillStyle = "rgba(0,25,35,0.96)"
+      ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 7); ctx.fill()
+      ctx.strokeStyle = "#00CCDDAA"; ctx.lineWidth = 1.3
+      ctx.beginPath(); ctx.roundRect(bx2, by2, bw, bh, 7); ctx.stroke()
+
+      // Cola
+      const tailX = Math.max(bx2 + 14, Math.min(bx2 + bw - 14, plSx * sc))
+      ctx.fillStyle = "rgba(0,25,35,0.96)"
+      ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX + 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 9); ctx.closePath(); ctx.fill()
+      ctx.strokeStyle = "#00CCDDAA"; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.moveTo(tailX - 5, by2 + bh); ctx.lineTo(tailX, by2 + bh + 9); ctx.lineTo(tailX + 5, by2 + bh); ctx.stroke()
+
+      ctx.textAlign = "center"
+
+      // Línea 1
+      if (line1Shown.length > 0) {
+        ctx.fillStyle = "#AAEEFF"
+        ctx.fillText(line1Shown, bx2 + bw / 2, by2 + 15)
+      }
+
+      // Línea 2
+      if (line2Shown.length > 0) {
+        ctx.fillStyle = "#66DDCC"
+        ctx.fillText(line2Shown, bx2 + bw / 2, by2 + 30)
+      }
+
+      // Cursor parpadeante durante el tipeo
+      const isTyping = nowMs >= typingStart && nowMs < typingEnd
+      if (isTyping && Math.floor(nowMs / 420) % 2 === 0) {
+        const cursorLine = line2Shown.length > 0 ? line2Shown : line1Shown
+        const cursorY    = line2Shown.length > 0 ? by2 + 30 : by2 + 15
+        const cursorX    = bx2 + bw / 2 + ctx.measureText(cursorLine).width / 2 + 2
+        ctx.fillStyle = "#00FFEE"
+        ctx.fillRect(cursorX, cursorY - 8, 2, 10)
+      }
+
+      ctx.textAlign = "left"; ctx.restore()
+    }
   }
 
   // ── Notificación de habilidad desbloqueada ────────────────────────────

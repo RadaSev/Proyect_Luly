@@ -12,6 +12,20 @@ import { activePlats, resolve, dmgPlayer, dmgEnemy, getDir } from "./physics"
 import { spawnExplosion, triggerShake } from "./utils"
 
 export function tickPlayer(g: G) {
+  // ── Animación de celular (mensaje de Rex): bloquea todos los inputs ──────────
+  // El ciclo de vida (usingPhone = false) lo gestiona page.tsx según setAt timing.
+  if (g.pl.usingPhone) {
+    const k2 = g.keys
+    k2["a"] = false; k2["arrowleft"]  = false
+    k2["d"] = false; k2["arrowright"] = false
+    k2[" "] = false; k2["arrowup"] = false; k2["w"] = false
+    k2["s"] = false; k2["arrowdown"] = false
+    k2["shift"] = false
+    k2["n"] = false; k2["m"] = false; k2["v"] = false
+    g.pl.vx = 0; g.pl.runMode = false; g.pl.crouching = false
+    // Física vertical continúa (gravedad/colisión) — no flotar
+  }
+
   // ── Freeze de movimiento: shop abierto O animación de entrega de Bolkha ──────
   if (g.bolkhaShopOpen || g.bolkhaState === "giving") {
     const k2 = g.keys
@@ -195,6 +209,11 @@ export function tickPlayer(g: G) {
       }
       // zona media (-2 a 2.5): mantiene pa actual (walk/idle/jump congelado)
     }
+  }
+
+  // ── Celular: siempre gana sobre cualquier otro estado de animación ────────────
+  if (p.usingPhone) {
+    p.pa = p.facing === 1 ? "celular_right" : "celular_left"
   }
 
   if (p.inv > 0) p.inv -= STEP

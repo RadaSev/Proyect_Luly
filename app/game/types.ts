@@ -23,6 +23,7 @@ export type MovingPlat = {
 
 export type Player = {
   x: number; y: number; w: number; h: number; vx: number; vy: number; onGround: boolean; facing: 1 | -1; hp: number; maxHp: number; inv: number; ammo: number; ls: number; as2: number; sh: boolean; jh: boolean; djump: boolean; djumpAvail: boolean; wh: boolean; wcd: number; pf: number; pft: number; pa: string; crouching: boolean; stamina: number; maxStamina: number; staminaCooldown: number; exhausted: boolean; runMode: boolean; tapLeft: number; tapRight: number;
+  usingPhone: boolean       // animación del celular activa (bloquea inputs)
   tapDown: number; dropThruPlatform: boolean
   // Dash
   dash: boolean; dashCd: number; dashDir: 1 | -1; dashTimer: number
@@ -110,7 +111,7 @@ export type G = {
   p1BossRexSeen: boolean          // Rex explicó El Castigador → puerta P1 abierta
   p2BossRexSeen: boolean          // Rex explicó El Herrero → puerta P2 abierta
   ultraBossRexSeen: boolean       // Rex explicó El Torturado → puerta ultra abierta
-  rexPhoneNotif: { kind: "p1" | "p2" | "ultra"; timer: number } | null  // burbuja celular Luly
+  rexPhoneNotif: { kind: "p1" | "p2" | "ultra"; timer: number; setAt: number } | null  // burbuja celular Luly
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
