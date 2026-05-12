@@ -309,10 +309,16 @@ export function tickEnemies(g: G, now: number) {
     // Pierde al jugador si sale de la sala o se pierde de vista
     if ((!canSee || !plSameRoom) && e.alertT <= 0) {
       e.alert = false; e.state = "patrol"
+      // Adoptar rango de la sala actual como nuevo cubículo de patrulla
+      const _cr = eRoom(e); const _crR = getSafeSpawnRangesX(_cr.w, _cr.c, _cr.r, e.w)
+      if (_crR.length > 0) { e.p0 = _crR[0].x0; e.p1 = _crR[_crR.length - 1].x1 }
     }
     // Si el jugador salió de la sala, parar la persecución inmediatamente
     if (!plSameRoom && e.state === "chase") {
       e.alert = false; e.alertT = 0; e.state = "patrol"
+      // Adoptar rango de la sala actual como nuevo cubículo de patrulla
+      const _cr2 = eRoom(e); const _crR2 = getSafeSpawnRangesX(_cr2.w, _cr2.c, _cr2.r, e.w)
+      if (_crR2.length > 0) { e.p0 = _crR2[0].x0; e.p1 = _crR2[_crR2.length - 1].x1 }
     }
 
     // ── Lógica de movimiento ─────────────────────────────────────────
@@ -512,10 +518,8 @@ export function tickEnemies(g: G, now: number) {
         chaseDir = otherSide
       }
       if (dist > 36) {
-        const rawVx = chaseDir * e.spd * 1.4
-        const nextX = e.x + rawVx
-        if (nextX >= hb.x0 && nextX <= hb.x1) targetVx = rawVx
-        else targetVx = 0
+        // En persecución: ignorar límites del cubículo original (e.p0/e.p1)
+        targetVx = chaseDir * e.spd * 1.4
       }
       e.dir = chaseDir
 

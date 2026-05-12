@@ -4319,7 +4319,10 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const EY0 = HY0 + HS + 12, ESIZE = 22, ESTP = 26  // enemigos
   const BY0 = EY0 + ESIZE + 12, BSIZE = 18, BSTP = 11 // huesos
   const BONES_PER_ROW = 11                            // cuántos caben en la 1ª fila
-  const CPLBL_Y = BY0 + BSIZE * 2 + 6 + 14           // checkpoint mini-label (2 filas de huesos)
+  const hasTballHUD = g.abilities.has("tball")        // ¿mostrar fila de pelota?
+  const TBALL_ROW_H = 20                              // altura de la fila de pelota
+  const TBY0 = BY0 + BSIZE * 2 + 6 + 8               // Y de la fila tball (si existe)
+  const CPLBL_Y = (hasTballHUD ? TBY0 + TBALL_ROW_H + 4 : BY0 + BSIZE * 2 + 6) + 14
   const panH = CPLBL_Y + 16 + 8
   ctx.fillStyle = "rgba(0,0,0,0.72)"
   ctx.beginPath(); ctx.roundRect(panX, panY, panW, panH, 10); ctx.fill()
@@ -4430,6 +4433,41 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     } else {
       ctx.fillStyle = has ? th.accent : "#222"
       ctx.beginPath(); ctx.arc(bx + BSIZE/2, by + BSIZE/2, 3, 0, Math.PI*2); ctx.fill()
+    }
+  }
+
+  // ── Pelota rebotante (solo si desbloqueada) ──────────────────────────────
+  if (hasTballHUD) {
+    const tbSpr = sprs["tennis_ball"]
+    const tbMax = g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT
+    const tbAmmo = g.tballAmmo
+    const tbY = TBY0
+    ctx.fillStyle = th.accent + "88"; ctx.font = "bold 8px 'Courier New',monospace"
+    ctx.fillText("PELOTA", HX0, tbY + 11)
+    // Ícono de pelota
+    const iconSz = 14, iconX = HX0 + 44
+    if (tbSpr && tbSpr.complete && tbSpr.naturalWidth > 0) {
+      if (tbAmmo === 0) { ctx.save(); ctx.globalAlpha = 0.22 }
+      ctx.drawImage(tbSpr, iconX, tbY, iconSz, iconSz)
+      if (tbAmmo === 0) ctx.restore()
+    } else {
+      ctx.fillStyle = tbAmmo > 0 ? "#CCFF00" : "#333"
+      ctx.beginPath(); ctx.arc(iconX + iconSz/2, tbY + iconSz/2, iconSz/2 - 1, 0, Math.PI*2); ctx.fill()
+    }
+    // Contador  ×N / MAX
+    ctx.fillStyle = tbAmmo > 0 ? "#CCFF00" : "#555"
+    ctx.font = `bold 11px 'Courier New',monospace`
+    ctx.fillText(`×${tbAmmo}`, iconX + iconSz + 5, tbY + 12)
+    // Barritas de ammo (bolitas pequeñas)
+    const dotR = 3, dotGap = 8, dotsX = iconX + iconSz + 32
+    for (let i = 0; i < Math.min(tbMax, 15); i++) {
+      const filled = i < tbAmmo
+      ctx.fillStyle = filled ? "#CCFF00" : "#2A2A1A"
+      ctx.beginPath(); ctx.arc(dotsX + i * dotGap, tbY + iconSz/2, dotR, 0, Math.PI*2); ctx.fill()
+      if (filled) {
+        ctx.fillStyle = "rgba(255,255,255,0.35)"
+        ctx.beginPath(); ctx.arc(dotsX + i * dotGap - 1, tbY + iconSz/2 - 1, dotR * 0.45, 0, Math.PI*2); ctx.fill()
+      }
     }
   }
 

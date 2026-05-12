@@ -220,13 +220,10 @@ export function lrDoorY_rel(w: number, leftC: number, r: number): number {
   const needsJump = roomHasVertConn(w, leftC, r) || roomHasVertConn(w, leftC + 1, r)
 
   if (!needsJump) {
-    // Salas horizontales puras: puerta entre 58 % y nivel de suelo
-    const groundSlots = [
-      Math.floor((RH - WT - DH) * 0.58),  // nivel medio-bajo — accesible sin saltar
-      Math.floor((RH - WT - DH) * 0.74),  // nivel bajo
-      RH - WT - DH,                         // ras del suelo
-    ]
-    return groundSlots[h % groundSlots.length]
+    // Corredor plano: puerta siempre ras del suelo (único slot donde el jugador
+    // puede pasar sin saltar — dy = RH - WT - DH pone la base de la puerta
+    // exactamente en el nivel del piso interior de la sala).
+    return RH - WT - DH
   }
 
   // Salas con conexiones verticales: todos los slots disponibles (incluye elevados)
@@ -457,22 +454,24 @@ export function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
   const bossType = isBossRoom(w, c, r)
   if (bossType === "p1" || bossType === "p2") {
     const sw = bossType === "p1" ? 300 + w : 400 + w
-    // Paneles laterales: expanden P px hacia interior de la pared y P px en alto
-    if (d.L) result.push({ x: x0 - P, y: y0 + lrDoorY_rel(w, c - 1, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw })
-    if (d.R && !d.Rx) result.push({ x: x0 + RW - WT - P, y: y0 + lrDoorY_rel(w, c, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw })
-    // Paneles verticales (techo / suelo): expanden P px hacia exterior + P px en ancho
-    if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1) - P, y: y0 - P, w: DW + 2 * P, h: WT + 2 * P, mode: "d", sw })
-    if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r) - P, y: y0 + RH - WT - P, w: DW + 2 * P, h: WT + 2 * P, mode: "d", sw })
-    // Puerta de cierre de arena P1 (sw 500+w): sella entrada lateral
+    // ★ SELLADO DOBLE: cada panel cubre AMBAS paredes (boss room + sala adyacente)
+    //   para que no quede el hueco de 24 px de la sala vecina visualmente abierto.
+    //   LR: x arranca WT antes del borde de la boss room → cubre sala adyacente + sala boss
+    //   UD: y arranca WT antes del borde de la boss room → cubre sala adyacente + sala boss
+    if (d.L) result.push({ x: x0 - WT - P, y: y0 + lrDoorY_rel(w, c - 1, r) - P, w: 2 * WT + 2 * P, h: DH + 2 * P, mode: "d", sw })
+    if (d.R && !d.Rx) result.push({ x: x0 + RW - 2 * WT - P, y: y0 + lrDoorY_rel(w, c, r) - P, w: 2 * WT + 2 * P, h: DH + 2 * P, mode: "d", sw })
+    if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1) - P, y: y0 - WT - P, w: DW + 2 * P, h: 2 * WT + 2 * P, mode: "d", sw })
+    if (d.D) result.push({ x: x0 + udDoorX_rel(w, c, r) - P, y: y0 + RH - 2 * WT - P, w: DW + 2 * P, h: 2 * WT + 2 * P, mode: "d", sw })
+    // Puerta de cierre de arena P1 (sw 500+w): sella entrada lateral (mismo sellado doble)
     if (bossType === "p1") {
       const swArena = 500 + w
-      if (d.L) result.push({ x: x0 - P, y: y0 + lrDoorY_rel(w, c - 1, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw: swArena })
-      if (d.R && !d.Rx) result.push({ x: x0 + RW - WT - P, y: y0 + lrDoorY_rel(w, c, r) - P, w: WT + 2 * P, h: DH + 2 * P, mode: "d", sw: swArena })
+      if (d.L) result.push({ x: x0 - WT - P, y: y0 + lrDoorY_rel(w, c - 1, r) - P, w: 2 * WT + 2 * P, h: DH + 2 * P, mode: "d", sw: swArena })
+      if (d.R && !d.Rx) result.push({ x: x0 + RW - 2 * WT - P, y: y0 + lrDoorY_rel(w, c, r) - P, w: 2 * WT + 2 * P, h: DH + 2 * P, mode: "d", sw: swArena })
     }
-    // Puerta de cierre de arena P2 (sw 510+w): sella entrada superior al entrar en batalla
+    // Puerta de cierre de arena P2 (sw 510+w): sella entrada superior (sellado doble)
     if (bossType === "p2") {
       const swArena2 = 510 + w
-      if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1) - P, y: y0 - P, w: DW + 2 * P, h: WT + 2 * P, mode: "d", sw: swArena2 })
+      if (d.U) result.push({ x: x0 + udDoorX_rel(w, c, r - 1) - P, y: y0 - WT - P, w: DW + 2 * P, h: 2 * WT + 2 * P, mode: "d", sw: swArena2 })
     }
   }
 

@@ -13,6 +13,7 @@ import {
   CP_RADIUS, SAVE_KEY,
   GPAD_BTN, XB_COL, PS_COL,
   asset, BASE_PATH,
+  VIEJO_DOG_C, VIEJO_DOG_R,
 } from "./game/constants"
 import { ALL_CPS } from "./game/world_gen"
 import { mkG_lazy, applyLoad, loadWorld, tickCamera, tickWorldAnim } from "./game/init"
@@ -305,6 +306,7 @@ export default function ProyectoLuly() {
     const pv = ["arrowup", "arrowdown", "arrowleft", "arrowright", " ", "w", "a", "s", "d", "t", "tab", "z", "f", "enter", "shift"]
     const dn = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase(); if (pv.includes(k)) e.preventDefault()
+      if (e.repeat) return   // una pulsación por tecla en todos los contextos (mapa, menú, juego)
       const g = G.current
 
       // ── FIX: Navegación cursor dev map con teclado ──────────────────
@@ -358,7 +360,6 @@ export default function ProyectoLuly() {
         return  // bloquear cualquier otra tecla mientras el menú está abierto
       }
 
-      if (e.repeat) return   // teclas repetidas no re-activan (preserva "just pressed" para diálogos)
       G.current.keys[k] = true
       const TAP_WIN = 280
       if (k === "a" || k === "arrowleft") { if (performance.now() - g.pl.tapLeft < TAP_WIN && g.pl.tapLeft > 0) g.pl.runMode = true; g.pl.tapLeft = performance.now() }
@@ -369,7 +370,12 @@ export default function ProyectoLuly() {
           ; (g as any)._gfxMsg = true
         g.kennelMsg = 1.8
       }
-      if (k === "v" && !g.devMode) fireTBall(g)
+      if (k === "v" && !g.devMode) {
+        const _vW = Math.floor(g.pl.x / (NC * RW))
+        const _vC = Math.floor((g.pl.x % (NC * RW)) / RW)
+        const _vR = Math.floor(g.pl.y / RH)
+        if (!(_vW === 0 && _vC === VIEJO_DOG_C && _vR === VIEJO_DOG_R)) fireTBall(g)
+      }
       if (k === "r") G.current = mkG_lazy()
       if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.showRealMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
       if (g.devMode && k === "i") g.godMode = !g.godMode
@@ -1295,7 +1301,12 @@ export default function ProyectoLuly() {
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
                 pointerEvents: active ? "auto" : "none",
               }}
-              {...(active ? makeTouch(() => fireTBall(g), () => {}) : {})}
+              {...(active ? makeTouch(() => {
+                const _tw = Math.floor(g.pl.x / (NC * RW))
+                const _tC = Math.floor((g.pl.x % (NC * RW)) / RW)
+                const _tR = Math.floor(g.pl.y / RH)
+                if (!(_tw === 0 && _tC === VIEJO_DOG_C && _tR === VIEJO_DOG_R)) fireTBall(g)
+              }, () => {}) : {})}
             >
               {/* Botón cóncavo */}
               <div style={{
@@ -1856,6 +1867,16 @@ export default function ProyectoLuly() {
                   : {}
                 const sv = hasSave ? loadSaveData() : null
                 const timeStr = sv ? (() => { const d = new Date(sv.savedAt); return `${d.getDate()}/${d.getMonth()+1} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}` })() : ""
+                const timeAgo = sv ? (() => {
+                  const diff = Date.now() - sv.savedAt
+                  const mins = Math.floor(diff / 60_000)
+                  const hours = Math.floor(diff / 3_600_000)
+                  const days = Math.floor(diff / 86_400_000)
+                  if (days >= 1) return `hace ${days} día${days > 1 ? "s" : ""}`
+                  if (hours >= 1) return `hace ${hours}h`
+                  if (mins >= 1) return `hace ${mins} min`
+                  return "hace un momento"
+                })() : ""
                 const contIdx = hasSave ? idx++ : -1
                 const jugarIdx = idx++
                 const cfgIdx = idx++
@@ -1876,7 +1897,10 @@ export default function ProyectoLuly() {
                         onTouchEnd={e => { e.preventDefault(); const sv2 = loadSaveData(); if (!sv2) { handlePlay(); return }; applyLoad(G.current, sv2); gameActiveRef.current = true; setScreen("playing"); if (!getFSElement() && !isPseudoFS) tryFullscreen(document.documentElement) }}
                       >
                         {isSel(contIdx) && <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#D4C400" }}>▶</span>}
-                        ★  CONTINUAR  <span style={{ fontSize: 9, opacity: 0.6 }}>· {timeStr}</span>
+                        ★  CONTINUAR
+                        <span style={{ display: "block", fontSize: 9, opacity: 0.55, marginTop: 2 }}>
+                          {timeStr}{timeAgo ? `  ·  ${timeAgo}` : ""}
+                        </span>
                       </button>
                     )}
                     <button

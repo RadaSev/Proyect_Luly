@@ -5,7 +5,8 @@
 import type { G } from "./types"
 import {
   STEP, PW, PH, PH_CROUCH, WALK, RUN, JV, GUP, GDN, GMAX, PSPD, WLEN, WDMG,
-  EN_HBX, EN_HBT, PL_HBX, PL_HBT, NC, NW, TOT_W, TOT_H, TB_AMMO_MAX
+  EN_HBX, EN_HBT, PL_HBX, PL_HBT, NC, NW, TOT_W, TOT_H, TB_AMMO_MAX,
+  RW, RH, VIEJO_DOG_C, VIEJO_DOG_R,
 } from "./constants"
 import { activePlats, resolve, dmgPlayer, dmgEnemy, getDir } from "./physics"
 import { spawnExplosion, triggerShake } from "./utils"
@@ -149,14 +150,22 @@ export function tickPlayer(g: G) {
 
   if (p.onGround && !standingOnOneWay_plat) p.dropThruPlatform = false
 
-  if (k["n"] && p.ammo > 0) {
+  // ── Zona de paz: deshabilitar TODOS los ataques dentro del cubículo de Rex (W0 C1 R4) ──
+  const inRexPeaceZone =
+    Math.floor(p.x / (NC * RW)) === 0 &&
+    Math.floor((p.x % (NC * RW)) / RW) === VIEJO_DOG_C &&
+    Math.floor(p.y / RH) === VIEJO_DOG_R
+
+  if (k["n"] && p.ammo > 0 && !inRexPeaceZone) {
     const mkP = () => { const d = getDir(g); const px = p.x + (p.facing === 1 ? p.w : 0), py = p.y + p.h / 2; g.projs.push({ x: px, y: py, vx: d.x * PSPD, vy: d.y * PSPD - 1, active: true, pl: true, star: false, rot: Math.atan2(d.y, d.x) * 180 / Math.PI, life: 3.5, dist: 0, ox: px, oy: py }); p.ammo-- }
     if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
     else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
     else { p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }  // mantiene mientras se sostiene N
-  } else p.sh = false
+  } else if (!inRexPeaceZone && !k["n"]) p.sh = false
+  else if (inRexPeaceZone) p.sh = false
+
   p.wcd = Math.max(0, p.wcd - STEP * 1000)
-  if (k["m"] && !p.wh && p.wcd <= 0 && !g.whip && !p.exhausted) {
+  if (k["m"] && !p.wh && p.wcd <= 0 && !g.whip && !p.exhausted && !inRexPeaceZone) {
     const d = getDir(g); const cx = p.x + p.w / 2, cy = p.y + p.h / 2
     g.whip = { x: cx, y: cy, ex: cx + d.x * WLEN, ey: cy + d.y * WLEN, life: 0.2, dealt: false }
     p.stamina = Math.max(0, p.stamina - 18)
