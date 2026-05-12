@@ -903,7 +903,7 @@ export function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
         dying: false, deathTimer: 0, deathDir: 1, deathFalling: false,
         hurtTimer: 0, isMoving: false, alertDelay: 0, phase: 1,
         ls2: 0, chainHit: null,
-        spinTimer: 0, stunTimer: 0, spinHitMound: false,
+        spinTimer: 0, stunTimer: 0, spinHitMound: false, atkPending: false,
       })
     })
   }
@@ -919,6 +919,6 @@ export function mkCratesForWorld(w: number, dead: Set<string>): Crate[] {
 // ── mkPlayer: estado inicial del jugador
 export function mkPlayer(): Player {
   const [sw, sc, sr] = PLAYER_START; const { x: x0, y: y0 } = ro(sw, sc, sr)
-  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 10, maxHp: 10, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0, usingPhone: false }
+  return { x: x0 + 80, y: y0 + RH - WT - PH, w: PW, h: PH, vx: 0, vy: 0, onGround: false, facing: 1, hp: 10, maxHp: 10, inv: 0, ammo: 15, ls: 0, as2: 0, sh: false, jh: false, djump: false, djumpAvail: false, wh: false, wcd: 0, pf: 0, pft: 0, pa: "idle", crouching: false, stamina: 100, maxStamina: 100, staminaCooldown: 0, exhausted: false, runMode: false, tapLeft: 0, tapRight: 0, tapDown: 0, dropThruPlatform: false, dash: false, dashCd: 0, dashDir: 1 as (1 | -1), dashTimer: 0, wallSliding: false, wallDir: 0 as (0 | 1 | -1), wallJumpCd: 0, usingPhone: false, atkLock: 0 }
 }
 

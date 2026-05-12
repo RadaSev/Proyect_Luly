@@ -170,21 +170,39 @@ export function tickPlayer(g: G) {
     Math.floor((p.x % (NC * RW)) / RW) === VIEJO_DOG_C &&
     Math.floor(p.y / RH) === VIEJO_DOG_R
 
+  // ── Ataque con hueso (N) ─────────────────────────────────────────────────
+  // ORIGINAL sin sync — ver docs/combat_backup.md para restaurar
+  // if (k["n"] && p.ammo > 0 && !inRexPeaceZone) {
+  //   const mkP = () => { ... }
+  //   if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = ... }
+  //   else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = ... }
+  //   else { p.pa = ... }
+  // } else if (!inRexPeaceZone && !k["n"]) p.sh = false
+  // else if (inRexPeaceZone) p.sh = false
+
+  // NUEVO: lock por animación — atkLock impide spam antes del midpoint de 25 frames
+  // ATK_LOCK_S ≈ mitad de animación de ataque (25 frames × ~36ms/f ≈ 900ms → lock 450ms)
+  const ATK_LOCK_S = 0.45
   if (k["n"] && p.ammo > 0 && !inRexPeaceZone) {
     const mkP = () => { const d = getDir(g); const px = p.x + (p.facing === 1 ? p.w : 0), py = p.y + p.h / 2; g.projs.push({ x: px, y: py, vx: d.x * PSPD, vy: d.y * PSPD - 1, active: true, pl: true, star: false, rot: Math.atan2(d.y, d.x) * 180 / Math.PI, life: 3.5, dist: 0, ox: px, oy: py }); p.ammo-- }
-    if (!p.sh) { mkP(); p.ls = now; p.as2 = now; p.sh = true; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
-    else if (now - p.as2 > 2500) { mkP(); p.as2 = now; p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }
-    else { p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }  // mantiene mientras se sostiene N
+    if (!p.sh && p.atkLock <= 0) {
+      mkP(); p.ls = now; p.as2 = now; p.sh = true; p.atkLock = ATK_LOCK_S
+      p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left"
+    } else if (p.sh && now - p.as2 > 2500 && p.atkLock <= 0) {
+      mkP(); p.as2 = now; p.atkLock = ATK_LOCK_S
+      p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left"
+    } else { p.pa = p.facing === 1 ? "atack_bone" : "atack_bone_left" }  // mantiene anim mientras se sostiene N
   } else if (!inRexPeaceZone && !k["n"]) p.sh = false
   else if (inRexPeaceZone) p.sh = false
 
   p.wcd = Math.max(0, p.wcd - STEP * 1000)
+  p.atkLock = Math.max(0, p.atkLock - STEP)
   if (k["m"] && !p.wh && p.wcd <= 0 && !g.whip && !p.exhausted && !inRexPeaceZone) {
     const d = getDir(g); const cx = p.x + p.w / 2, cy = p.y + p.h / 2
     g.whip = { x: cx, y: cy, ex: cx + d.x * WLEN, ey: cy + d.y * WLEN, life: 0.2, dealt: false }
     p.stamina = Math.max(0, p.stamina - 18)
     if (p.stamina <= 0) { p.exhausted = true; p.staminaCooldown = 4.5 }
-    p.wcd = 500; p.wh = true; p.pa = p.facing === 1 ? "atack_correa" : "atack_correa_left"
+    p.wcd = 500; p.wh = true; p.atkLock = Math.max(p.atkLock, 0.45); p.pa = p.facing === 1 ? "atack_correa" : "atack_correa_left"
   }
   if (!k["m"]) p.wh = false
   // Mantiene la animación de correa mientras el látigo sigue activo (life=0.2s)

@@ -879,7 +879,26 @@ export function tickEnemies(g: G, now: number) {
 
     } else {
       // ── Ataque genérico (resto de enemigos + otros bosses) ────────
-      if (now - e.ls > e.cd && canShoot) {
+      // ORIGINAL sin sync — ver docs/combat_backup.md para restaurar
+      // if (now - e.ls > e.cd && canShoot) { ... spawn inmediato ... e.ls = now; e.sa = 300 }
+
+      // NUEVO: sistema de frames activos
+      // Fase 1 — WINDUP: al decidir atacar se registra el intent y se espera ~300ms antes de disparar.
+      // Fase 2 — FIRE: el proyectil sale cuando e.sa cruza el umbral (midpoint de animación).
+      // Esto da tiempo al jugador de reaccionar al "telegraph" del enemigo.
+      const WINDUP_MS = 300   // ms de startup antes de que salga el proyectil
+      const POST_MS   = 300   // ms de animación post-disparo
+      const FIRE_THR  = POST_MS  // e.sa <= FIRE_THR → disparar
+
+      // Trigger: cooldown cumplido → iniciar windup
+      if (now - e.ls > e.cd && canShoot && !e.atkPending) {
+        e.atkPending = true
+        e.ls = now                         // bloquea cooldown desde ahora
+        e.sa = WINDUP_MS + POST_MS         // 600ms total (300 windup + 300 post-fire)
+      }
+
+      // Fire: disparar al cruzar el umbral del midpoint
+      if (e.atkPending && e.sa <= FIRE_THR) {
         const sp = e.boss ? (e.phase === 2 ? 4.2 : 3.2) : 2.8
         const ex2 = e.x + e.w / 2, ey2 = e.y + e.h / 2
         const LEAD = e.boss ? 0.5 : 0.38
@@ -903,7 +922,7 @@ export function tickEnemies(g: G, now: number) {
           }
           triggerShake(g, e.phase === 2 ? 5 : 3, 0.18)
         }
-        e.ls = now; e.sa = 300
+        e.atkPending = false  // sa sigue contando hasta 0 → post-fire lock
       }
     }
     if (e.sa > 0) e.sa -= dt

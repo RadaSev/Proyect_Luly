@@ -29,6 +29,8 @@ export type Player = {
   dash: boolean; dashCd: number; dashDir: 1 | -1; dashTimer: number
   // Wall slide / wall jump
   wallSliding: boolean; wallDir: 0 | 1 | -1; wallJumpCd: number
+  // Attack lock: countdown (segundos) que impide disparar hasta que la animación progrese
+  atkLock: number
 }
 
 export type Enemy = {
@@ -43,6 +45,7 @@ export type Enemy = {
   spinTimer: number     // segundos restantes de giro del Blacksmith
   stunTimer: number     // segundos restantes de parálisis post-giro
   spinHitMound: boolean // ya golpeó un montículo en esta iteración de giro
+  atkPending: boolean   // ataque decidido, esperando el windup para lanzar el proyectil
 }
 
 export type Proj = { x: number; y: number; vx: number; vy: number; active: boolean; pl: boolean; star: boolean; rot: number; life: number; dist: number; ox: number; oy: number; parried?: boolean; lightning?: boolean }
