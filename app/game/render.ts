@@ -1360,7 +1360,7 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
 
   if (g.viejoDogState === "intro") {
     dlg = {
-      headers: ["◈ ¡BIENVENIDA, LULY! ◈", "◈ MI PROBLEMA ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`],
+      headers: ["◈ ¡BIENVENIDO, LULY! ◈", "◈ MI PROBLEMA ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`],
       colors:  ["#E8D8C0",                "#FFCC88",          "#FFCC66"],
       pages: [
         [
