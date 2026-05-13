@@ -122,6 +122,7 @@ export function applyLoad(g: G, s: LulySave): void {
   g.bolkhaAppearedOnce     = s.bolkhaAppearedOnce      ?? false
   g.bolkhaRexTold          = s.bolkhaRexTold           ?? false
   g.bolkhaMetDialogSeen    = s.bolkhaMetDialogSeen     ?? false
+  g.bolkhaGivingPhase      = 0   // siempre reset al cargar (estado transitorio)
   g.rexKeyAnimTimer        = s.rexKeyAnimTimer         ?? 0
   g.rexMitadAnimStart      = 0   // siempre reset al cargar (se recalcula al entrar en rango)
   g.rexPhoneNotif          = null
@@ -280,6 +281,7 @@ export function mkG_lazy(): G {
     bolkhaFacing: -1,
     bolkhaEf: 0, bolkhaEft: 0,
     bolkhaGivingTimer: 0,
+    bolkhaGivingPhase: 0,
     bolkhaGivingItem: null,
     bolkhaShopOpen: false,
     bolkhaShopCursor: 0,

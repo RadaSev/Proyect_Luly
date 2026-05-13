@@ -140,7 +140,8 @@ export type G = {
   bolkhaFacing: 1 | -1
   bolkhaEf: number             // frame de animación actual (0-24)
   bolkhaEft: number            // acumulador de tiempo para animación
-  bolkhaGivingTimer: number    // cuenta regresiva del sprite de entrega
+  bolkhaGivingTimer: number    // cuenta regresiva del sprite de entrega (fase 1: freeze)
+  bolkhaGivingPhase: 0 | 1 | 2  // 0=avanzando, 1=freeze, 2=últimos frames (solo tball)
   bolkhaGivingItem: "hearts" | "bones" | "tball" | null
   bolkhaShopOpen: boolean      // menú de compra visible
   bolkhaShopCursor: number     // item seleccionado (0-2)

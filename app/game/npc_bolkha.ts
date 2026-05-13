@@ -45,29 +45,71 @@ export function tickBolkha(g: G) {
     return
   }
 
-  // Animación continua (10 fps)
-  g.bolkhaEft += 1 / 60
+  // Talk timer + afford-error timer
+  if (g.bolkhaTalkTimer > 0) g.bolkhaTalkTimer = Math.max(0, g.bolkhaTalkTimer - STEP)
+  if (g.bolkhaAffordTimer > 0) g.bolkhaAffordTimer = Math.max(0, g.bolkhaAffordTimer - STEP)
+
+  // ── Animación de entrega (reemplaza ciclo continuo durante "giving") ────────
+  if (g.bolkhaState === "giving") {
+    const item = g.bolkhaGivingItem
+
+    if (g.bolkhaGivingPhase === 0) {
+      // Avanzar frames a 10 fps hasta el punto de congelación
+      g.bolkhaEft += STEP
+      if (g.bolkhaEft >= 0.10) {
+        g.bolkhaEft = 0
+        g.bolkhaEf++
+        const freezeAt = item === "tball" ? 18 : 24
+        if (g.bolkhaEf >= freezeAt) {
+          g.bolkhaEf = freezeAt
+          g.bolkhaGivingPhase = 1
+          // tball: 3 s de freeze; corazones/huesos: 0.4 s antes de la explosión
+          g.bolkhaGivingTimer = item === "tball" ? 3.0 : 0.4
+        }
+      }
+    } else if (g.bolkhaGivingPhase === 1) {
+      // Freeze: esperar el timer
+      g.bolkhaGivingTimer = Math.max(0, g.bolkhaGivingTimer - STEP)
+      if (g.bolkhaGivingTimer <= 0) {
+        if (item === "tball") {
+          // Pasar a fase 2: últimos 7 frames (18→24)
+          g.bolkhaGivingPhase = 2
+          g.bolkhaEft = 0
+        } else {
+          // Corazones / huesos: explotar y cerrar entrega
+          spawnExplosion(g, BOLKHA_POS.x, BOLKHA_POS.y - 20,
+            ["#AAFFEE", "#88DDFF", "#FFD700", "#FFFFFF", "#AAFFAA"], 10, 3.0, false)
+          g.bolkhaGivingItem = null
+          g.bolkhaGivingPhase = 0
+          g.bolkhaState = "shop"
+          g.bolkhaShopOpen = true
+        }
+      }
+    } else {
+      // Fase 2 (tball): avanzar frames 18→24 y explotar al llegar a 24
+      g.bolkhaEft += STEP
+      if (g.bolkhaEft >= 0.10) {
+        g.bolkhaEft = 0
+        g.bolkhaEf++
+        if (g.bolkhaEf >= 24) {
+          g.bolkhaEf = 24
+          spawnExplosion(g, BOLKHA_POS.x, BOLKHA_POS.y - 20,
+            ["#CCFF00", "#88FF44", "#FFD700", "#FFFFFF", "#AAFFEE"], 14, 3.5, false)
+          g.bolkhaGivingItem = null
+          g.bolkhaGivingPhase = 0
+          g.bolkhaState = "shop"
+          g.bolkhaShopOpen = true
+        }
+      }
+    }
+    return
+  }
+
+  // Animación continua (10 fps) — solo fuera del estado "giving"
+  g.bolkhaEft += STEP
   if (g.bolkhaEft >= 0.10) {
     g.bolkhaEft = 0
     g.bolkhaEf = (g.bolkhaEf + 1) % 25
-  }
-
-  // Talk timer + afford-error timer
-  if (g.bolkhaTalkTimer > 0) g.bolkhaTalkTimer = Math.max(0, g.bolkhaTalkTimer - 1 / 60)
-  if (g.bolkhaAffordTimer > 0) g.bolkhaAffordTimer = Math.max(0, g.bolkhaAffordTimer - 1 / 60)
-
-  // Giving animation
-  if (g.bolkhaState === "giving") {
-    g.bolkhaGivingTimer = Math.max(0, g.bolkhaGivingTimer - 1 / 60)
-    if (g.bolkhaGivingTimer <= 0) {
-      // Efecto de entrega: pequeño destello de partículas
-      spawnExplosion(g, BOLKHA_POS.x, BOLKHA_POS.y - 20,
-        ["#AAFFEE", "#88DDFF", "#FFD700", "#FFFFFF", "#AAFFAA"], 10, 3.0, false)
-      g.bolkhaGivingItem = null
-      g.bolkhaState = "shop"
-      g.bolkhaShopOpen = true
-    }
-    return
   }
 
   // Reusar la distancia calculada al inicio de la función
@@ -134,7 +176,10 @@ export function bolkhaDoInteract(g: G) {
       g.score -= sel.price
       sel.buy()
       g.bolkhaGivingItem = sel.givingItem
-      g.bolkhaGivingTimer = 1.8
+      g.bolkhaGivingPhase = 0
+      g.bolkhaGivingTimer = 0
+      g.bolkhaEf = 0
+      g.bolkhaEft = 0
       g.bolkhaState = "giving"
       g.bolkhaShopOpen = false
       g.bolkhaTalkText = sel.talkText
