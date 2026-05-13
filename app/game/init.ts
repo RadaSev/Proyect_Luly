@@ -123,6 +123,7 @@ export function applyLoad(g: G, s: LulySave): void {
   g.bolkhaRexTold          = s.bolkhaRexTold           ?? false
   g.bolkhaMetDialogSeen    = s.bolkhaMetDialogSeen     ?? false
   g.rexKeyAnimTimer        = s.rexKeyAnimTimer         ?? 0
+  g.rexMitadAnimStart      = 0   // siempre reset al cargar (se recalcula al entrar en rango)
   g.rexPhoneNotif          = null
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
@@ -291,6 +292,7 @@ export function mkG_lazy(): G {
     bolkhaRexTold: false,
     bolkhaMetDialogSeen: false,
     rexKeyAnimTimer: 0,
+    rexMitadAnimStart: 0,
     sessionStart: Date.now(),
   } as G
 }

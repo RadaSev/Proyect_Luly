@@ -44,8 +44,9 @@ export function tickViejoDog(g: G) {
   if (g.rexKeyAnimTimer > 0) {
     g.rexKeyAnimTimer = Math.max(0, g.rexKeyAnimTimer - STEP)
     if (g.rexKeyAnimTimer <= 0 && g.viejoDogState === "key_held" && !g.tballKeyHeld) {
-      // Animación terminada → explotar y abrir la jaula
+      // Fase 3 terminada → explotar y abrir la jaula
       g.viejoDogState = "cage_opened"
+      g.rexMitadAnimStart = 0   // limpiar para futuros usos
       spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FFD700", "#FFA500", "#FFFFFF", "#FFEE88"], 28, 5, true)
       triggerShake(g, 9, 0.55)
       g.abilityNotif = { text: "¡Rex tiene la otra mitad! La jaula de su pelota está abierta", timer: 6.0 }
@@ -146,11 +147,12 @@ export function tickViejoDog(g: G) {
     triggerShake(g, 7, 0.4)
     g.abilityNotif = { text: "¡PELOTA MEJORADA! +2 balas • +4 rebotes  🎾", timer: 6.0 }
     saveGame(g)
-  } else if (g.viejoDogState === "key_held" && g.tballKeyHeld && g.rexKeyAnimTimer === 0) {
-    // El jugador lleva la media llave y se acerca a Rex
-    // Consumir la llave y empezar animación rex_mitad_llave (2 s) antes de explotar
+  } else if (g.viejoDogState === "key_held" && g.tballKeyHeld && g.rexMitadAnimStart === 0) {
+    // Llave entregada: consumir y arrancar animación del sprite rex_mitad_llave
+    // Fase 1 (render): frames 0→20 a 100ms/frame, luego congelado en 20 durante el diálogo
+    // Fase 3 (render): render.ts setea rexKeyAnimTimer=0.5 al terminar el diálogo → frames 20→24 → explosión
     g.tballKeyHeld = false
-    g.rexKeyAnimTimer = 4.0   // drawViejoDog mostrará rex_mitad_llave durante este tiempo (4 s)
+    g.rexMitadAnimStart = Date.now()
     saveGame(g)
   }
 }

@@ -37,6 +37,9 @@ import {
 import { spawnExplosion, triggerShake, countP1KillsW0 } from "./utils"
 import { saveGame } from "./save"
 
+// Cooldown entre avances de página de Rex — evita doble-salto por tap rápido o lag de frame
+let _rexLastAdvanceMs = 0
+
 // ══════════════════════════════════════════════════════════════
 //  RENDERIZADO
 // ══════════════════════════════════════════════════════════════
@@ -1156,8 +1159,8 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   if (dist >= VIEJO_DOG_CALLOUT_R) {
     sprKey = "rex_idle"
   } else if (dist > VIEJO_DOG_TALK_R) {
-    // En rango callout: si el jugador viene con la llave, mostrar mitad_llave ya desde aquí
-    sprKey = g.viejoDogState === "key_held" ? `rex_mitad_llave_${dir}` : `rex_saludo_${dir}`
+    // En rango callout: siempre saludo/impresionado — mitad_llave solo en talk range
+    sprKey = `rex_saludo_${dir}`
   } else if (g.viejoDogState === "key_held" || g.rexKeyAnimTimer > 0) {
     // En rango diálogo: estado key_held (llave aún no entregada) O durante la animación post-entrega
     sprKey = `rex_mitad_llave_${dir}`
@@ -1200,7 +1203,24 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     rex_mitad_llave_right: REX_FPF,
   }
   // 5×5 spritesheet (25fps) = 25 frames totales
-  const rexFrame = Math.floor(Date.now() / (REX_SPD[sprKey] ?? REX_FPF)) % 25
+  // rex_mitad_llave tiene 3 fases controladas:
+  //   Fase 1+2: frames 0→20 (100ms/frame) luego congelado en 20 mientras dura el diálogo
+  //   Fase 3:   frames 20→24 cuando rexKeyAnimTimer > 0 (activado por render al terminar diálogo)
+  const isMitadLlave = sprKey === "rex_mitad_llave_left" || sprKey === "rex_mitad_llave_right"
+  let rexFrame: number
+  if (isMitadLlave && g.rexMitadAnimStart > 0) {
+    if (g.rexKeyAnimTimer > 0) {
+      // Fase 3: 5 frames en 500 ms (100 ms/frame)
+      const elapsed3s = 0.5 - g.rexKeyAnimTimer
+      rexFrame = Math.min(24, 20 + Math.floor(elapsed3s * 10))
+    } else {
+      // Fase 1+2: avanzar hasta frame 20, quedarse ahí
+      const elapsedMs = Date.now() - g.rexMitadAnimStart
+      rexFrame = Math.min(20, Math.floor(elapsedMs / REX_FPF))
+    }
+  } else {
+    rexFrame = Math.floor(Date.now() / (REX_SPD[sprKey] ?? REX_FPF)) % 25
+  }
   const rfCol = rexFrame % 5
   const rfRow = Math.floor(rexFrame / 5)
 
@@ -1679,8 +1699,9 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   const curPageTotalChars = dlg.pages[curPage].join("").length
   const curPageDone = elapsed >= curPageTotalChars * REX_TYPING_MS && curPage < numPages - 1
   setRexPageWaiting(curPageDone)
-  // Avance de página con E/B/○
-  if (curPageDone && g.keys["e"]) {
+  // Avance de página con E/B/○ — cooldown 400 ms evita doble-salto por tap rápido o lag
+  if (curPageDone && g.keys["e"] && Date.now() - _rexLastAdvanceMs > 400) {
+    _rexLastAdvanceMs = Date.now()
     _rexReadPages[dlgKey] = curPage   // página actual ya vista → no retipear
     curPage++
     setRexDlgPage(curPage)
@@ -1741,6 +1762,12 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
         // Solo se activa al leer la última página del diálogo BASE (con la página BOLKHA)
         g.bolkhaRexTold = true
         saveGame(g)
+      }
+      // ── Llave: diálogo terminado → disparar fase 3 del sprite rex_mitad_llave ──
+      // rexMitadAnimStart > 0: la animación ya empezó (Luly entregó la llave al acercarse)
+      // rexKeyAnimTimer === 0: la fase 3 no ha sido disparada todavía
+      if (g.viejoDogState === "key_held" && g.rexMitadAnimStart > 0 && g.rexKeyAnimTimer === 0) {
+        g.rexKeyAnimTimer = 0.5   // 500 ms → 5 frames a 100 ms/frame, luego explosión en npc_rex.ts
       }
     }
   }

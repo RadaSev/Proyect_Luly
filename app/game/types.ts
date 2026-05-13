@@ -152,7 +152,8 @@ export type G = {
   bolkhaShopDescCursor: number     // cursor del último ítem cuya desc se mostró
   bolkhaRexTold: boolean           // Rex mencionó a Bolkha en su diálogo → puede aparecer
   bolkhaMetDialogSeen: boolean     // jugadora ya vio el diálogo "entonces ya lo conociste..."
-  rexKeyAnimTimer: number          // segundos restantes de animación pre-explosión al entregar llave
+  rexKeyAnimTimer: number          // segundos de la fase 3 (frames 20→24); al llegar a 0 → explosión
+  rexMitadAnimStart: number        // timestamp ms de cuando empezó la anim rex_mitad_llave (0 = sin iniciar)
   sessionStart: number             // timestamp al iniciar sesión o al último guardado (para aviso de salida)
 }
 
