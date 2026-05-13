@@ -1362,18 +1362,23 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   // ── Análisis de recursos pre-Torturado (usado en ultra_hint / ultra_ready) ──
   const _ultraReady = g.pl.hp >= g.pl.maxHp && g.pl.ammo >= 15
     && (!g.abilities.has("tball") || g.tballAmmo > 0)
-  const _ultraDrops = g.drops.filter(d => d.active && (d.kind === "h" || d.kind === "a" || d.kind === "tba")).length
+  // "Bolsas": cajas sin romper (persistentes) + drops útiles aún flotando (transitorios)
+  const _ultraCrates = g.crates.filter(c => c.active).length
+  const _ultraFloatDrops = g.drops.filter(d => d.active
+    && (d.kind === "h" || d.kind === "a" || d.kind === "tba")).length
+  const _ultraBolsas = _ultraCrates + _ultraFloatDrops   // total de "bolsas" disponibles
   const _ultraNeededScore = (g.pl.hp < g.pl.maxHp ? BOLKHA_PRICE_HEART : 0)
     + (g.pl.ammo < 15 ? BOLKHA_PRICE_BONES : 0)
     + (g.abilities.has("tball") && g.tballAmmo === 0 ? BOLKHA_PRICE_TBALL : 0)
   const _ultraCanAfford = _ultraNeededScore > 0 && g.score >= _ultraNeededScore
   // Sufijo para dlgKey: encapsula el sub-estado del análisis
+  // Umbrales: >= 6 bolsas = mucho, 1-5 = poco, 0 = nada
   let _ultraSuffix = ""
   if (g.viejoDogState === "ultra_hint") {
-    if (_ultraDrops >= 4)        _ultraSuffix = "_drops"
-    else if (_ultraDrops > 0)    _ultraSuffix = "_fewdrops"
-    else if (_ultraCanAfford)    _ultraSuffix = "_bolkha"
-    else                         _ultraSuffix = "_rexhelp"
+    if (_ultraBolsas >= 6)        _ultraSuffix = "_drops"
+    else if (_ultraBolsas >= 2)   _ultraSuffix = "_fewdrops"
+    else if (_ultraCanAfford)     _ultraSuffix = "_bolkha"
+    else                          _ultraSuffix = "_rexhelp"
   } else if (g.viejoDogState === "ultra_ready") {
     _ultraSuffix = g.rexUltraReadyDeclined ? "_no" : (g.ultraBossRexSeen ? "_open" : "_check")
   }
@@ -1384,7 +1389,7 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
 
   if (g.viejoDogState === "intro") {
     dlg = {
-      headers: ["◈ ¡BIENVENIDO, LULY! ◈", "◈ MI PROBLEMA ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`],
+      headers: ["◈ ¡BIENVENIDO, LULY! ◈", "◈ MI PROBLEMA ◈", `◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ASIGNADA ◈`,""],
       colors:  ["#E8D8C0",                "#FFCC88",          "#FFCC66"],
       pages: [
         [
@@ -1409,6 +1414,9 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
           "¡Encuéntrala, Luly,",
           "y tráemela! 🗝",
         ],
+        [
+          
+        ],
       ]
     }
   } else if (g.viejoDogState === "surprised") {
@@ -1428,13 +1436,19 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
       "te la ganaste! 🎾",
     ]]}
   } else if (g.viejoDogState === "key_held") {
-    dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ¡LA TIENES! ◈`], colors: ["#FFE088"], pages: [[
+    dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: ¡LA TIENES! ◈`,""], colors: ["#FFE088"], pages: 
+    [
+      [
       "¡La otra mitad de la",
       "llave de mi antiguo amo!",
       "Aquí tengo la mía...",
       "¡Tómala, Luly! Las dos",
       "juntas abren la jaula.",
-    ]]}
+    ],
+    [
+          
+        ],
+  ]}
   } else if (g.viejoDogState === "key_dropped") {
     dlg = { headers: [`◈ MISIÓN 1/${TOTAL_QUEST_SLOTS}: EN CURSO ◈`], colors: ["#FFCC66"], pages: [[
       "¡Uno de ellos tenía",
@@ -1494,7 +1508,7 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
           ],
           [
             "Ahora mejoraremos tu",
-            "pelota. Pero primero:",
+            "pelota. Luego:",
             "vence al Herrero. Él",
             "tiene mi bastón.",
             "Derrótalo y tráemelo,",
@@ -1536,7 +1550,7 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     ]]}
   } else if (g.viejoDogState === "reward_lives") {
     dlg = {
-      headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈"],
+      headers: ["◈ ¡LO VENCISTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈",""],
       colors:  ["#FF8888",          "#C8A0FF",           "#88DDFF"],
       pages: [
         [
@@ -1561,11 +1575,14 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
           "Cambia croquetas por",
           "cosas útiles. Búscalo.",
         ],
+        [
+         
+        ],
       ]
     }
   } else if (g.viejoDogState === "reward_full") {
     dlg = {
-      headers: ["◈ ¡IMPRESIONANTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈"],
+      headers: ["◈ ¡IMPRESIONANTE! ◈", "◈ NUEVA MISIÓN ◈", "◈ BOLKHA ◈",""],
       colors:  ["#88FFCC",            "#C8A0FF",           "#88DDFF"],
       pages: [
         [
@@ -1588,6 +1605,9 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
           "de él. Es... especial.",
           "Cambia croquetas por",
           "cosas útiles. Búscalo.",
+        ],
+        [
+          
         ],
       ]
     }
@@ -1645,39 +1665,39 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     ]]}
   } else if (g.viejoDogState === "ultra_hint") {
     if (_ultraSuffix === "_drops") {
-      dlg = { headers: ["◈ BOLSAS EN EL MAPA ◈"], colors: ["#88FFAA"], pages: [[
-        "Luly, hay bolsas de",
-        "recursos por el mapa.",
-        "Recógelas antes de",
-        "entrar. Así no",
-        "gastas croquetas en",
-        "lo que puedes",
-        "conseguir gratis. 🐾",
+      dlg = { headers: ["◈ AÚN HAY RECURSOS ◈"], colors: ["#88FFAA"], pages: [[
+        `Luly, hay ${_ultraBolsas} cajas`,
+        "sin romper por el mapa.",
+        "Rómpelas antes de",
+        "entrar, así no gastas",
+        "croquetas en lo que",
+        "puedes conseguir",
+        "rompiendo cajas. 🐾",
       ]]}
     } else if (_ultraSuffix === "_fewdrops") {
-      dlg = { headers: ["◈ CASI, PERO NO ◈"], colors: ["#FFCC66"], pages: [[
-        "Quedan pocas bolsas,",
-        "Luly. Creo que no te",
+      dlg = { headers: ["◈ POCAS CAJAS ◈"], colors: ["#FFCC66"], pages: [[
+        `Solo quedan ${_ultraBolsas} cajas.`,
+        "Creo que no te",
         "alcanzarán para todo.",
-        "Recoge lo que puedas",
+        "Rompe lo que puedas",
         "y pásate con Bolkha",
         "a completar lo que",
-        "te falte. ¡Apúrate! 🐾",
+        "te falte. 🐾",
       ]]}
     } else if (_ultraSuffix === "_bolkha") {
       dlg = { headers: ["◈ VE A BOLKHA ◈"], colors: ["#88DDFF"], pages: [[
-        "No hay bolsas, pero",
-        "tienes croquetas.",
+        "No quedan cajas que",
+        "romper, pero tienes",
+        "croquetas suficientes.",
         "Ve con Bolkha a",
-        "comprar lo que te",
-        "falta. Está ahí cerca.",
+        "comprar lo que falta.",
         "¡No entres sin estar",
         "completa! 🐾",
       ]]}
     } else {
-      // _rexhelp: sin bolsas y sin croquetas suficientes → Rex da los recursos
+      // _rexhelp: sin cajas, sin croquetas → Rex da los recursos
       dlg = { headers: ["◈ UN PRÉSTAMO... ◈"], colors: ["#FFAACC"], pages: [[
-        "Luly... no hay bolsas",
+        "Luly... no hay cajas",
         "ni croquetas para ti.",
         "No puedo dejarte ir",
         "así al Torturado...",
@@ -4825,7 +4845,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const PHONE_PHASE0_DUR = 20 * PHONE_FPF   // 800ms
     const PHONE_CHAR_DELAY = 62                // ms/carácter
     const PHONE_WAIT_DUR   = 4200              // ms espera
-    const PHONE_PHASE3_DUR = 5 * PHONE_FPF    // 200ms
+    const PHONE_PHASE3_DUR = 3 * PHONE_FPF    // 200ms
 
     const typingStart = pn.setAt + PHONE_PHASE0_DUR
     const typingEnd   = typingStart + totalChars * PHONE_CHAR_DELAY
