@@ -114,7 +114,8 @@ export type G = {
   p1BossRexSeen: boolean          // Rex explicó El Castigador → puerta P1 abierta
   p2BossRexSeen: boolean          // Rex explicó El Herrero → puerta P2 abierta
   ultraBossRexSeen: boolean       // Rex explicó El Torturado → puerta ultra abierta
-  rexPhoneNotif: { kind: "p1" | "p2" | "ultra"; timer: number; setAt: number } | null  // burbuja celular Luly
+  rexPhoneNotif: { kind: "p1" | "section2" | "p2" | "ultra"; timer: number; setAt: number } | null  // burbuja celular Luly
+  rexSection2Notified: boolean     // ya se envió el celular de "segunda sección" al matar al Castigador
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)

@@ -118,6 +118,7 @@ export function applyLoad(g: G, s: LulySave): void {
   g.p1BossRexSeen          = s.p1BossRexSeen          ?? false
   g.p2BossRexSeen          = s.p2BossRexSeen          ?? false
   g.ultraBossRexSeen       = s.ultraBossRexSeen        ?? false
+  g.rexSection2Notified    = s.rexSection2Notified     ?? false
   g.croquetas              = s.croquetas               ?? 0
   g.bolkhaAppearedOnce     = s.bolkhaAppearedOnce      ?? false
   g.bolkhaRexTold          = s.bolkhaRexTold           ?? false
@@ -132,10 +133,16 @@ export function applyLoad(g: G, s: LulySave): void {
   if (!g.p1BossRexSeen && areRegularP1EnemiesDead(g, 0)) {
     g.rexPhoneNotif = { kind: "p1", timer: 20.0, setAt: Date.now() }
     g.pl.usingPhone = true; g.pl.pf = 0
+  } else if (!g.rexSection2Notified && isPart1BossDead(g, 0)) {
+    // Castigador ya cayó pero el celular de "segunda sección" no se vio
+    g.rexSection2Notified = true
+    g.rexPhoneNotif = { kind: "section2", timer: 20.0, setAt: Date.now() }
+    g.pl.usingPhone = true; g.pl.pf = 0
   } else if (!g.p2BossRexSeen && areRegularP2EnemiesDead(g, 0)) {
     g.rexPhoneNotif = { kind: "p2", timer: 20.0, setAt: Date.now() }
     g.pl.usingPhone = true; g.pl.pf = 0
-  } else if (!g.ultraBossRexSeen && isPart1BossDead(g, 0) && isPart2BossDead(g, 0)) {
+  } else if (!g.ultraBossRexSeen && isPart2BossDead(g, 0)) {
+    // Herrero ya cayó pero el celular del último jefe no se vio
     g.rexPhoneNotif = { kind: "ultra", timer: 20.0, setAt: Date.now() }
     g.pl.usingPhone = true; g.pl.pf = 0
   }
@@ -275,6 +282,7 @@ export function mkG_lazy(): G {
     p1BossRexSeen: false,
     p2BossRexSeen: false,
     ultraBossRexSeen: false,
+    rexSection2Notified: false,
     rexPhoneNotif: null,
     gpadType: "keyboard",
     isMobile: typeof window !== "undefined" && (window.innerWidth < 900 || navigator.maxTouchPoints > 0),

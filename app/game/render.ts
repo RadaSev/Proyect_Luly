@@ -4644,9 +4644,12 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   // ── Burbuja de celular de Luly (mensaje de Rex) — tipeo animado ─────────
   if (g.rexPhoneNotif && g.rexPhoneNotif.setAt) {
     const pn = g.rexPhoneNotif
-    const bossName = pn.kind === "p1" ? "Castigador" : pn.kind === "p2" ? "Herrero" : "Torturado"
     const line1 = "📱 Rex: ¡Luly, ven a verme!"
-    const line2 = `Necesitas saber del ${bossName}`
+    const line2 =
+      pn.kind === "p1"       ? "Necesitas saber del Castigador" :
+      pn.kind === "section2" ? "¡Hay más por explorar, ven!" :
+      pn.kind === "p2"       ? "Necesitas saber del Herrero" :
+      /* ultra */              "El último jefe... debo decírtelo en persona"
     const totalChars = line1.length + line2.length
 
     // Mismas constantes que page.tsx

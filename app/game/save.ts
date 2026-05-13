@@ -24,6 +24,7 @@ export interface LulySave {
   p1BossRexSeen?: boolean
   p2BossRexSeen?: boolean
   ultraBossRexSeen?: boolean
+  rexSection2Notified?: boolean
   croquetas?: number
   bolkhaAppearedOnce?: boolean
   bolkhaRexTold?: boolean
@@ -53,6 +54,7 @@ export function saveGame(g: G): void {
       p1BossRexSeen: g.p1BossRexSeen,
       p2BossRexSeen: g.p2BossRexSeen,
       ultraBossRexSeen: g.ultraBossRexSeen,
+      rexSection2Notified: g.rexSection2Notified,
       croquetas: g.croquetas,
       bolkhaAppearedOnce: g.bolkhaAppearedOnce,
       bolkhaRexTold: g.bolkhaRexTold,

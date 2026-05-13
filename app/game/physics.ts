@@ -413,7 +413,7 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
   }
   // ── Notificación de celular cuando el último enemigo de una sección muere ──
   const ew = e.world ?? 0
-  const _triggerPhoneAnim = (kind: "p1" | "p2" | "ultra") => {
+  const _triggerPhoneAnim = (kind: "p1" | "section2" | "p2" | "ultra") => {
     const now_ms = Date.now()
     // Siempre sobreescribir: si había un phone activo, reiniciar con el nuevo
     g.rexPhoneNotif = { kind, timer: 20.0, setAt: now_ms }
@@ -423,15 +423,29 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
       g.pl.pf = 0
     }
   }
+  // Trigger 1: todos los regulares P1 muertos → celular sobre El Castigador
   if (!e.boss) {
     if (areRegularP1EnemiesDead(g, ew) && !g.p1BossRexSeen && !g.rexPhoneNotif)
       _triggerPhoneAnim("p1")
+    // Trigger 3: todos los regulares P2 muertos → celular sobre El Herrero
     else if (areRegularP2EnemiesDead(g, ew) && !g.p2BossRexSeen && !g.rexPhoneNotif)
       _triggerPhoneAnim("p2")
   }
-  // Ultra: cuando AMBOS jefes están muertos — reemplaza cualquier phone previo que quedara activo
-  if (e.boss && isPart1BossDead(g, ew) && isPart2BossDead(g, ew) && !g.ultraBossRexSeen)
-    _triggerPhoneAnim("ultra")
+  if (e.boss) {
+    const bParts = e.originalId.split("_")
+    const bC = parseInt(bParts[1]), bR = parseInt(bParts[2])
+    const [p1c, p1r] = WORLD_P1_BOSS[ew]
+    const [p2c, p2r] = WORLD_P2_BOSS[ew]
+    // Trigger 2: Castigador muerto → celular sobre la segunda sección
+    if (bC === p1c && bR === p1r && !g.rexSection2Notified) {
+      g.rexSection2Notified = true
+      _triggerPhoneAnim("section2")
+    }
+    // Trigger 4: Herrero muerto → celular sobre el último jefe (sin revelar nombre)
+    if (bC === p2c && bR === p2r && !g.ultraBossRexSeen) {
+      _triggerPhoneAnim("ultra")
+    }
+  }
 }
 
 // Helper global para saber si un spawn está muerto (tolerante a adopciones)

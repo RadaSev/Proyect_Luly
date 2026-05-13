@@ -451,8 +451,15 @@ export default function ProyectoLuly() {
           if (!g.p1BossRexSeen && areRegularP1EnemiesDead(g, pWld)) {
             g.rexPhoneNotif = { kind: "p1", timer: 20.0, setAt: now_ms }
             g.pl.usingPhone = true; g.pl.pf = 0
+          } else if (!g.rexSection2Notified && isPart1BossDead(g, pWld)) {
+            g.rexSection2Notified = true
+            g.rexPhoneNotif = { kind: "section2", timer: 20.0, setAt: now_ms }
+            g.pl.usingPhone = true; g.pl.pf = 0
           } else if (!g.p2BossRexSeen && areRegularP2EnemiesDead(g, pWld)) {
             g.rexPhoneNotif = { kind: "p2", timer: 20.0, setAt: now_ms }
+            g.pl.usingPhone = true; g.pl.pf = 0
+          } else if (!g.ultraBossRexSeen && isPart2BossDead(g, pWld)) {
+            g.rexPhoneNotif = { kind: "ultra", timer: 20.0, setAt: now_ms }
             g.pl.usingPhone = true; g.pl.pf = 0
           }
         }
