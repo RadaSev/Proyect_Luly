@@ -4324,7 +4324,7 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const BY0 = EY0 + ESIZE + 12, BSIZE = 18, BSTP = 11 // huesos
   const BONES_PER_ROW = 11                            // cuántos caben en la 1ª fila
   const hasTballHUD = g.abilities.has("tball")        // ¿mostrar fila de pelota?
-  const TBALL_ROW_H = 20                              // altura de la fila de pelota
+  const TBALL_ROW_H = 33                              // altura de la fila de pelota (2 filas: 14+3+14+2)
   const TBY0 = BY0 + BSIZE * 2 + 6 + 8               // Y de la fila tball (si existe)
   const CPLBL_Y = (hasTballHUD ? TBY0 + TBALL_ROW_H + 4 : BY0 + BSIZE * 2 + 6) + 14
   const panH = CPLBL_Y + 16 + 8
@@ -4447,19 +4447,23 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     const tbAmmo = g.tballAmmo
     const tbY = TBY0
     const TBLBL_W = 44, TBSIZE = 14, TBSTP = 17
+    const TB_PER_ROW = 8                              // máx iconos por fila (igual que huesos)
     ctx.fillStyle = th.accent + "88"; ctx.font = "bold 8px 'Courier New',monospace"
     ctx.fillText("PELOTA", HX0, tbY + 11)
-    // Íconos individuales — uno por carga (igual que los huesos)
+    // Íconos individuales en 2 filas — mismo comportamiento que los huesos
     for (let i = 0; i < tbMax; i++) {
-      const tx = HX0 + TBLBL_W + i * TBSTP
+      const row = i < TB_PER_ROW ? 0 : 1
+      const col = i < TB_PER_ROW ? i : i - TB_PER_ROW
+      const tx  = HX0 + TBLBL_W + col * TBSTP
+      const ty  = tbY + row * (TBSIZE + 3)
       const has = i < tbAmmo
       if (tbSpr && tbSpr.complete && tbSpr.naturalWidth > 0) {
         if (!has) { ctx.save(); ctx.globalAlpha = 0.14 }
-        ctx.drawImage(tbSpr, tx, tbY, TBSIZE, TBSIZE)
+        ctx.drawImage(tbSpr, tx, ty, TBSIZE, TBSIZE)
         if (!has) ctx.restore()
       } else {
         ctx.fillStyle = has ? "#CCFF00" : "#2A2A1A"
-        ctx.beginPath(); ctx.arc(tx + TBSIZE / 2, tbY + TBSIZE / 2, TBSIZE / 2 - 1, 0, Math.PI * 2); ctx.fill()
+        ctx.beginPath(); ctx.arc(tx + TBSIZE / 2, ty + TBSIZE / 2, TBSIZE / 2 - 1, 0, Math.PI * 2); ctx.fill()
       }
     }
   }
