@@ -126,6 +126,19 @@ export function applyLoad(g: G, s: LulySave): void {
   g.rexKeyAnimTimer        = s.rexKeyAnimTimer         ?? 0
   g.rexMitadAnimStart      = 0   // siempre reset al cargar (se recalcula al entrar en rango)
   g.rexPhoneNotif          = null
+  // Recovery: re-disparar notificación de celular si se perdió (guardado durante animación o dev-l).
+  // Se ejecuta después de restaurar g.dead para que areRegularP*EnemiesDead sea exacto.
+  // Se hace ANTES de loadWorld porque areRegularP*EnemiesDead solo consulta g.dead (no g.enemies).
+  if (!g.p1BossRexSeen && areRegularP1EnemiesDead(g, 0)) {
+    g.rexPhoneNotif = { kind: "p1", timer: 20.0, setAt: Date.now() }
+    g.pl.usingPhone = true; g.pl.pf = 0
+  } else if (!g.p2BossRexSeen && areRegularP2EnemiesDead(g, 0)) {
+    g.rexPhoneNotif = { kind: "p2", timer: 20.0, setAt: Date.now() }
+    g.pl.usingPhone = true; g.pl.pf = 0
+  } else if (!g.ultraBossRexSeen && isPart1BossDead(g, 0) && isPart2BossDead(g, 0)) {
+    g.rexPhoneNotif = { kind: "ultra", timer: 20.0, setAt: Date.now() }
+    g.pl.usingPhone = true; g.pl.pf = 0
+  }
   // Si el estado guardado es "key_dropped" pero la llave ya no está activa, volver a spawnarla
   if (g.viejoDogState === "key_dropped" && !g.pickups.find(p => p.id === "tball_key" && p.active)) {
     // Ubicar llave cerca de donde está la jaula (pickup secundario de emergencia)

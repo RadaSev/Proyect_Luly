@@ -415,10 +415,12 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
   const ew = e.world ?? 0
   const _triggerPhoneAnim = (kind: "p1" | "p2" | "ultra") => {
     const now_ms = Date.now()
-    g.rexPhoneNotif = { kind, timer: 20.0, setAt: now_ms }  // timer largo: la animación tarda ~8-9s
+    // Siempre sobreescribir: si había un phone activo, reiniciar con el nuevo
+    g.rexPhoneNotif = { kind, timer: 20.0, setAt: now_ms }
+    // Reiniciar animación de Luly solo si no estaba ya en el celular
     if (!g.pl.usingPhone) {
       g.pl.usingPhone = true
-      g.pl.pf = 0   // reiniciar frame al inicio de la animación
+      g.pl.pf = 0
     }
   }
   if (!e.boss) {
@@ -427,8 +429,8 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
     else if (areRegularP2EnemiesDead(g, ew) && !g.p2BossRexSeen && !g.rexPhoneNotif)
       _triggerPhoneAnim("p2")
   }
-  // Ultra: cuando AMBOS jefes están muertos (puede ser tras matar a p1 o a p2)
-  if (e.boss && isPart1BossDead(g, ew) && isPart2BossDead(g, ew) && !g.ultraBossRexSeen && !g.rexPhoneNotif)
+  // Ultra: cuando AMBOS jefes están muertos — reemplaza cualquier phone previo que quedara activo
+  if (e.boss && isPart1BossDead(g, ew) && isPart2BossDead(g, ew) && !g.ultraBossRexSeen)
     _triggerPhoneAnim("ultra")
 }
 

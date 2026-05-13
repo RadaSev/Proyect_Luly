@@ -25,6 +25,7 @@ import {
   getWorldAtX, _mapWorldExplored, devMapHitTest,
 } from "./game/render"
 import { fireTBall } from "./game/player_tball"
+import { areRegularP1EnemiesDead, areRegularP2EnemiesDead, isPart1BossDead, isPart2BossDead } from "./game/physics"
 import { pollGamepad, detectGpadType } from "./game/input"
 import { bolkhaDoInteract } from "./game/npc_bolkha"
 import { isBossCPUnlocked, spawnBossCPReward } from "./game/checkpoints"
@@ -443,6 +444,17 @@ export default function ProyectoLuly() {
           const parts = en.originalId.split("_")
           if (parts.length >= 4) g.dead.add(parts.slice(0, 4).join("_"))
           g.dead.add(en.originalId); g.dead.add(en.id)
+        }
+        // Verificar si el phone debe dispararse ahora (bypass de dmgEnemy)
+        if (!g.rexPhoneNotif && !g.pl.usingPhone) {
+          const now_ms = Date.now()
+          if (!g.p1BossRexSeen && areRegularP1EnemiesDead(g, pWld)) {
+            g.rexPhoneNotif = { kind: "p1", timer: 20.0, setAt: now_ms }
+            g.pl.usingPhone = true; g.pl.pf = 0
+          } else if (!g.p2BossRexSeen && areRegularP2EnemiesDead(g, pWld)) {
+            g.rexPhoneNotif = { kind: "p2", timer: 20.0, setAt: now_ms }
+            g.pl.usingPhone = true; g.pl.pf = 0
+          }
         }
       }
       if (g.devMode && k === "j") g.staDisplay = g.staDisplay === "circle" ? "bar" : "circle"
