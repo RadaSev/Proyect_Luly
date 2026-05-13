@@ -59,12 +59,12 @@ export function tickBolkha(g: G) {
       if (g.bolkhaEft >= 0.10) {
         g.bolkhaEft = 0
         g.bolkhaEf++
-        const freezeAt = item === "tball" ? 18 : 24
+        const freezeAt = item === "tball" ? 17 : 24
         if (g.bolkhaEf >= freezeAt) {
           g.bolkhaEf = freezeAt
           g.bolkhaGivingPhase = 1
           // tball: 3 s de freeze; corazones/huesos: 0.4 s antes de la explosión
-          g.bolkhaGivingTimer = item === "tball" ? 3.0 : 0.4
+          g.bolkhaGivingTimer = item === "tball" ? 1.0 : 0.4
         }
       }
     } else if (g.bolkhaGivingPhase === 1) {
