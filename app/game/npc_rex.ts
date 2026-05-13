@@ -19,6 +19,7 @@ export let _rexDlgMs     = 0
 export let _rexDlgPage    = 0
 export let _rexPageWaiting  = false
 export let _rexTypingActive = false
+export let _rexYesNoActive  = false   // true cuando el selector Sí/No está listo para input
 export let _rexWasInRange   = false
 export const _rexReadPages: Record<string, number> = {}
 
@@ -29,6 +30,7 @@ export function setRexDlgMs(v: number)         { _rexDlgMs = v }
 export function setRexDlgPage(v: number)       { _rexDlgPage = v }
 export function setRexPageWaiting(v: boolean)  { _rexPageWaiting = v }
 export function setRexTypingActive(v: boolean) { _rexTypingActive = v }
+export function setRexYesNoActive(v: boolean)  { _rexYesNoActive = v }
 export function setRexWasInRange(v: boolean)   { _rexWasInRange = v }
 
 export function tickViejoDog(g: G) {
@@ -66,6 +68,18 @@ export function tickViejoDog(g: G) {
     if (g.viejoDogState === "ultra_done" && g.rexUltraDoneSeen) {
       g.viejoDogState = "world2_ready"
       saveGame(g)
+    }
+    // ultra_ready: si la jugadora dijo No y se aleja, re-analizar si le faltan recursos
+    if (g.viejoDogState === "ultra_ready" && g.rexUltraReadyDeclined) {
+      g.rexUltraReadyDeclined = false
+      const _fullCheck = g.pl.hp >= g.pl.maxHp && g.pl.ammo >= 15
+        && (!g.abilities.has("tball") || g.tballAmmo > 0)
+      if (!_fullCheck) {
+        // No está completa → volver al análisis de recursos
+        g.viejoDogState = "ultra_hint"
+        g.rexUltraGaveItems = false  // Rex puede prestar de nuevo si hace falta
+        saveGame(g)
+      }
     }
     return
   }
@@ -133,7 +147,13 @@ export function tickViejoDog(g: G) {
   } else if (g.viejoDogState === "baton_delivered") {
     // Primera vez que vuelve después de entregar el bastón: marcar vista
     if (!g.rexBatonDeliveredSeen) { g.rexBatonDeliveredSeen = true; saveGame(g) }
-  } else if (g.viejoDogState === "ultra_hint" && g.cw.has(0)) {
+  } else if (g.viejoDogState === "ultra_hint") {
+    // Cuando la jugadora está completa (vida, munición, pelotas) → pasar al ready-check
+    const _isFullForBoss = g.pl.hp >= g.pl.maxHp && g.pl.ammo >= 15
+      && (!g.abilities.has("tball") || g.tballAmmo > 0)
+    if (_isFullForBoss) { g.viejoDogState = "ultra_ready"; saveGame(g) }
+    else if (g.cw.has(0)) { g.viejoDogState = "ultra_done"; saveGame(g) }
+  } else if (g.viejoDogState === "ultra_ready" && g.cw.has(0)) {
     g.viejoDogState = "ultra_done"; saveGame(g)
   } else if (g.viejoDogState === "ultra_done") {
     if (!g.rexUltraDoneSeen) { g.rexUltraDoneSeen = true; saveGame(g) }

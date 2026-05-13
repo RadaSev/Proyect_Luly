@@ -119,6 +119,9 @@ export function applyLoad(g: G, s: LulySave): void {
   g.p2BossRexSeen          = s.p2BossRexSeen          ?? false
   g.ultraBossRexSeen       = s.ultraBossRexSeen        ?? false
   g.rexSection2Notified    = s.rexSection2Notified     ?? false
+  g.rexUltraGaveItems      = s.rexUltraGaveItems       ?? false
+  g.rexReadyCursor         = 0   // siempre reset (estado transitorio)
+  g.rexUltraReadyDeclined  = false
   g.croquetas              = s.croquetas               ?? 0
   g.bolkhaAppearedOnce     = s.bolkhaAppearedOnce      ?? false
   g.bolkhaRexTold          = s.bolkhaRexTold           ?? false
@@ -283,6 +286,9 @@ export function mkG_lazy(): G {
     p2BossRexSeen: false,
     ultraBossRexSeen: false,
     rexSection2Notified: false,
+    rexUltraGaveItems: false,
+    rexReadyCursor: 0,
+    rexUltraReadyDeclined: false,
     rexPhoneNotif: null,
     gpadType: "keyboard",
     isMobile: typeof window !== "undefined" && (window.innerWidth < 900 || navigator.maxTouchPoints > 0),

@@ -101,7 +101,7 @@ export type G = {
   activePower: string | null          // poder seleccionado actualmente
   bossRewardedCPs: Set<string>        // CPs de boss que ya dieron recompensa
   // Quest del perrito viejo (NPC en TROW [1,4] de W0)
-  viejoDogState: "waiting" | "intro" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised" | "ball_held" | "ball_guide" | "reward_lives" | "reward_full" | "baton_delivered" | "p2_warning" | "ultra_hint" | "ultra_done" | "world2_ready"
+  viejoDogState: "waiting" | "intro" | "quest_active" | "key_dropped" | "key_held" | "cage_opened" | "quest_done" | "surprised" | "ball_held" | "ball_guide" | "reward_lives" | "reward_full" | "baton_delivered" | "p2_warning" | "ultra_hint" | "ultra_ready" | "ultra_done" | "world2_ready"
   tballKeyHeld: boolean
   questKillBaseline: number
   rexBallFirstSeen: boolean
@@ -116,6 +116,9 @@ export type G = {
   ultraBossRexSeen: boolean       // Rex explicó El Torturado → puerta ultra abierta
   rexPhoneNotif: { kind: "p1" | "section2" | "p2" | "ultra"; timer: number; setAt: number } | null  // burbuja celular Luly
   rexSection2Notified: boolean     // ya se envió el celular de "segunda sección" al matar al Castigador
+  rexUltraGaveItems: boolean       // Rex ya dio los recursos prestados antes del Torturado
+  rexReadyCursor: 0 | 1            // cursor del selector Sí/No (0=Sí, 1=No)
+  rexUltraReadyDeclined: boolean   // jugadora dijo No al ready-check → muestra msg "vuelve cuando quieras"
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)

@@ -32,7 +32,7 @@ import {
   _rexNameAlpha, _rexDlgKey, _rexDlgMs, _rexDlgPage,
   _rexPageWaiting, _rexTypingActive, _rexWasInRange, _rexReadPages,
   setRexNameAlpha, setRexDlgKey, setRexDlgMs, setRexDlgPage,
-  setRexPageWaiting, setRexTypingActive, setRexWasInRange,
+  setRexPageWaiting, setRexTypingActive, setRexYesNoActive, setRexWasInRange,
 } from "./npc_rex"
 import { spawnExplosion, triggerShake, countP1KillsW0 } from "./utils"
 import { saveGame } from "./save"
@@ -1130,14 +1130,14 @@ export function drawBolkhaShop(ctx: CanvasRenderingContext2D, g: G, sprs: SprBan
 // Por ahora solo tiene la quest "tball". El sistema de slots permite añadir más.
 export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
-  if (curW !== 0) { setRexTypingActive(false); setRexWasInRange(false); return }
+  if (curW !== 0) { setRexTypingActive(false); setRexYesNoActive(false); setRexWasInRange(false); return }
 
   const { cx, cy } = g
   const nx = VIEJO_DOG_POS.x - cx
   const ny = VIEJO_DOG_POS.y - cy
   // Culling basado en la casa (HRX=bx-151, HRW=552, HRH=368, HRY=by-326)
   // Solo salir si la casa entera queda fuera de pantalla
-  if (nx + 401 < 0 || nx - 151 > CW || ny + 42 < 0 || ny - 326 > CH) { setRexTypingActive(false); setRexWasInRange(false); return }
+  if (nx + 401 < 0 || nx - 151 > CW || ny + 42 < 0 || ny - 326 > CH) { setRexTypingActive(false); setRexYesNoActive(false); setRexWasInRange(false); return }
 
   // bx/by = centro X / pies del NPC en pantalla
   const bx = nx, by = ny
@@ -1301,6 +1301,9 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     const p1Dead = isPart1BossDead(g, 0)
     const p2Dead = isPart2BossDead(g, 0)
     const allP1Clear = areRegularP1EnemiesDead(g, 0)
+    // Para el callout de ultra_hint / ultra_ready (necesita _ultraReady antes del bloque de análisis)
+    const _ultraReadyCallout = g.pl.hp >= g.pl.maxHp && g.pl.ammo >= 15
+      && (!g.abilities.has("tball") || g.tballAmmo > 0)
     const callText = g.viejoDogState === "intro"
       ? (g.rexIntroLeft ? "¡Ve por ellos, búscala! 🗝" : "¡Hola! ¡Acércate, Luly!")
       : (g.viejoDogState === "cage_opened" || g.viejoDogState === "quest_done")
@@ -1322,7 +1325,9 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
       : g.viejoDogState === "p2_warning"
       ? (g.rexBatonHeld ? "¡Si, ahí está mi bastón! 🪄" : p2Dead ? "¿Y mi bastón? ¡Búscalo!" : "¡Ese Herrero caerá en tus brasas!")
       : g.viejoDogState === "ultra_hint"
-      ? (g.cw.has(0) ? "¡Luly, nos liberaste! 🎉" : "¡Recarga antes de enfrentarlo!")
+      ? (_ultraReadyCallout ? "¡Estás lista! ¡Ven!" : "¡Recarga antes de enfrentarlo!")
+      : g.viejoDogState === "ultra_ready"
+      ? (g.ultraBossRexSeen ? "¡Ve, Luly! ¡Tú puedes! 🐾" : _ultraReadyCallout ? "¡Ven, te hago una pregunta!" : "¡Recarga antes de enfrentarlo!")
       : g.viejoDogState === "ultra_done"
       ? "¡Luly, lo hiciste! 🎉"
       : g.viejoDogState === "world2_ready"
@@ -1342,10 +1347,10 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     ctx.fillStyle = "#3A2800"; ctx.font = "bold 8px 'Courier New',monospace"; ctx.textAlign = "center"
     ctx.fillText(callText, bx, cby + 11)
     ctx.textAlign = "left"; ctx.restore()
-    setRexTypingActive(false); setRexWasInRange(false)   // fuera del rango de diálogo
+    setRexTypingActive(false); setRexYesNoActive(false); setRexWasInRange(false)   // fuera del rango de diálogo
     return
   }
-  if (dist >= VIEJO_DOG_CALLOUT_R) { setRexTypingActive(false); setRexWasInRange(false); return }
+  if (dist >= VIEJO_DOG_CALLOUT_R) { setRexTypingActive(false); setRexYesNoActive(false); setRexWasInRange(false); return }
 
   // ── Sistema de quests / diálogo con tipografía animada ───────────────────
   const TOTAL_QUEST_SLOTS = 3
@@ -1353,6 +1358,25 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   const allP1Clear_dlg = areRegularP1EnemiesDead(g, 0)
   const p1Dead_dlg = isPart1BossDead(g, 0)
   const p2Dead_dlg = isPart2BossDead(g, 0)
+
+  // ── Análisis de recursos pre-Torturado (usado en ultra_hint / ultra_ready) ──
+  const _ultraReady = g.pl.hp >= g.pl.maxHp && g.pl.ammo >= 15
+    && (!g.abilities.has("tball") || g.tballAmmo > 0)
+  const _ultraDrops = g.drops.filter(d => d.active && (d.kind === "h" || d.kind === "a" || d.kind === "tba")).length
+  const _ultraNeededScore = (g.pl.hp < g.pl.maxHp ? BOLKHA_PRICE_HEART : 0)
+    + (g.pl.ammo < 15 ? BOLKHA_PRICE_BONES : 0)
+    + (g.abilities.has("tball") && g.tballAmmo === 0 ? BOLKHA_PRICE_TBALL : 0)
+  const _ultraCanAfford = _ultraNeededScore > 0 && g.score >= _ultraNeededScore
+  // Sufijo para dlgKey: encapsula el sub-estado del análisis
+  let _ultraSuffix = ""
+  if (g.viejoDogState === "ultra_hint") {
+    if (_ultraDrops >= 4)        _ultraSuffix = "_drops"
+    else if (_ultraDrops > 0)    _ultraSuffix = "_fewdrops"
+    else if (_ultraCanAfford)    _ultraSuffix = "_bolkha"
+    else                         _ultraSuffix = "_rexhelp"
+  } else if (g.viejoDogState === "ultra_ready") {
+    _ultraSuffix = g.rexUltraReadyDeclined ? "_no" : (g.ultraBossRexSeen ? "_open" : "_check")
+  }
 
   // Cada estado devuelve { pages, colors, headers } — pages = array de páginas (array de líneas)
   type DlgDef = { pages: string[][]; colors: string[]; headers: string[] }
@@ -1620,13 +1644,76 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
       "¡sé que lo lograrás!",
     ]]}
   } else if (g.viejoDogState === "ultra_hint") {
-    dlg = { headers: ["◈ ÁNIMO, LULY ◈"], colors: ["#88AAFF"], pages: [[
-      "Recuerda: recarga todo",
-      "antes de entrar.",
-      "Descansa si es necesario.",
-      "¡Tú puedes, Luly,",
-      "yo creo en ti! 🐾",
-    ]]}
+    if (_ultraSuffix === "_drops") {
+      dlg = { headers: ["◈ BOLSAS EN EL MAPA ◈"], colors: ["#88FFAA"], pages: [[
+        "Luly, hay bolsas de",
+        "recursos por el mapa.",
+        "Recógelas antes de",
+        "entrar. Así no",
+        "gastas croquetas en",
+        "lo que puedes",
+        "conseguir gratis. 🐾",
+      ]]}
+    } else if (_ultraSuffix === "_fewdrops") {
+      dlg = { headers: ["◈ CASI, PERO NO ◈"], colors: ["#FFCC66"], pages: [[
+        "Quedan pocas bolsas,",
+        "Luly. Creo que no te",
+        "alcanzarán para todo.",
+        "Recoge lo que puedas",
+        "y pásate con Bolkha",
+        "a completar lo que",
+        "te falte. ¡Apúrate! 🐾",
+      ]]}
+    } else if (_ultraSuffix === "_bolkha") {
+      dlg = { headers: ["◈ VE A BOLKHA ◈"], colors: ["#88DDFF"], pages: [[
+        "No hay bolsas, pero",
+        "tienes croquetas.",
+        "Ve con Bolkha a",
+        "comprar lo que te",
+        "falta. Está ahí cerca.",
+        "¡No entres sin estar",
+        "completa! 🐾",
+      ]]}
+    } else {
+      // _rexhelp: sin bolsas y sin croquetas suficientes → Rex da los recursos
+      dlg = { headers: ["◈ UN PRÉSTAMO... ◈"], colors: ["#FFAACC"], pages: [[
+        "Luly... no hay bolsas",
+        "ni croquetas para ti.",
+        "No puedo dejarte ir",
+        "así al Torturado...",
+        "oye, ¡esto es un",
+        "PRÉSTAMO, eh? ¡Yo",
+        "también como, Luly! 🐾",
+      ]]}
+    }
+  } else if (g.viejoDogState === "ultra_ready") {
+    if (g.rexUltraReadyDeclined) {
+      dlg = { headers: ["◈ CUANDO ESTÉS LISTA ◈"], colors: ["#AABBFF"], pages: [[
+        "Está bien, Luly.",
+        "Vuelve cuando quieras.",
+        "Aquí estaré. El",
+        "Torturado puede",
+        "esperar un poco. 🐾",
+      ]]}
+    } else if (g.ultraBossRexSeen) {
+      dlg = { headers: ["◈ ¡MUCHA SUERTE! ◈"], colors: ["#88FF88"], pages: [[
+        "¡Ve, Luly! El Torturado",
+        "te espera ahí dentro.",
+        "Usa todo lo que",
+        "aprendiste. ¡Tú",
+        "puedes con él!",
+        "¡Yo creo en ti! 🐾",
+      ]]}
+    } else {
+      dlg = { headers: ["◈ ¿LISTA PARA EL FINAL? ◈"], colors: ["#CCBBFF"], pages: [[
+        "Veo que estás completa.",
+        "El Torturado es el",
+        "más poderoso de todos.",
+        "Usa todo lo que tienes.",
+        "¿Estás lista para",
+        "enfrentarte a él?",
+      ]]}
+    }
   } else if (g.viejoDogState === "ultra_done") {
     dlg = { headers: ["◈ ¡LO HICISTE, LULY! ◈"], colors: ["#FFDD44"], pages: [[
       "Ahora debemos seguir,",
@@ -1671,6 +1758,7 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     + (p1Dead_dlg ? "_p1d" : allP1Clear_dlg ? "_clr" : "")
     + (p2Dead_dlg ? "_p2d" : "")
     + _bolkhaSuffix
+    + _ultraSuffix
 
   // ── Re-entrada al rango: mostrar instantáneo si ya fue leído, sino reiniciar ──
   const nowInRange = dist < VIEJO_DOG_TALK_R
@@ -1699,6 +1787,10 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   const curPageTotalChars = dlg.pages[curPage].join("").length
   const curPageDone = elapsed >= curPageTotalChars * REX_TYPING_MS && curPage < numPages - 1
   setRexPageWaiting(curPageDone)
+  // _showYesNo: true cuando el ready-check está activo (charsShown resuelto más abajo)
+  const _showYesNo = g.viejoDogState === "ultra_ready" && !g.ultraBossRexSeen
+    && !g.rexUltraReadyDeclined && curPage === numPages - 1
+
   // Avance de página con E/B/○ — cooldown 400 ms evita doble-salto por tap rápido o lag
   if (curPageDone && g.keys["e"] && Date.now() - _rexLastAdvanceMs > 400) {
     _rexLastAdvanceMs = Date.now()
@@ -1716,6 +1808,23 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   )
   const dialogLines = dlg.pages[curPage]
 
+  // ── Confirmación del selector Sí/No con E (cursor ya actualizado por tick.ts) ─
+  const _yesNoDone = _showYesNo && charsShown >= dlg.pages[curPage].join("").length
+  if (_yesNoDone && g.keys["e"] && Date.now() - _rexLastAdvanceMs > 400) {
+    _rexLastAdvanceMs = Date.now()
+    g.keys["e"] = false
+    if (g.rexReadyCursor === 0) {
+      // Sí → abrir sala del Torturado
+      g.ultraBossRexSeen = true
+      triggerShake(g, 18, 2.2)
+      g.abilityNotif = { text: "¡La sala del Torturado ha sido desbloqueada! ⚡", timer: 5.0 }
+      saveGame(g)
+    } else {
+      // No → mostrar mensaje "vuelve cuando quieras"
+      g.rexUltraReadyDeclined = true
+    }
+  }
+
   // ── Actualizar flag de tipografía activa (leído por tickViejoDog siguiente tick) ─
   // Se calcula aquí porque 'dialogLines' ya está disponible; 'totalPageChars' se redeclara abajo
   const _curPageChars = dialogLines.join("").length
@@ -1730,7 +1839,6 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
         && (g.viejoDogState === "ball_held" || g.viejoDogState === "ball_guide")
         && allP1Clear_dlg && !p1Dead_dlg
       const isP2Unlock = !g.p2BossRexSeen && g.viejoDogState === "p2_warning"
-      const isUltraUnlock = !g.ultraBossRexSeen && g.viejoDogState === "ultra_hint"
       if (isP1Unlock) {
         g.p1BossRexSeen = true
         triggerShake(g, 14, 1.8)
@@ -1741,10 +1849,19 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
         triggerShake(g, 14, 1.8)
         g.abilityNotif = { text: "¡El cubículo del Herrero se ha abierto! 🔴", timer: 5.0 }
         saveGame(g)
-      } else if (isUltraUnlock) {
-        g.ultraBossRexSeen = true
-        triggerShake(g, 18, 2.2)
-        g.abilityNotif = { text: "¡La sala del Torturado ha sido desbloqueada! ⚡", timer: 5.0 }
+      }
+      // ── Rex da recursos prestados (último diálogo _rexhelp) ────────────────
+      if (!g.rexUltraGaveItems && g.viejoDogState === "ultra_hint"
+          && _ultraSuffix === "_rexhelp") {
+        g.rexUltraGaveItems = true
+        g.pl.hp  = g.pl.maxHp
+        g.pl.ammo = 15
+        if (g.abilities.has("tball"))
+          g.tballAmmo = g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT
+        spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30,
+          ["#FF4444", "#FFD700", "#88FF44", "#88DDFF", "#FFAACC", "#FFFFFF"], 35, 5, true)
+        triggerShake(g, 8, 0.5)
+        g.abilityNotif = { text: "¡Rex te prestó recursos! ❤ 🦴 🎾", timer: 4.5 }
         saveGame(g)
       }
       // ── Tarea 2: intro leída completa → activar quest sin salir del rango ──
@@ -1772,7 +1889,13 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     }
   }
   // Solo bloquear movimiento en diálogos de 2 páginas (los que requieren pulsar E)
-  setRexTypingActive(nowInRange && numPages > 1 && !(curPage === numPages - 1 && charsShown >= _curPageChars))
+  // Paralizar a Luly: diálogos multi-página O cuando el selector Sí/No está activo
+  setRexTypingActive(nowInRange && (
+    (numPages > 1 && !(curPage === numPages - 1 && charsShown >= _curPageChars))
+    || _showYesNo
+  ))
+  // Habilitar lectura de cursor en tick.ts solo cuando el texto terminó de tipear
+  setRexYesNoActive(nowInRange && _yesNoDone)
   const dialogColor = dlg.colors[curPage] ?? dlg.colors[0]
   const headerLine  = dlg.headers[curPage] ?? dlg.headers[0]
 
@@ -1784,7 +1907,8 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
   const bub_pad = dlgMob ? 13 : 9
   const bub_w   = dlgMob ? 300 : 210
   const totalLines = (headerLine ? 1 : 0) + dialogLines.length
-  const bub_h = bub_pad * 2 + totalLines * bub_lh + (headerLine ? 4 : 0)
+  const _yesNoExtraH = _showYesNo ? bub_lh + 8 : 0
+  const bub_h = bub_pad * 2 + totalLines * bub_lh + (headerLine ? 4 : 0) + _yesNoExtraH
   const bub_x = Math.max(4, Math.min(CW - bub_w - 4, bx - bub_w / 2))
   const bub_y = by - bub_h - 78
 
@@ -1801,7 +1925,15 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     : (g.viejoDogState === "baton_delivered") ? (curPage === 1 ? "#FF8844" : "#C8A0FF")
     : (g.viejoDogState === "intro") ? (curPage === 1 ? "#FFDD88" : "#E8D8C0")
     : (g.viejoDogState === "p2_warning") ? "#FFAA44"
-    : (g.viejoDogState === "ultra_hint") ? "#88AAFF"
+    : (g.viejoDogState === "ultra_hint") ? (
+        _ultraSuffix === "_drops" ? "#88FFAA"
+        : _ultraSuffix === "_fewdrops" ? "#FFCC66"
+        : _ultraSuffix === "_bolkha" ? "#88DDFF"
+        : "#FFAACC")
+    : (g.viejoDogState === "ultra_ready") ? (
+        g.rexUltraReadyDeclined ? "#AABBFF"
+        : g.ultraBossRexSeen ? "#88FF88"
+        : "#CCBBFF")
     : (g.viejoDogState === "ultra_done") ? "#FFDD44"
     : (g.viejoDogState === "world2_ready") ? "#AADDFF"
     : "#A08060"
@@ -1851,6 +1983,42 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
     ctx.globalAlpha = pulse
     ctx.fillStyle = btnColor; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "right"
     ctx.fillText(btnLabel, bub_x + bub_w - 6, bub_y + bub_h - 4)
+    ctx.globalAlpha = 1
+  }
+  // ── Selector Sí/No (ultra_ready ready-check) ────────────────────────────────
+  if (_showYesNo && _yesNoDone) {
+    const btnY  = bub_y + bub_h - bub_pad - 2
+    const siX   = bub_x + bub_w * 0.30
+    const noX   = bub_x + bub_w * 0.70
+    const btnW  = 44, btnH = 16
+    ctx.font = `bold ${bub_fontSize + 1}px 'Courier New',monospace`
+    ctx.textAlign = "center"
+    // Sí
+    const siSel = g.rexReadyCursor === 0
+    ctx.fillStyle = siSel ? "rgba(100,255,100,0.25)" : "rgba(80,80,80,0.18)"
+    ctx.beginPath(); ctx.roundRect(siX - btnW / 2, btnY - btnH + 3, btnW, btnH, 4); ctx.fill()
+    if (siSel) {
+      ctx.strokeStyle = "#AAFFAA"; ctx.lineWidth = 1.2
+      ctx.beginPath(); ctx.roundRect(siX - btnW / 2, btnY - btnH + 3, btnW, btnH, 4); ctx.stroke()
+    }
+    ctx.fillStyle = siSel ? "#CCFFAA" : "#777777"
+    ctx.fillText("[ Sí ]", siX, btnY)
+    // No
+    const noSel = g.rexReadyCursor === 1
+    ctx.fillStyle = noSel ? "rgba(255,100,100,0.25)" : "rgba(80,80,80,0.18)"
+    ctx.beginPath(); ctx.roundRect(noX - btnW / 2, btnY - btnH + 3, btnW, btnH, 4); ctx.fill()
+    if (noSel) {
+      ctx.strokeStyle = "#FFAAAA"; ctx.lineWidth = 1.2
+      ctx.beginPath(); ctx.roundRect(noX - btnW / 2, btnY - btnH + 3, btnW, btnH, 4); ctx.stroke()
+    }
+    ctx.fillStyle = noSel ? "#FFAAAA" : "#777777"
+    ctx.fillText("[ No ]", noX, btnY)
+    // Indicador de controles (flechas)
+    const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.005)
+    ctx.globalAlpha = pulse
+    ctx.fillStyle = "#AAAAFF"
+    ctx.font = `bold 8px 'Courier New',monospace`
+    ctx.fillText("◄ ► para elegir  •  E para confirmar", bub_x + bub_w / 2, btnY + 10)
     ctx.globalAlpha = 1
   }
   ctx.textAlign = "left"

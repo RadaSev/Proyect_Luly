@@ -12,13 +12,18 @@ import { tickBolkha } from "./npc_bolkha"
 import { tickCamera, tickWorldAnim } from "./init"
 import { tickSparks, tickShake } from "./utils"
 import { tickCheckpoints } from "./checkpoints"
-import { _rexTypingActive } from "./npc_rex"
+import { _rexTypingActive, _rexYesNoActive } from "./npc_rex"
 
 export function tick(g: G) {
   if (g.tpAnim && g.tpAnim.phase === 0) { tickCheckpoints(g); return }  // congelar juego durante fade-out
   const now = performance.now()
   // Bloqueo TOTAL durante diálogos de 2 páginas de Rex — va ANTES de tickPlayer
   if (_rexTypingActive) {
+    // Selector Sí/No: leer cursor ANTES de limpiar teclas de movimiento
+    if (_rexYesNoActive) {
+      if (g.keys["arrowleft"] || g.keys["a"])  g.rexReadyCursor = 0
+      if (g.keys["arrowright"] || g.keys["d"]) g.rexReadyCursor = 1
+    }
     // Movimiento
     g.keys["arrowleft"] = false;  g.keys["a"] = false
     g.keys["arrowright"] = false; g.keys["d"] = false
