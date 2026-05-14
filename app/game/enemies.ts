@@ -12,13 +12,16 @@ import {
   SPIN_DURATION, SPIN_STUN, SPIN_DMG, SPIN_RADIUS, SPIN_CD,
   CHAIN_REACH, MOUND_W, MOUND_H, KENNEL_R, KENNEL_ROOMS,
   TRANSIT_BOSS_COL, TROW, WORLD_P1_BOSS, WORLD_P2_BOSS, PW, PH, PL_HBX, PL_HBT,
-  JUMP_H, ro, PLAYER_START
+  JUMP_H, ro, PLAYER_START,
+  UB_FLAME_WARN1, UB_FLAME_WARN2, UB_FLAME_DMG1, UB_FLAME_DMG2,
+  UB_FLAME_CD, UB_FLAME_DMG_DUR, UB_FREEZE_FRAME1, UB_FREEZE_FRAME2, UB_VULN_DUR,
+  UB_PLAT_W, UB_PLAT_OX, UB_PLAT_BOT_FR, UB_PLAT_TOP_FR,
 } from "./constants"
 import { computeDoors, getEnemySpawns, isBossRoom, getRoomChannelBounds } from "./world_gen"
 import {
   activePlats, resolve, dmgPlayer, dmgEnemy, spawnBossArenaPlats, spawnToolMounds, launchToolsFromMound, isSpawnDead,
   getShaftRangesX, isInShaft, voidAhead, getSafeSpawnRangesX,
-  isW1P1Boss, isW1P2Boss, enemySection,
+  isW1P1Boss, isW1P2Boss, isUltraBoss, enemySection,
 } from "./physics"
 import { spawnExplosion, triggerShake } from "./utils"
 
@@ -472,13 +475,15 @@ export function tickEnemies(g: G, now: number) {
           e.spinTimer = 0; e.stunTimer = 0; e.chainHit = null
           e.ls = 0; e.ls2 = 0; e.ef = 0; e.eft = 0
           e.y = by0 + RH - WT - e.h   // reposicionar en el suelo de su sala
+          if (isUltraBoss(e)) g.ultraFlames = null  // limpiar llamas al salir de la sala
         }
       } else {
         // ── Boss activo (mismo cuarto, o arena W1P2 ya cerrada): perseguir al jugador ─
         if (e.state !== "chase") {
           e.state = "chase"
           // W1P1 shake de entrada; W1P2 shake solo la primera vez (antes del cierre de arena)
-          if (!isW1P1Boss(e) && !isW1P2Boss(e)) triggerShake(g, 10, 0.45)
+          if (!isW1P1Boss(e) && !isW1P2Boss(e) && !isUltraBoss(e)) triggerShake(g, 10, 0.45)
+          if (isUltraBoss(e)) triggerShake(g, 8, 0.5)
           // Cerrar la arena del jefe P1 al entrar en combate
           if (isW1P1Boss(e) && !g.bossArenaLocked.has(e.world)) {
             g.bossArenaLocked.add(e.world)
@@ -504,6 +509,11 @@ export function tickEnemies(g: G, now: number) {
         }
         // W1P2: parar durante stun y durante slam (atack_1 no tiene frames de caminata)
         if (isW1P2Boss(e) && (e.stunTimer > 0 || (e.sa > 0 && e.spinTimer <= 0))) {
+          targetVx = 0
+          e.vx = 0
+        }
+        // Ultra boss: parar durante las fases warn/dmg/vuln de llamas
+        if (isUltraBoss(e) && g.ultraFlames && g.ultraFlames.phase !== "startup") {
           targetVx = 0
           e.vx = 0
         }
@@ -877,6 +887,100 @@ export function tickEnemies(g: G, now: number) {
         if (e.chainHit.life <= 0) e.chainHit = null
       }
 
+    } else if (isUltraBoss(e)) {
+      // ══ El Torturado: ataque de llamas ═══════════════════════════════════════
+      const uf = g.ultraFlames
+      const { x: ubX0, y: ubY0 } = ro(e.world, TRANSIT_BOSS_COL, TROW)
+
+      // Helper: ¿el jugador está en una zona de llama activa?
+      const playerInFlameZone = (): boolean => {
+        if (!uf) return false
+        const phxF = p.x + PL_HBX, phyF = p.y + PL_HBT
+        const phwF = p.w - 2 * PL_HBX, phhF = p.h - PL_HBT
+        const floorFlameY = ubY0 + RH - WT - 40
+        if (phyF + phhF > floorFlameY) return true
+        const lX = ubX0 + WT + UB_PLAT_OX
+        const rX = ubX0 + RW - WT - UB_PLAT_OX - UB_PLAT_W
+        const bY = ubY0 + WT + Math.floor((RH - 2 * WT) * UB_PLAT_BOT_FR)
+        const tY = ubY0 + WT + Math.floor((RH - 2 * WT) * UB_PLAT_TOP_FR)
+        const platPos = [
+          { x: lX, y: bY }, { x: lX, y: tY },
+          { x: rX, y: bY }, { x: rX, y: tY },
+        ]
+        for (const idx of uf.platIdxs) {
+          const pp = platPos[idx]
+          if (phyF + phhF > pp.y - 18 && phyF < pp.y + WT + 4 &&
+              phxF < pp.x + UB_PLAT_W && phxF + phwF > pp.x) return true
+        }
+        return false
+      }
+
+      // Tick del estado de llamas
+      if (uf) {
+        uf.timer -= STEP
+
+        if (uf.phase === "startup") {
+          const freezeF = uf.kind === 1 ? UB_FREEZE_FRAME1 : UB_FREEZE_FRAME2
+          if (e.ef >= freezeF) {
+            e.ef = freezeF; e.eft = 0
+            uf.phase = "warn"
+            uf.timer = uf.kind === 1 ? UB_FLAME_WARN1 : UB_FLAME_WARN2
+            triggerShake(g, 4, 0.25)
+          }
+        } else if (uf.phase === "warn" && uf.timer <= 0) {
+          uf.phase = "dmg"
+          uf.timer = UB_FLAME_DMG_DUR
+          uf.dmgDealt = false
+          triggerShake(g, 6, 0.35)
+        } else if (uf.phase === "dmg") {
+          if (!uf.dmgDealt && playerInFlameZone()) {
+            dmgPlayer(g, uf.kind === 1 ? UB_FLAME_DMG1 : UB_FLAME_DMG2)
+            uf.dmgDealt = true
+          }
+          if (uf.timer <= 0) {
+            if (uf.kind === 2) {
+              uf.phase = "vuln"
+              uf.timer = UB_VULN_DUR
+              e.ef = UB_FREEZE_FRAME2; e.eft = 0
+              e.phase = 2
+              triggerShake(g, 3, 0.2)
+            } else {
+              g.ultraFlames = null
+              e.sa = 0; e.phase = 1
+              e.ls = now
+            }
+          }
+        } else if (uf.phase === "vuln") {
+          if (e.ef >= 24) { e.ef = 24; e.eft = 0 }
+          if (uf.timer <= 0) {
+            g.ultraFlames = null
+            e.ef = 0; e.phase = 1
+            e.ls = now
+          }
+        }
+
+        // Congelar animación en warn y dmg
+        if (uf.phase === "warn" || uf.phase === "dmg") {
+          e.ef = uf.kind === 1 ? UB_FREEZE_FRAME1 : UB_FREEZE_FRAME2
+          e.eft = 0
+          e.sa = 999; e.phase = uf.kind === 1 ? 1 : 2
+        }
+      }
+
+      // Disparar nuevo ataque si no hay llamas y el cooldown se cumplió
+      if (!g.ultraFlames && plSameRoom && now - e.ls > UB_FLAME_CD * 1000) {
+        const hpPct = e.hp / e.mhp
+        const kind: 1 | 2 = hpPct < 0.5 && Math.random() < 0.35 ? 2 : 1
+        const count = kind === 1 ? 2 : 3
+        const allIdxs = [0, 1, 2, 3]
+        for (let si = allIdxs.length - 1; si > 0; si--) {
+          const sj = Math.floor(Math.random() * (si + 1))
+          ;[allIdxs[si], allIdxs[sj]] = [allIdxs[sj], allIdxs[si]]
+        }
+        g.ultraFlames = { kind, phase: "startup", timer: 999, platIdxs: allIdxs.slice(0, count), dmgDealt: false }
+        e.ef = 0; e.eft = 0; e.phase = 1
+      }
+
     } else {
       // ── Ataque genérico (resto de enemigos + otros bosses) ────────
       // ORIGINAL sin sync — ver docs/combat_backup.md para restaurar
@@ -929,7 +1033,8 @@ export function tickEnemies(g: G, now: number) {
 
     // ── Daño por contacto ─────────────────────────────────────────────
     // El jefe W1P1 no inflige daño por contacto — sólo a través del látigo
-    if (e.hurtTimer <= 0 && !isW1P1Boss(e) && !isW1P2Boss(e)) {
+    // El Torturado tampoco — sólo a través de las llamas
+    if (e.hurtTimer <= 0 && !isW1P1Boss(e) && !isW1P2Boss(e) && !isUltraBoss(e)) {
       const ecx = e.x + EN_HBX, ecy = e.y + EN_HBT, ecw = e.w - 2 * EN_HBX, ech = e.h - EN_HBT
       if (p.inv <= 0 && phx < ecx + ecw && phx + phw > ecx && phy < ecy + ech && phy + phh > ecy) dmgPlayer(g, 1)
     }

@@ -7,6 +7,7 @@ import type { G, Enemy, SprBank, CPDef, GpadType } from "./types"
 import {
   CW, CH, RW, RH, NW, NC, NR, WT, DW, DH, PW, PH, PH_CROUCH,
   TROW, BW, BH, EW, EH, W1P1_BW, W1P1_BH, W1P2_BW, W1P2_BH,
+  UB_W, UB_H, UB_PLAT_W, UB_PLAT_OX, UB_PLAT_BOT_FR, UB_PLAT_TOP_FR,
   THEMES, WORLD_NAMES, WORLD_SUBS,
   WORLD_P1_BOSS, WORLD_P2_BOSS, TRANSIT_BOSS_COL,
   CP_RADIUS,
@@ -25,7 +26,7 @@ import {
   ro, rid,
 } from "./constants"
 import { isBossRoom, computeDoors, ALL_CPS, getWorldPlats, getEnemySpawns } from "./world_gen"
-import { activePlats, areRegularP1EnemiesDead, areRegularP2EnemiesDead, isPart1BossDead, isPart2BossDead, isSpawnDead, isW1P1Boss, isW1P2Boss, enemySection, getBossSection } from "./physics"
+import { activePlats, areRegularP1EnemiesDead, areRegularP2EnemiesDead, isPart1BossDead, isPart2BossDead, isSpawnDead, isW1P1Boss, isW1P2Boss, isUltraBoss, enemySection, getBossSection } from "./physics"
 import { activateWorld } from "./init"
 import { isBossCPUnlocked } from "./checkpoints"
 import {
@@ -4490,6 +4491,70 @@ export function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
   }
 }
 
+// ── Llamas del Torturado (Ultra Boss) ─────────────────────────────────────
+export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
+  const uf = g.ultraFlames
+  if (!uf || uf.phase === "startup" || uf.phase === "vuln") return
+
+  // Buscar el ultra boss para conocer su mundo
+  const uboss = g.enemies.find(e => isUltraBoss(e) && e.active && !e.dying)
+  if (!uboss) return
+
+  const { x: x0, y: y0 } = ro(uboss.world, TRANSIT_BOSS_COL, TROW)
+  const lX  = x0 + WT + UB_PLAT_OX
+  const rX  = x0 + RW - WT - UB_PLAT_OX - UB_PLAT_W
+  const bY  = y0 + WT + Math.floor((RH - 2 * WT) * UB_PLAT_BOT_FR)
+  const tY  = y0 + WT + Math.floor((RH - 2 * WT) * UB_PLAT_TOP_FR)
+  const platPos = [
+    { x: lX, y: bY }, { x: lX, y: tY },
+    { x: rX, y: bY }, { x: rX, y: tY },
+  ]
+
+  const isWarn = uf.phase === "warn"
+  const pulse  = isWarn ? (0.45 + 0.25 * Math.sin(Date.now() / 140)) : 0.75
+  const r2 = isWarn ? 255 : 255
+  const g2 = isWarn ? 130 : 30
+  const b2 = isWarn ? 0   : 0
+
+  ctx.save()
+
+  // ── Zona del suelo ──────────────────────────────────────────────────────
+  const flameH  = 44
+  const floorY  = y0 + RH - WT - flameH
+  const sx0     = x0 + WT - g.cx
+  const sy0     = floorY - g.cy
+  ctx.fillStyle = `rgba(${r2},${g2},${b2},${pulse})`
+  ctx.fillRect(sx0, sy0, RW - 2 * WT, flameH)
+  // Borde superior luminoso
+  ctx.fillStyle = `rgba(255,220,60,${pulse * 0.8})`
+  ctx.fillRect(sx0, sy0, RW - 2 * WT, 3)
+
+  // ── Zonas de plataformas seleccionadas ─────────────────────────────────
+  for (const idx of uf.platIdxs) {
+    const pp  = platPos[idx]
+    const psx = pp.x - g.cx
+    const psy = pp.y - g.cy
+    const fH  = 22
+    ctx.fillStyle = `rgba(${r2},${g2},${b2},${pulse})`
+    ctx.fillRect(psx, psy - fH, UB_PLAT_W, fH + 4)
+    ctx.fillStyle = `rgba(255,220,60,${pulse * 0.8})`
+    ctx.fillRect(psx, psy - fH, UB_PLAT_W, 3)
+  }
+
+  // ── Texto de advertencia ────────────────────────────────────────────────
+  if (isWarn) {
+    const alpha2 = 0.6 + 0.4 * Math.sin(Date.now() / 180)
+    ctx.globalAlpha = alpha2
+    ctx.fillStyle = "#FFDD44"
+    ctx.font = "bold 15px monospace"
+    ctx.textAlign = "center"
+    ctx.fillText("⚠ LLAMAS ⚠", x0 + RW / 2 - g.cx, y0 + WT + 30 - g.cy)
+    ctx.textAlign = "left"
+  }
+
+  ctx.restore()
+}
+
 export function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHover: { w: number; c: number; r: number } | null = null) {
   ctx.clearRect(0, 0, CW, CH)
   if (g.showDevMap) { drawDevMap(ctx, g, devHover); return }
@@ -4501,6 +4566,7 @@ export function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHove
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawUltraFlames(ctx, g)
   drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawBolkha(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()

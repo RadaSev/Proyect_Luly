@@ -7,6 +7,7 @@ import {
   NW, NC, NR, RW, RH, WT, DW, DH, PW, PH, EW,
   STAIR_H, TUN_H_INNER, TUN_V_WIDTH, JUMP_H,
   TROW, TRANSIT_VERT_UP, TRANSIT_VERT_DOWN, TRANSIT_BOSS_COL,
+  UB_PLAT_W, UB_PLAT_OX, UB_PLAT_BOT_FR, UB_PLAT_TOP_FR,
   WORLD_P1_BOSS, WORLD_P2_BOSS, WORLD_ENTRIES, KENNEL_ROOMS,
   CP_LOCS, CP_COMPASS, CP_ICON, CP_LOCS_P1, CP_LOCS_P2, CP_LOCS_BOSS,
   TBALL_WALL, TBALL_PICKUP_POS, TBALL_SECRET_C, TBALL_SECRET_R,
@@ -520,6 +521,21 @@ export function makeInternalPlats(w: number, c: number, r: number): WPlat[] {
       trav2(rwX + wallThk, wallTop + Math.floor(wallH * 0.58), plW2, STAIR_H),
     ]
     return result2
+  }
+
+  // ─── ULTRA BOSS ARENA [TRANSIT_BOSS_COL, TROW]: 4 plataformas en pares laterales ───
+  if (c === TRANSIT_BOSS_COL && r === TROW) {
+    const platH = WT
+    const leftX  = x0 + WT + UB_PLAT_OX
+    const rightX = x0 + RW - WT - UB_PLAT_OX - UB_PLAT_W
+    const botY   = y0 + WT + Math.floor((RH - 2 * WT) * UB_PLAT_BOT_FR)
+    const topY   = y0 + WT + Math.floor((RH - 2 * WT) * UB_PLAT_TOP_FR)
+    return [
+      { x: leftX,  y: botY, w: UB_PLAT_W, h: platH, mode: "t" },  // 0: izquierda-baja
+      { x: leftX,  y: topY, w: UB_PLAT_W, h: platH, mode: "t" },  // 1: izquierda-alta
+      { x: rightX, y: botY, w: UB_PLAT_W, h: platH, mode: "t" },  // 2: derecha-baja
+      { x: rightX, y: topY, w: UB_PLAT_W, h: platH, mode: "t" },  // 3: derecha-alta
+    ]
   }
 
   // Corredor de transición: pasillo limpio; solo añadir plataformas de escalada

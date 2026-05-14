@@ -160,6 +160,14 @@ export type G = {
   rexKeyAnimTimer: number          // segundos de la fase 3 (frames 20→24); al llegar a 0 → explosión
   rexMitadAnimStart: number        // timestamp ms de cuando empezó la anim rex_mitad_llave (0 = sin iniciar)
   sessionStart: number             // timestamp al iniciar sesión o al último guardado (para aviso de salida)
+  // ── Llamas del Torturado (Ultra Boss) ────────────────────────────────────
+  ultraFlames: {
+    kind: 1 | 2           // tipo de ataque
+    phase: "startup" | "warn" | "dmg" | "vuln"
+    timer: number         // s restantes en la fase actual
+    platIdxs: number[]    // índices 0-3 de plataformas afectadas
+    dmgDealt: boolean     // ya se aplicó el daño en esta fase dmg
+  } | null
 }
 
 // SprBank: mapa de sprites cargados

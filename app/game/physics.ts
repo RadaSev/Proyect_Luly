@@ -10,7 +10,7 @@ import {
   ARENA_PLAT_SHOW, ARENA_PLAT_HIDE, ARENA_PLAT_AMP, ARENA_PLAT_SPD, ARENA_PLAT_W, ARENA_PLAT_H,
   MOUND_W, MOUND_H, WORLD_P1_BOSS, WORLD_P2_BOSS, TRANSIT_BOSS_COL, TROW,
   PROJ_GRAV, PROJ_MAXD, TB_AMMO_MAX, TB_AMMO_INIT, TB_AMMO_DROP, WLEN, WDMG,
-  EW, EH, BW, BH, W1P1_BW, W1P1_BH, W1P2_BW, W1P2_BH,
+  EW, EH, BW, BH, W1P1_BW, W1P1_BH, W1P2_BW, W1P2_BH, UB_W, UB_H,
   TBALL_KEY_DROP_CHANCE, TBALL_KEY_MIN_KILLS, TBALL_KEY_FORCE_KILL,
   PLAYER_START,
   ro, rid,
@@ -279,6 +279,7 @@ export function dmgPlayer(g: G, dmg: number) {
     g.pl.hp = g.pl.maxHp
     g.pl.vx = 0; g.pl.vy = 0; g.pl.crouching = false; g.pl.h = PH
     g.pl.dash = false; g.pl.wallSliding = false; g.pl.inv = 2
+    g.ultraFlames = null  // limpiar llamas al morir
 
     // ── Abrir puertas de arenas de jefes vivos ───────────────────────────
     // Solo limpiamos los bloqueos de puerta y los objetos de arena.
@@ -305,6 +306,12 @@ export function dmgPlayer(g: G, dmg: number) {
 
 export function dmgEnemy(g: G, e: Enemy, dmg: number) {
   if (e.dying || e.deathFalling) return
+  // El Torturado: inmune durante warn/dmg, daño doble en ventana de vulnerabilidad
+  if (isUltraBoss(e) && g.ultraFlames) {
+    const ufPhase = g.ultraFlames.phase
+    if (ufPhase === "warn" || ufPhase === "dmg") return
+    if (ufPhase === "vuln") dmg = Math.min(e.hp, dmg * 2)
+  }
   const finalDmg = g.ohko ? e.hp : dmg
   e.hp -= finalDmg
   if (e.hp > 0) {
@@ -542,6 +549,10 @@ export function isW1P1Boss(e: Enemy): boolean {
 
 export function isW1P2Boss(e: Enemy): boolean {
   return e.boss && e.world === 0 && getBossSection(e) === "ss"
+}
+
+export function isUltraBoss(e: Enemy): boolean {
+  return e.boss && getBossSection(e) === "fb"
 }
 
 export function breakCrate(g: G, c: Crate) {
@@ -846,8 +857,9 @@ export function mkEnemiesForWorld(w: number, dead: Set<string>): Enemy[] {
       const isW1P1bossSpawn = boss && w === 0 && c === bp1cs && r === bp1rs
       const [bp2cs, bp2rs] = WORLD_P2_BOSS[w]
       const isW1P2bossSpawn = boss && w === 0 && c === bp2cs && r === bp2rs
-      const eW = boss ? (isW1P1bossSpawn ? W1P1_BW : isW1P2bossSpawn ? W1P2_BW : BW) : (isW1S2spawn ? 60 : EW)
-      const eH = boss ? (isW1P1bossSpawn ? W1P1_BH : isW1P2bossSpawn ? W1P2_BH : BH) : (isW1S2spawn ? 72 : EH)
+      const isUltraBossSpawn = boss && c === TRANSIT_BOSS_COL && r === TROW
+      const eW = boss ? (isW1P1bossSpawn ? W1P1_BW : isW1P2bossSpawn ? W1P2_BW : isUltraBossSpawn ? UB_W : BW) : (isW1S2spawn ? 60 : EW)
+      const eH = boss ? (isW1P1bossSpawn ? W1P1_BH : isW1P2bossSpawn ? W1P2_BH : isUltraBossSpawn ? UB_H : BH) : (isW1S2spawn ? 72 : EH)
 
       // Para jefes: ignorar exclusión de shafts (su sala siempre tiene espacio suficiente)
       // y validar posición al nivel del PISO en vez del canal (chanBot puede estar

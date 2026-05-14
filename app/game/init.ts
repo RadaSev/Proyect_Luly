@@ -323,5 +323,6 @@ export function mkG_lazy(): G {
     rexKeyAnimTimer: 0,
     rexMitadAnimStart: 0,
     sessionStart: Date.now(),
+    ultraFlames: null,
   } as G
 }

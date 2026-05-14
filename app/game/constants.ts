@@ -28,6 +28,23 @@ export const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
 export const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
 export const WHIP_KB_VY  = -3.5  // componente vertical del repulsión
 export const W1P2_BW = 140, W1P2_BH = 220   // Boss W1 Segunda Sección: ~3× Luly (3×72=216)
+export const UB_W = 70, UB_H = 100           // El Torturado (Ultra Boss): ligeramente mayor que Luly
+
+// ── Ataques de llama del Torturado ──────────────────────────────────────────
+export const UB_FLAME_WARN1    = 4.0   // s de advertencia ataque 1 (suelo + 2 plats)
+export const UB_FLAME_WARN2    = 5.0   // s de advertencia ataque 2 (suelo + 3 plats)
+export const UB_FLAME_DMG1     = 2     // daño ataque 1 (1 corazón = 2 unidades)
+export const UB_FLAME_DMG2     = 3     // daño ataque 2 (1.5 corazones = 3 unidades)
+export const UB_FLAME_CD       = 4.0   // s de espera entre ataques
+export const UB_FLAME_DMG_DUR  = 1.2   // s de ventana de daño activo
+export const UB_FREEZE_FRAME1  = 20    // frame en que el boss se congela (ataque 1)
+export const UB_FREEZE_FRAME2  = 15    // frame en que el boss se congela (ataque 2)
+export const UB_VULN_DUR       = 2.5   // s de ventana de vulnerabilidad (post ataque 2)
+// Arena del Torturado: posición relativa de las 4 plataformas laterales
+export const UB_PLAT_W         = 200   // ancho de cada plataforma
+export const UB_PLAT_OX        = 40    // offset desde la pared interior (x0+WT+UB_PLAT_OX)
+export const UB_PLAT_BOT_FR    = 0.62  // fracción Y interior para plataforma baja
+export const UB_PLAT_TOP_FR    = 0.32  // fracción Y interior para plataforma alta
 export const SLAM_REACH = 180    // alcance del golpe de piso (px) frente al boss
 export const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
 export const SLAM_DMG   = 2      // daño del slam (1 corazón completo en escala ×2)
@@ -217,7 +234,7 @@ export const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E5393
 
 // ── Salvar ──────────────────────────────────────────────────────────────────
 export const SAVE_KEY = "proyecto_luly_v2"
-export const GAME_VERSION = "0.3.11"
+export const GAME_VERSION = "0.3.12"
 
 // ── BG ──────────────────────────────────────────────────────────────────────
 export const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]
