@@ -803,7 +803,7 @@ export const ALL_CPS: CPDef[] = (() => {
 
   for (let w = 0; w < NW; w++) {
     // CPs originales (kennel + compás)
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < CP_LOCS.length; i++) {
       const [c, r] = CP_LOCS[i]
       addCP(w, c, r, `W${w + 1} ${WORLD_NAMES[w].slice(0, 10)} — ${CP_COMPASS[i]}`, CP_ICON[i])
     }

@@ -118,9 +118,9 @@ export const KENNEL_WORLD_POS = KENNEL_ROOMS.map(({ w, c, r }) => {
 })
 
 // ── Sistema de Checkpoints ────────────────────────────────────────────────────
-export const CP_LOCS: [number, number][] = [[0, 4], [4, 0], [8, 4], [4, 8], [4, 4]]
-export const CP_COMPASS = ["OESTE", "NORTE", "ESTE", "SUR", "CENTRO"]
-export const CP_ICON = ["◀", "▲", "▶", "▼", "◆"]
+export const CP_LOCS: [number, number][] = [[0, 4], [4, 0], [8, 4], [4, 8]]
+export const CP_COMPASS = ["OESTE", "NORTE", "ESTE", "SUR"]
+export const CP_ICON = ["◀", "▲", "▶", "▼"]
 export const CP_LOCS_P1: [number, number][] = [[2, 0], [6, 0], [1, 2], [5, 2]]
 export const CP_LOCS_P2: [number, number][] = [[2, 5], [6, 5], [1, 7], [5, 7]]
 export const CP_LOCS_BOSS: [number, number, "p1" | "ultra" | "p2"][] = [
@@ -234,7 +234,7 @@ export const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E5393
 
 // ── Salvar ──────────────────────────────────────────────────────────────────
 export const SAVE_KEY = "proyecto_luly_v2"
-export const GAME_VERSION = "0.3.12"
+export const GAME_VERSION = "0.3.13"
 
 // ── BG ──────────────────────────────────────────────────────────────────────
 export const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]

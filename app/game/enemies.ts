@@ -482,8 +482,8 @@ export function tickEnemies(g: G, now: number) {
         if (e.state !== "chase") {
           e.state = "chase"
           // W1P1 shake de entrada; W1P2 shake solo la primera vez (antes del cierre de arena)
+          // Ultra boss: sin shake de entrada (confunde en la arena con plataformas)
           if (!isW1P1Boss(e) && !isW1P2Boss(e) && !isUltraBoss(e)) triggerShake(g, 10, 0.45)
-          if (isUltraBoss(e)) triggerShake(g, 8, 0.5)
           // Cerrar la arena del jefe P1 al entrar en combate
           if (isW1P1Boss(e) && !g.bossArenaLocked.has(e.world)) {
             g.bossArenaLocked.add(e.world)
@@ -693,8 +693,10 @@ export function tickEnemies(g: G, now: number) {
     // ── Transición de fase del boss (50% HP → fase 2: Rage_Walk + Atack_2) ──
     if (e.boss && e.phase === 1 && e.state === "chase" && e.hp <= Math.ceil(e.mhp * 0.5) && !e.dying) {
       e.phase = 2
-      e.spd *= 1.5; e.cd = Math.floor(e.cd * 0.55)
-      if (!isW1P2Boss(e)) triggerShake(g, 12, 0.55)  // W1P2: sin shake dentro de la arena
+      // Ultra boss: sin aumento de velocidad (solo habilita ataques tipo 2)
+      if (!isUltraBoss(e)) { e.spd *= 1.5; e.cd = Math.floor(e.cd * 0.55) }
+      // Ultra boss y W1P2: sin shake de fase (confunde dentro de la arena)
+      if (!isW1P2Boss(e) && !isUltraBoss(e)) triggerShake(g, 12, 0.55)
       spawnExplosion(g, e.x + e.w / 2, e.y + e.h / 2, ["#FF0000", "#FF8800", "#FFFF00", "#FFFFFF", "#FF4400"], 24, 6, true)
       if (isW1P2Boss(e)) e.ls2 = now  // reiniciar rage-walk al entrar en fase 2
     }
@@ -928,13 +930,11 @@ export function tickEnemies(g: G, now: number) {
             e.ef = freezeF; e.eft = 0
             uf.phase = "warn"
             uf.timer = uf.kind === 1 ? UB_FLAME_WARN1 : UB_FLAME_WARN2
-            triggerShake(g, 4, 0.25)
           }
         } else if (uf.phase === "warn" && uf.timer <= 0) {
           uf.phase = "dmg"
           uf.timer = UB_FLAME_DMG_DUR
           uf.dmgDealt = false
-          triggerShake(g, 6, 0.35)
         } else if (uf.phase === "dmg") {
           if (!uf.dmgDealt && playerInFlameZone()) {
             dmgPlayer(g, uf.kind === 1 ? UB_FLAME_DMG1 : UB_FLAME_DMG2)
@@ -946,7 +946,6 @@ export function tickEnemies(g: G, now: number) {
               uf.timer = UB_VULN_DUR
               e.ef = UB_FREEZE_FRAME2; e.eft = 0
               e.phase = 2
-              triggerShake(g, 3, 0.2)
             } else {
               g.ultraFlames = null
               e.sa = 0; e.phase = 1

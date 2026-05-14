@@ -314,11 +314,10 @@ export function dmgPlayer(g: G, dmg: number) {
 
 export function dmgEnemy(g: G, e: Enemy, dmg: number) {
   if (e.dying || e.deathFalling) return
-  // El Torturado: inmune durante todo el ataque (startup→warn→dmg), daño doble en vuln
+  // El Torturado: inmune durante todo el ataque (startup→warn→dmg); vuln = daño normal
   if (isUltraBoss(e) && g.ultraFlames) {
     const ufPhase = g.ultraFlames.phase
     if (ufPhase === "startup" || ufPhase === "warn" || ufPhase === "dmg") return
-    if (ufPhase === "vuln") dmg = Math.min(e.hp, dmg * 2)
   }
   const finalDmg = g.ohko ? e.hp : dmg
   e.hp -= finalDmg
