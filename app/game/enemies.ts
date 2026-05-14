@@ -497,11 +497,14 @@ export function tickEnemies(g: G, now: number) {
             spawnToolMounds(g, e)
             e.ls2 = now   // iniciar timer de rage-walk desde que empieza el combate
           }
+          if (isUltraBoss(e) && !g.bossArenaLocked.has(e.world + 20)) {
+            g.bossArenaLocked.add(e.world + 20)
+          }
         }
         if (dist > 40) targetVx = (dx > 0 ? 1 : -1) * (e.spd * (dist < sight * 0.4 ? 1.8 : 1.35))
         e.dir = dx > 0 ? 1 : -1
-        // W1P1 y W1P2 no saltan; W1P2 tampoco se mueve durante spin/stun
-        if (!isW1P1Boss(e) && !isW1P2Boss(e)) {
+        // W1P1, W1P2 y ultra boss no saltan; W1P2 tampoco se mueve durante spin/stun
+        if (!isW1P1Boss(e) && !isW1P2Boss(e) && !isUltraBoss(e)) {
           const playerAbove = plFloor !== null && plFloor < e.y + e.h - 60 && p.onGround
           const playerBelow = p.onGround && p.y + p.h > e.y + e.h + 40
           if (playerAbove && eOnGround2 && e.jumpCd <= 0) { e.vy = JV * 0.9; e.jumpCd = 1400 }
@@ -954,7 +957,7 @@ export function tickEnemies(g: G, now: number) {
           if (e.ef >= 24) { e.ef = 24; e.eft = 0 }
           if (uf.timer <= 0) {
             g.ultraFlames = null
-            e.ef = 0; e.phase = 1
+            e.sa = 0; e.ef = 0; e.phase = 1
             e.ls = now
           }
         }

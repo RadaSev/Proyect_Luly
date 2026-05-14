@@ -43,6 +43,11 @@ export function activePlats(g: G): WPlat[] {
   _apCache2 = allPlats.filter(p => {
     if (p.mode !== "d") return true
     if (p.sw === undefined) return true
+    if (p.sw >= 600 && p.sw < 610) {
+      // puerta arena ultra boss: sólida durante la batalla
+      const arenaKey = (p.sw - 600) + 20   // world + 20 = ultra arena key
+      return g.bossArenaLocked.has(arenaKey)
+    }
     if (p.sw >= 510 && p.sw < 520) {
       // puerta arena jefe P2: sólida durante la batalla
       const arenaKey = (p.sw - 510) + 10   // world + 10 = P2 arena key
@@ -297,6 +302,9 @@ export function dmgPlayer(g: G, dmg: number) {
         g.toolMounds = []
         g.flyingTools = []
       }
+      if (isUltraBoss(e)) {
+        g.bossArenaLocked.delete(e.world + 20)
+      }
     }
 
     // Reaparece en el último checkpoint con animación de teletransporte
@@ -353,6 +361,7 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
   // Desbloquear arenas al morir el boss
   if (isW1P1Boss(e)) g.bossArenaLocked.delete(e.world)
   if (isW1P2Boss(e)) g.bossArenaLocked.delete(e.world + 10)
+  if (isUltraBoss(e)) g.bossArenaLocked.delete(e.world + 20)
   // ── Desbloqueo de habilidades al matar boss ─────────────────────────
   // Solo el ultra-jefe [TRANSIT_BOSS_COL, TROW] = [4,4] otorga la habilidad del mundo.
   if (e.boss) {
@@ -528,6 +537,11 @@ export function isPart2BossDead(g: G, w: number): boolean {
   const [p2c, p2r] = WORLD_P2_BOSS[w]
   const sp = getEnemySpawns(w, p2c, p2r)
   return sp.every((_, i) => isSpawnDead(g.dead, w, p2c, p2r, i))
+}
+
+export function isUltraBossDead(g: G, w: number): boolean {
+  const sp = getEnemySpawns(w, TRANSIT_BOSS_COL, TROW)
+  return sp.length > 0 && sp.every((_, i) => isSpawnDead(g.dead, w, TRANSIT_BOSS_COL, TROW, i))
 }
 
 // ── Enemy section / boss type helpers ────────────────────────────────────────

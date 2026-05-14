@@ -4511,10 +4511,11 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
   ]
 
   const isWarn = uf.phase === "warn"
-  const pulse  = isWarn ? (0.45 + 0.25 * Math.sin(Date.now() / 140)) : 0.75
-  const r2 = isWarn ? 255 : 255
-  const g2 = isWarn ? 130 : 30
-  const b2 = isWarn ? 0   : 0
+  const pulse  = isWarn ? (0.45 + 0.25 * Math.sin(Date.now() / 140)) : 0.80
+  // Violeta espacial: advertencia más tenue, daño más intenso
+  const r2 = isWarn ? 130 : 170
+  const g2 = 0
+  const b2 = isWarn ? 220 : 255
 
   ctx.save()
 
@@ -4525,8 +4526,8 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
   const sy0     = floorY - g.cy
   ctx.fillStyle = `rgba(${r2},${g2},${b2},${pulse})`
   ctx.fillRect(sx0, sy0, RW - 2 * WT, flameH)
-  // Borde superior luminoso
-  ctx.fillStyle = `rgba(255,220,60,${pulse * 0.8})`
+  // Borde superior luminoso (violeta claro)
+  ctx.fillStyle = `rgba(210,140,255,${pulse * 0.9})`
   ctx.fillRect(sx0, sy0, RW - 2 * WT, 3)
 
   // ── Zonas de plataformas seleccionadas ─────────────────────────────────
@@ -4537,7 +4538,7 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
     const fH  = 22
     ctx.fillStyle = `rgba(${r2},${g2},${b2},${pulse})`
     ctx.fillRect(psx, psy - fH, UB_PLAT_W, fH + 4)
-    ctx.fillStyle = `rgba(255,220,60,${pulse * 0.8})`
+    ctx.fillStyle = `rgba(210,140,255,${pulse * 0.9})`
     ctx.fillRect(psx, psy - fH, UB_PLAT_W, 3)
   }
 
@@ -4545,7 +4546,7 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
   if (isWarn) {
     const alpha2 = 0.6 + 0.4 * Math.sin(Date.now() / 180)
     ctx.globalAlpha = alpha2
-    ctx.fillStyle = "#FFDD44"
+    ctx.fillStyle = "#CC88FF"
     ctx.font = "bold 15px monospace"
     ctx.textAlign = "center"
     ctx.fillText("⚠ LLAMAS ⚠", x0 + RW / 2 - g.cx, y0 + WT + 30 - g.cy)

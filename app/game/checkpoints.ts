@@ -5,7 +5,7 @@
 import type { G, CPDef } from "./types"
 import { STEP, CW, CH, TOT_W, TOT_H, PW, PH, CP_RADIUS } from "./constants"
 import { ALL_CPS } from "./world_gen"
-import { isPart1BossDead, isPart2BossDead } from "./physics"
+import { isPart1BossDead, isPart2BossDead, isUltraBossDead } from "./physics"
 import { spawnExplosion, triggerShake } from "./utils"
 import { saveGame } from "./save"
 
@@ -15,7 +15,7 @@ export function isBossCPUnlocked(g: G, cp: CPDef): boolean {
   const w = cp.w
   if (cp.bossKind === "p1")    return isPart1BossDead(g, w)
   if (cp.bossKind === "p2")    return isPart2BossDead(g, w)
-  if (cp.bossKind === "ultra") return isPart1BossDead(g, w) && isPart2BossDead(g, w)
+  if (cp.bossKind === "ultra") return isUltraBossDead(g, w)
   return false
 }
 

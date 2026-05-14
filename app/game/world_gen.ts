@@ -415,6 +415,8 @@ export function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     // ★ PUERTA ULTRA-BOSS: pared izquierda de [4,TROW] sellada hasta matar ambos jefes
     if (r === TROW && c === TRANSIT_BOSS_COL) {
       result.push({ x: x0, y: y0 + dy, w: WT, h: DH, mode: "d", sw: 200 + w })
+      // Puerta de cierre de arena (sw 600+w): sella la entrada al iniciar el combate
+      result.push({ x: x0 - WT - 1, y: y0 + dy - 1, w: 2 * WT + 2, h: DH + 2, mode: "d", sw: 600 + w })
     }
   }
   if (!d.R) {
@@ -439,6 +441,8 @@ export function makeRoomWalls(w: number, c: number, r: number): WPlat[] {
     // ★ PUERTA ULTRA-BOSS: pared derecha de [4,TROW] sellada hasta matar ambos jefes
     if (r === TROW && c === TRANSIT_BOSS_COL) {
       result.push({ x: x0 + RW - WT, y: y0 + dy, w: WT, h: DH, mode: "d", sw: 200 + w })
+      // Puerta de cierre de arena (sw 600+w): sella la entrada al iniciar el combate
+      result.push({ x: x0 + RW - 2 * WT - 1, y: y0 + dy - 1, w: 2 * WT + 2, h: DH + 2, mode: "d", sw: 600 + w })
     }
   }
 
