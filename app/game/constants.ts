@@ -22,7 +22,7 @@ export const W1P1_BW = 64, W1P1_BH = 84   // Jefe W1 Sección 1: hitbox (un poco
 export const WHIP1_REACH = 105   // alcance del látigo Ataque 1 del jefe W1P1 (px)
 export const WHIP2_REACH = 148   // alcance del látigo Ataque 2 del jefe W1P1 (px, más fuerte)
 export const WHIP1_DMG   = 2     // daño Ataque 1 (1 corazón completo en escala ×2)
-export const WHIP2_DMG   = 4     // daño Ataque 2 (2 corazones en escala ×2)
+export const WHIP2_DMG   = 3     // daño Ataque 2 (1.5 corazones en escala ×2)
 export const WHIP1_CD    = 1800  // cooldown Ataque 1 (ms)
 export const WHIP2_CD    = 1400  // cooldown Ataque 2 — fase 2 (ms)
 export const WHIP_KB_VX  = 6.5   // velocidad de repulsión horizontal al recibir el latigazo
@@ -33,8 +33,8 @@ export const UB_W = 70, UB_H = 100           // El Torturado (Ultra Boss): liger
 // ── Ataques de llama del Torturado ──────────────────────────────────────────
 export const UB_FLAME_WARN1    = 4.0   // s de advertencia ataque 1 (suelo + 2 plats)
 export const UB_FLAME_WARN2    = 5.0   // s de advertencia ataque 2 (suelo + 3 plats)
-export const UB_FLAME_DMG1     = 2     // daño ataque 1 (1 corazón = 2 unidades)
-export const UB_FLAME_DMG2     = 3     // daño ataque 2 (1.5 corazones = 3 unidades)
+export const UB_FLAME_DMG1     = 3     // daño ataque 1 (1.5 corazones = 3 unidades)
+export const UB_FLAME_DMG2     = 4     // daño ataque 2 (2 corazones = 4 unidades)
 export const UB_FLAME_CD       = 4.0   // s de espera entre ataques
 export const UB_FLAME_DMG_DUR  = 1.2   // s de ventana de daño activo
 export const UB_FREEZE_FRAME1  = 20    // frame en que el boss se congela (ataque 1)
@@ -50,7 +50,7 @@ export const SLAM_KB_VY = -10    // impulso vertical al recibir el slam
 export const SLAM_DMG   = 2      // daño del slam (1 corazón completo en escala ×2)
 export const SPIN_DURATION = 4.5 // 2 ciclos × 25 frames × 90 ms = 4500 ms exactos
 export const SPIN_STUN  = 3.0    // segundos de parálisis post-giro (vulnerable, esperar 3s)
-export const SPIN_DMG   = 2      // daño del giro al jugador
+export const SPIN_DMG   = 3      // daño del giro al jugador (1.5 corazones)
 export const SPIN_RADIUS = 220   // radio de daño durante el giro
 export const SLAM_CD    = 5000   // ms entre slams (base 5 s)
 export const SLAM_CD_CLOSE = 3000 // ms entre slams cuando está cerca (<SLAM_CLOSE_DIST)
@@ -234,7 +234,7 @@ export const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E5393
 
 // ── Salvar ──────────────────────────────────────────────────────────────────
 export const SAVE_KEY = "proyecto_luly_v2"
-export const GAME_VERSION = "0.3.13"
+export const GAME_VERSION = "0.3.14"
 
 // ── BG ──────────────────────────────────────────────────────────────────────
 export const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]

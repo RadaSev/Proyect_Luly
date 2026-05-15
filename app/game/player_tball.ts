@@ -114,7 +114,9 @@ export function tickTBalls(g: G) {
     for (const e of g.enemies) {
       if (!e.active || e.dying) continue
       if (b.x + TB_R > e.x && b.x - TB_R < e.x + e.w && b.y + TB_R > e.y && b.y - TB_R < e.y + e.h) {
-        dmgEnemy(g, e, Math.max(1, Math.floor(e.mhp / 8)))
+        // Jefes: 1 dmg por rebote (igual que un hueso, pero puede rebotar varias veces)
+        // Enemigos normales: fórmula proporcional al HP máximo
+        dmgEnemy(g, e, e.boss ? 1 : Math.max(1, Math.floor(e.mhp / 8)))
         spawnExplosion(g, b.x, b.y, ["#CCFF00", "#88FF44", "#FFFFFF"], 6, 2.5)
         b.vx *= -0.9; b.vy *= -0.9  // rebota en el enemigo
         b.bounces--

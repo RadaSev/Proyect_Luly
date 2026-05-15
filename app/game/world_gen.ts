@@ -134,7 +134,7 @@ export function getEnemySpawns(w: number, c: number, r: number): ES[] {
   if (r === TROW) {
     // Ultra-Boss en el centro del corredor (col 4)
     if (c === TRANSIT_BOSS_COL) {
-      const bHp = [22, 36, 54, 78][w]
+      const bHp = [36, 56, 84, 120][w]
       return [[0.5, 0, bHp, spdB * 0.75, cdB * 0.5, true]]
     }
     // Perros guardianes de la jaula (solo World 0, sala de la jaula)
@@ -148,14 +148,14 @@ export function getEnemySpawns(w: number, c: number, r: number): ES[] {
   // ── JEFE 1 (Parte 1) ────────────────────────────────────────────────────
   const [p1c, p1r] = WORLD_P1_BOSS[w]
   if (c === p1c && r === p1r) {
-    const bHp = [12, 18, 28, 42][w]
+    const bHp = [20, 30, 46, 68][w]
     return [[0.5, 0, bHp, spdB * 0.85, cdB * 0.65, true]]
   }
 
   // ── JEFE 2 (Parte 2) ────────────────────────────────────────────────────
   const [p2c, p2r] = WORLD_P2_BOSS[w]
   if (c === p2c && r === p2r) {
-    const bHp = [16, 26, 38, 56][w]
+    const bHp = [26, 42, 60, 88][w]
     return [[0.5, 0, bHp, spdB * 0.8, cdB * 0.6, true]]
   }
 

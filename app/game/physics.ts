@@ -256,11 +256,11 @@ export function tickToolMounds(g: G) {
         ft.active = false  // se destruye al tocar la pared
       }
     }
-    // Daño al jugador
+    // Daño al jugador (2 corazones = 4 unidades)
     if (!ft.dealt) {
       const p = g.pl
       if (ft.x > p.x && ft.x < p.x + p.w && ft.y > p.y && ft.y < p.y + p.h && p.inv <= 0) {
-        dmgPlayer(g, 1)
+        dmgPlayer(g, 4)
         ft.dealt = true
         ft.active = false
       }
