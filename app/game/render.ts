@@ -2950,6 +2950,32 @@ export function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: nu
     }
   }
 
+  // ── El Torturado — Ultra Boss (eW=70, eH=100) — target char height 130px ─────
+  // Sprites 384×384 (5×5 grid), valores PIL por animación.
+  if (isUltraBoss(e)) {
+    const dir4 = (e.dying ? e.deathDir : e.dir) >= 0   // true=right
+    if (e.dying) {
+      return dir4
+        ? { rw: 127, rh: 229, rxOff: -30, ryOff: -75 }  // Death_right
+        : { rw: 127, rh: 229, rxOff: -28, ryOff: -75 }  // Death_left
+    }
+    if (e.sa > 0) {
+      if (e.phase >= 2) {
+        return { rw: 136, rh: 210, rxOff: -33, ryOff: -70 }  // Atack_2 (simétrico)
+      }
+      return dir4
+        ? { rw: 119, rh: 218, rxOff: -21, ryOff: -68 }  // Atack_1_right
+        : { rw: 119, rh: 218, rxOff: -24, ryOff: -68 }  // Atack_1_left
+    }
+    if (e.phase >= 2) {
+      return dir4
+        ? { rw: 102, rh: 223, rxOff: -14, ryOff: -78 }  // Rage_Walk_right
+        : { rw: 102, rh: 223, rxOff: -16, ryOff: -78 }  // Rage_Walk_left
+    }
+    // Walk fase 1 (simétrico)
+    return { rw: 69, rh: 167, rxOff: 0, ryOff: -43 }
+  }
+
   // Default: el sprite ocupa exactamente el hitbox
   return { rw: eW, rh: eH, rxOff: 0, ryOff: 0 }
 }
@@ -4518,8 +4544,9 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G, sprs: SprBa
   const pisoSpr = sprs["violet_fire_piso"]
   const platSpr = sprs["violet_fire_plat"]
 
-  // Helper: dibuja un sprite 5×5 tileado horizontalmente dentro de un rect
-  const drawTiled = (spr: HTMLImageElement, dx: number, dy: number, dw: number, dh: number) => {
+  // Helper: dibuja un sprite 5×5 tileado horizontalmente dentro de un rect.
+  // clipH: si se pasa, la región de clip es dh=clipH (útil para compensar padding del sprite).
+  const drawTiled = (spr: HTMLImageElement, dx: number, dy: number, dw: number, dh: number, clipH?: number) => {
     const fW  = spr.width  / 5
     const fH  = spr.height / 5
     const col = fireFrame % 5, row = Math.floor(fireFrame / 5)
@@ -4527,7 +4554,7 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G, sprs: SprBa
     // Ancho de cada tile manteniendo la proporción del frame
     const tileW = Math.round(fW * (dh / fH))
     ctx.save()
-    ctx.beginPath(); ctx.rect(dx, dy, dw, dh); ctx.clip()
+    ctx.beginPath(); ctx.rect(dx, dy, dw, clipH ?? dh); ctx.clip()
     for (let tx = dx; tx < dx + dw + tileW; tx += tileW) {
       ctx.drawImage(spr, sx, sy, fW, fH, tx, dy, tileW, dh)
     }
@@ -4543,7 +4570,11 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G, sprs: SprBa
   const sx0    = x0 + WT - g.cx
   const sy0    = floorY  - g.cy
   if (pisoSpr) {
-    drawTiled(pisoSpr, sx0, sy0, RW - 2 * WT, floorFlameH)
+    // padBottom=21: extender dh para que la base del contenido quede al ras del suelo
+    // dh_full = floorFlameH * fH / (fH - padB), clip al rect visible original
+    const _fHp = pisoSpr.height / 5
+    const _dhP = Math.round(floorFlameH * _fHp / (_fHp - 21))
+    drawTiled(pisoSpr, sx0, sy0, RW - 2 * WT, _dhP, floorFlameH)
   } else {
     // fallback geométrico si el sprite no cargó
     const r2 = isWarn ? 130 : 170, b2 = isWarn ? 220 : 255
@@ -4560,7 +4591,10 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G, sprs: SprBa
     const psx = pp.x - g.cx
     const psy = pp.y - g.cy
     if (platSpr) {
-      drawTiled(platSpr, psx, psy - platFlameH, UB_PLAT_W, platFlameH)
+      // padBottom=25: extender dh para que la base quede al ras de la plataforma
+      const _fHpl = platSpr.height / 5
+      const _dhPl = Math.round(platFlameH * _fHpl / (_fHpl - 25))
+      drawTiled(platSpr, psx, psy - platFlameH, UB_PLAT_W, _dhPl, platFlameH)
     } else {
       const r2 = isWarn ? 130 : 170, b2 = isWarn ? 220 : 255
       ctx.fillStyle = `rgba(${r2},0,${b2},${alpha})`
