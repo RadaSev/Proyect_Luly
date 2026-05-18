@@ -169,6 +169,7 @@ export default function ProyectoLuly() {
     L("bolkha_giving_hearts_right","/assets/NPCs/Blokha_the_merchant/Giving_Hearts_right.png")
     L("bolkha_giving_tball_left",  "/assets/NPCs/Blokha_the_merchant/Giving_Tennis_Ball_left.png")
     L("bolkha_giving_tball_right", "/assets/NPCs/Blokha_the_merchant/Giving_Tennis_Ball_right.png")
+    L("bolkha_teleport",           "/assets/Enviroment/Bolkha_Teleport/Bolkha_Teleport.png")
     L("cucha_teleport",   "/assets/Enviroment/Cucha_Teleport/cucha_teleport.png")
     // Rex el Viejo — sprites por estado
     L("floor_w1_base",          "/assets/Enviroment/World_1/Floor/F-1.png")

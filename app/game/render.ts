@@ -738,18 +738,30 @@ export function drawBolkha(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   if (g.bolkhaState === "hidden") return
   const CW = ctx.canvas.width, CH = ctx.canvas.height
 
-  // ── Aparición: efecto de teletransporte (parpadeo) ─────────────────────────
+  // ── Aparición: sprite animado de teletransporte (25 frames, grid 5×5) ────────
   if (g.bolkhaState === "appearing") {
     const prog = 1 - g.bolkhaGivingTimer / BOLKHA_APPEAR_DUR  // 0→1
-    if (prog < 0.7 && Math.floor(prog * 30) % 2 === 0) {
-      // Parpadeo rápido durante la materialización
+    const tpSpr = sprs["bolkha_teleport"]
+    const bx = Math.round(BOLKHA_POS.x - g.cx)
+    const by = Math.round(BOLKHA_POS.y - g.cy)
+    if (tpSpr && tpSpr.complete && tpSpr.naturalWidth > 0) {
+      // frame 396×484, contenido 221×383, padTop=50, padBottom=51, padL=87, padR=88
+      // target content height 120px → scale=0.3133 → rw=124 rh=152 rxOff=-38 ryOff=-72
+      const fw = tpSpr.naturalWidth  / 5
+      const fh = tpSpr.naturalHeight / 5
+      const frame  = Math.min(24, Math.floor(prog * 25))
+      const col    = frame % 5, row2 = Math.floor(frame / 5)
+      const rw = 124, rh = 152, rxOff = -38, ryOff = -72
+      ctx.save()
+      ctx.globalAlpha = Math.min(1, 0.3 + prog * 0.7)   // fade-in suave
+      ctx.drawImage(tpSpr, col * fw, row2 * fh, fw, fh, bx + rxOff, by + ryOff, rw, rh)
+      ctx.restore()
+    } else {
+      // Fallback geométrico si el sprite no cargó
       ctx.save()
       ctx.globalAlpha = 0.5 + prog * 0.5
       ctx.fillStyle = "#00FFCC"
-      ctx.fillRect(
-        BOLKHA_POS.x - g.cx - 8, BOLKHA_POS.y - g.cy - 8,
-        BOLKHA_W + 16, BOLKHA_H + 16
-      )
+      ctx.fillRect(bx - 8, by - 8, BOLKHA_W + 16, BOLKHA_H + 16)
       ctx.restore()
     }
     return
