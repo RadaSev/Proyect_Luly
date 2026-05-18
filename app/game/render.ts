@@ -2913,37 +2913,43 @@ export function getEnemyRenderDim(e: Enemy): { rw: number; rh: number; rxOff: nu
   // Scale = 84 / contentH  →  rw=fw*scale, rh=fh*scale
   // ryOff = eH − rh*(1−padB/fh)  →  pies del personaje en sy+eH
   // rxOff = eW/2 − (padL+cW/2)*scale  →  centro del contenido sobre centro del hitbox
+  // ── W1 First Section Boss — El Castigador (eW=64, eH=84) ─────────────────
+  // Escala fija desde Walk_right (cH=374, TARGET_CH=100) → scale=0.2674
+  // ryOff = eH - rh*(1 - minPadB/fh)   rxOff = eW/2 - midC_contenido*scale
+  // Sprites analizados sobre los 25 frames de cada spritesheet.
   if (isW1P1Boss(e)) {
     const dir2 = (e.dying ? e.deathDir : e.dir) >= 0   // true=right
     if (e.dying) {
-      // Death_left:  frame 484×415, cW=280 cH=385, padL=102, padB=15  scale=0.2182
-      // Death_right: frame 484×424, cW=290 cH=397, padL=34,  padB=27  scale=0.2116
+      // Death_right: fw=484 fh=424 minPadB=0   → rw=129 rh=113 ryOff=-29 rxOff=-35
+      // Death_left:  fw=484 fh=415 minPadB=2   → rw=129 rh=111 ryOff=-26 rxOff=-23
       return dir2
-        ? { rw: 102, rh: 90, rxOff: -6,  ryOff: 0  }   // right
-        : { rw: 106, rh: 91, rxOff: -21, ryOff: -4 }   // left
+        ? { rw: 129, rh: 113, rxOff: -35, ryOff: -29 }  // right
+        : { rw: 129, rh: 111, rxOff: -23, ryOff: -26 }  // left
     }
     if (e.chainHit || e.sa > 0) {
       if (e.phase >= 2) {
-        // Atack_2_right: frame 505×500, scale=0.2148  Atack_2_left: frame 505×511, scale=0.2176
+        // Atack_2_right: fw=505 fh=500 minPadB=0  → rw=135 rh=134 ryOff=-50 rxOff=-34
+        // Atack_2_left:  fw=505 fh=511 minPadB=30 → rw=135 rh=137 ryOff=-45 rxOff=-30
         return dir2
-          ? { rw: 108, rh: 107, rxOff: -15, ryOff: 0   }  // right
-          : { rw: 110, rh: 111, rxOff: -23, ryOff: -14 }  // left
+          ? { rw: 135, rh: 134, rxOff: -34, ryOff: -50 }  // right
+          : { rw: 135, rh: 137, rxOff: -30, ryOff: -45 }  // left
       }
-      // Atack_1_right: frame 505×485, scale=0.2148  Atack_1_left: frame 505×501, scale=0.2182
+      // Atack_1_right: fw=505 fh=485 minPadB=0  → rw=135 rh=130 ryOff=-46 rxOff=-43
+      // Atack_1_left:  fw=505 fh=501 minPadB=56 → rw=135 rh=134 ryOff=-35 rxOff=-34
       return dir2
-        ? { rw: 108, rh: 104, rxOff: -23, ryOff: 0   }  // right
-        : { rw: 110, rh: 109, rxOff: -23, ryOff: -12 }  // left
+        ? { rw: 135, rh: 130, rxOff: -43, ryOff: -46 }  // right
+        : { rw: 135, rh: 134, rxOff: -34, ryOff: -35 }  // left
     }
     if (e.phase >= 2) {
-      // Rage_Walk_right: frame 462×442, scale=0.2132  Rage_Walk_left: frame 463×440, scale=0.2182
+      // Rage_Walk_right: fw=462 fh=442 minPadB=0  → rw=124 rh=118 ryOff=-34 rxOff=-31
+      // Rage_Walk_left:  fw=463 fh=440 minPadB=17 → rw=124 rh=118 ryOff=-29 rxOff=-23
       return dir2
-        ? { rw: 99,  rh: 94, rxOff: -6,  ryOff: -1 }  // right
-        : { rw: 101, rh: 96, rxOff: -19, ryOff: -6 }  // left
+        ? { rw: 124, rh: 118, rxOff: -31, ryOff: -34 }  // right
+        : { rw: 124, rh: 118, rxOff: -23, ryOff: -29 }  // left
     }
-    // Walk_right: frame 464×400, scale=0.2252  Walk_left: frame 464×400, scale=0.2199
-    return dir2
-      ? { rw: 104, rh: 90, rxOff: -21, ryOff: -4 }  // right
-      : { rw: 102, rh: 88, rxOff: -23, ryOff: -2 }  // left
+    // Walk_right: fw=464 fh=400 minPadB=0  → rw=124 rh=107 ryOff=-23 rxOff=-30
+    // Walk_left:  fw=464 fh=400 minPadB=0  → rw=124 rh=107 ryOff=-23 rxOff=-30
+    return { rw: 124, rh: 107, rxOff: -30, ryOff: -23 }  // simétrico
   }
 
   // ── W1 First Section (eW=96, eH=96) — solo ajuste de muerte ───────
