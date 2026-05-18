@@ -152,6 +152,9 @@ export default function ProyectoLuly() {
     L("kennel_blue",   "/assets/Enviroment/Kennel/Kennel_blue.png")    // W2 Los Tubos
     L("kennel_violet",    "/assets/Enviroment/Kennel/Kennel_Violet.png")  // W3 Ctrl. Central
     L("monticulo_herramientas", "/assets/Enviroment/monticulo_herramientas/monticulo_herramientas.png")
+    // El Torturado — llamas animadas (grid 5×5, 25 frames)
+    L("violet_fire_piso", "/assets/Enviroment/violet_fire/piso_animate.png")
+    L("violet_fire_plat", "/assets/Enviroment/violet_fire/plataforma_animate.png")
     // W1P2 Boss — sprites exclusivos (no comparten loop general de boss anims)
     L("boss_w1_ss_mareado_right", "/assets/boos/World_1/Second_Section/mareado_right.png")
     L("boss_w1_ss_mareado_left",  "/assets/boos/World_1/Second_Section/mareado_left.png")

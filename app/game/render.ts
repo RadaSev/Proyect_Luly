@@ -4492,7 +4492,7 @@ export function drawBossArenaPlats(ctx: CanvasRenderingContext2D, g: G) {
 }
 
 // ── Llamas del Torturado (Ultra Boss) ─────────────────────────────────────
-export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
+export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const uf = g.ultraFlames
   if (!uf || uf.phase === "startup" || uf.phase === "vuln") return
 
@@ -4510,42 +4510,69 @@ export function drawUltraFlames(ctx: CanvasRenderingContext2D, g: G) {
     { x: rX, y: bY }, { x: rX, y: tY },
   ]
 
-  const isWarn = uf.phase === "warn"
-  const pulse  = isWarn ? (0.45 + 0.25 * Math.sin(Date.now() / 140)) : 0.80
-  // Violeta espacial: advertencia más tenue, daño más intenso
-  const r2 = isWarn ? 130 : 170
-  const g2 = 0
-  const b2 = isWarn ? 220 : 255
+  const isWarn  = uf.phase === "warn"
+  const alpha   = isWarn ? (0.55 + 0.25 * Math.sin(Date.now() / 140)) : 1.0
+  // Frame de animación a ~10fps (25 frames en grid 5×5)
+  const fireFrame = Math.floor(Date.now() / 100) % 25
+
+  const pisoSpr = sprs["violet_fire_piso"]
+  const platSpr = sprs["violet_fire_plat"]
+
+  // Helper: dibuja un sprite 5×5 tileado horizontalmente dentro de un rect
+  const drawTiled = (spr: HTMLImageElement, dx: number, dy: number, dw: number, dh: number) => {
+    const fW  = spr.width  / 5
+    const fH  = spr.height / 5
+    const col = fireFrame % 5, row = Math.floor(fireFrame / 5)
+    const sx  = col * fW,  sy = row * fH
+    // Ancho de cada tile manteniendo la proporción del frame
+    const tileW = Math.round(fW * (dh / fH))
+    ctx.save()
+    ctx.beginPath(); ctx.rect(dx, dy, dw, dh); ctx.clip()
+    for (let tx = dx; tx < dx + dw + tileW; tx += tileW) {
+      ctx.drawImage(spr, sx, sy, fW, fH, tx, dy, tileW, dh)
+    }
+    ctx.restore()
+  }
 
   ctx.save()
+  ctx.globalAlpha = alpha
 
   // ── Zona del suelo ──────────────────────────────────────────────────────
-  const flameH  = 44
-  const floorY  = y0 + RH - WT - flameH
-  const sx0     = x0 + WT - g.cx
-  const sy0     = floorY - g.cy
-  ctx.fillStyle = `rgba(${r2},${g2},${b2},${pulse})`
-  ctx.fillRect(sx0, sy0, RW - 2 * WT, flameH)
-  // Borde superior luminoso (violeta claro)
-  ctx.fillStyle = `rgba(210,140,255,${pulse * 0.9})`
-  ctx.fillRect(sx0, sy0, RW - 2 * WT, 3)
+  const floorFlameH = 72  // altura de las llamas del suelo (px en pantalla)
+  const floorY = y0 + RH - WT - floorFlameH
+  const sx0    = x0 + WT - g.cx
+  const sy0    = floorY  - g.cy
+  if (pisoSpr) {
+    drawTiled(pisoSpr, sx0, sy0, RW - 2 * WT, floorFlameH)
+  } else {
+    // fallback geométrico si el sprite no cargó
+    const r2 = isWarn ? 130 : 170, b2 = isWarn ? 220 : 255
+    ctx.fillStyle = `rgba(${r2},0,${b2},${alpha})`
+    ctx.fillRect(sx0, sy0, RW - 2 * WT, floorFlameH)
+    ctx.fillStyle = `rgba(210,140,255,${alpha * 0.9})`
+    ctx.fillRect(sx0, sy0, RW - 2 * WT, 3)
+  }
 
   // ── Zonas de plataformas seleccionadas ─────────────────────────────────
+  const platFlameH = 58  // altura de las llamas sobre cada plataforma
   for (const idx of uf.platIdxs) {
     const pp  = platPos[idx]
     const psx = pp.x - g.cx
     const psy = pp.y - g.cy
-    const fH  = 22
-    ctx.fillStyle = `rgba(${r2},${g2},${b2},${pulse})`
-    ctx.fillRect(psx, psy - fH, UB_PLAT_W, fH + 4)
-    ctx.fillStyle = `rgba(210,140,255,${pulse * 0.9})`
-    ctx.fillRect(psx, psy - fH, UB_PLAT_W, 3)
+    if (platSpr) {
+      drawTiled(platSpr, psx, psy - platFlameH, UB_PLAT_W, platFlameH)
+    } else {
+      const r2 = isWarn ? 130 : 170, b2 = isWarn ? 220 : 255
+      ctx.fillStyle = `rgba(${r2},0,${b2},${alpha})`
+      ctx.fillRect(psx, psy - platFlameH, UB_PLAT_W, platFlameH + 4)
+      ctx.fillStyle = `rgba(210,140,255,${alpha * 0.9})`
+      ctx.fillRect(psx, psy - platFlameH, UB_PLAT_W, 3)
+    }
   }
 
   // ── Texto de advertencia ────────────────────────────────────────────────
   if (isWarn) {
-    const alpha2 = 0.6 + 0.4 * Math.sin(Date.now() / 180)
-    ctx.globalAlpha = alpha2
+    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(Date.now() / 180)
     ctx.fillStyle = "#CC88FF"
     ctx.font = "bold 15px monospace"
     ctx.textAlign = "center"
@@ -4567,7 +4594,7 @@ export function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHove
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
-  drawUltraFlames(ctx, g)
+  drawUltraFlames(ctx, g, sprs)
   drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawBolkha(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
