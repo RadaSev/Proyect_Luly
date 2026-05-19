@@ -4892,23 +4892,47 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ctx.fillText(`DEV${devFlags.trim()?"|"+devFlags.trim():""}`,CW-48,57); ctx.textAlign="left"
   }
 
-  // ── kennelMsg (checkpoint / gfx toast) ───────────────────────────────────
+  // ── kennelMsg: ícono de save animado (checkpoint) o toast de texto (GFX) ─────
   if (g.kennelMsg > 0) {
-    const alpha = Math.min(1, g.kennelMsg) * Math.min(1, g.kennelMsg / 0.5)
-    const isGfxMsg = !g.explored.has("__gfxmsg__") // distinguir tipo de mensaje
-    // Detectar si el mensaje es de GFX o checkpoint usando un flag en el estado
-    const msgText = (g as any)._gfxMsg
-      ? `◈  GRÁFICOS: ${["BAJA", "MEDIA", "ALTA"][g.gfx]}  ◈`
-      : "★  CHECKPOINT  GUARDADO  ★"
-    const msgColor = (g as any)._gfxMsg ? th.accent : "#00FF88"
-    ctx.save(); ctx.globalAlpha = alpha
-    // En mobile los botones MAP/PAUSA ocupan ~42px desde el fondo del canvas (3%vh + 32px).
-    // Checkpoint justo encima con ~6px de separación → bottom del box a CH-48.
-    const cpY = g.isMobile ? CH - 88 : CH - 72
-    ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW / 2 - 136, cpY, 272, 40, 8); ctx.fill()
-    ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, cpY, 272, 40)
-    ctx.fillStyle = msgColor; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
-    ctx.fillText(msgText, CW / 2, cpY + 26); ctx.textAlign = "left"; ctx.restore()
+    const isGfxMsg = !!(g as any)._gfxMsg
+    if (isGfxMsg) {
+      // Toast de texto para cambio de calidad gráfica (no checkpoint) — igual que antes
+      const alpha = Math.min(1, g.kennelMsg) * Math.min(1, g.kennelMsg / 0.5)
+      ctx.save(); ctx.globalAlpha = alpha
+      const cpY = g.isMobile ? CH - 88 : CH - 72
+      ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(CW / 2 - 136, cpY, 272, 40, 8); ctx.fill()
+      ctx.strokeStyle = th.accent + "88"; ctx.lineWidth = 1.5; ctx.strokeRect(CW / 2 - 136, cpY, 272, 40)
+      ctx.fillStyle = th.accent; ctx.font = "bold 14px 'Courier New',monospace"; ctx.textAlign = "center"
+      ctx.fillText(`◈  GRÁFICOS: ${["BAJA", "MEDIA", "ALTA"][g.gfx]}  ◈`, CW / 2, cpY + 26)
+      ctx.textAlign = "left"; ctx.restore()
+    } else {
+      // ── Ícono de save animado (sprite 1105×1955, 5×5 grid, 25 frames) ──────────
+      // Duración total: 3s (kennelMsg 3→0). Una secuencia: 25 frames a ~10fps = 2.5s.
+      // Fade out en el último 0.5s (kennelMsg < 0.5).
+      const saveIconSpr = sprs["save_icon"]
+      const TOTAL = 3.0
+      const elapsed = Math.max(0, TOTAL - g.kennelMsg)
+      const frame   = Math.floor(elapsed * 10) % 25   // ~10fps
+      const fw = saveIconSpr ? saveIconSpr.naturalWidth  / 5 : 0
+      const fh = saveIconSpr ? saveIconSpr.naturalHeight / 5 : 0
+      const col = frame % 5, row2 = Math.floor(frame / 5)
+      const SW = 44, SH = 78   // 221×391 → proporción ×0.199
+      const px = panX                                     // alineado al borde del panel HUD
+      // Desktop: máximo inferior izquierdo (4px del borde)
+      // Mobile:  debajo de la fila de corazones, sin solaparse con el panel HUD ni el d-pad
+      const py = g.isMobile ? (HY0 + HS + 6) : (CH - SH - 4)
+      const alpha = Math.min(1, g.kennelMsg * 2)   // fade en último 0.5s
+      ctx.save(); ctx.globalAlpha = alpha
+      if (saveIconSpr && saveIconSpr.complete && saveIconSpr.naturalWidth > 0) {
+        ctx.drawImage(saveIconSpr, col * fw, row2 * fh, fw, fh, px, py, SW, SH)
+      } else {
+        // Fallback: texto simple si el sprite no cargó
+        ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.beginPath(); ctx.roundRect(px, py, 120, 30, 6); ctx.fill()
+        ctx.fillStyle = "#00FF88"; ctx.font = "bold 11px 'Courier New',monospace"
+        ctx.fillText("✦ GUARDADO", px + 8, py + 20)
+      }
+      ctx.restore()
+    }
   }
   // ── Barra de boss — solo visible cuando el jugador está EN la sala del boss ──
   const bossRoomType = isBossRoom(curW, curC, curR)
