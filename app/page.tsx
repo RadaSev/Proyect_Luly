@@ -92,6 +92,8 @@ export default function ProyectoLuly() {
     // celular (mensaje de Rex)
     L("player_celular_right", "/assets/player/player_celular_right.png")
     L("player_celular_left",  "/assets/player/player_celular_left.png")
+    L("player_pared_deslizamiento_right", "/assets/player/luly_pared_deslizamiento_right.png")
+    L("player_pared_deslizamiento_left",  "/assets/player/luly_pared_deslizamiento_left.png")
     // dash: cargados pero no usados hasta tener sprites 25fps
     L("player_dash_right", "/assets/player/player_dash_right.png")
     L("player_dash_left",  "/assets/player/player_dash_left.png")
@@ -231,6 +233,7 @@ export default function ProyectoLuly() {
       atack_bone: LULY_FPF, atack_bone_left: LULY_FPF,
       atack_correa: LULY_FPF, atack_correa_left: LULY_FPF,
       celular_right: LULY_FPF, celular_left: LULY_FPF,
+      pared_deslizamiento_right: LULY_FPF, pared_deslizamiento_left: LULY_FPF,
       // dash: desactivado hasta tener sprites 25fps
     }
     let raf: number, el = 0, last = performance.now()

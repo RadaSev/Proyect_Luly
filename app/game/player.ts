@@ -151,7 +151,7 @@ export function tickPlayer(g: G) {
   } else if (p.onGround || p.dash || (!left && !right)) {
     p.wallSliding = false; p.wallDir = 0
   }
-  if (p.wallSliding) p.pa = p.facing === 1 ? "jump" : "jump_left"
+  if (p.wallSliding) p.pa = p.wallDir === 1 ? "pared_deslizamiento_right" : "pared_deslizamiento_left"
   // Wall jump
   if (p.wallSliding && jk && !p.jh && g.abilities.has("walljump")) {
     p.vy = JV * 0.92; p.vx = -p.wallDir * (RUN + 2)

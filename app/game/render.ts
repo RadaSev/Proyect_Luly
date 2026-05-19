@@ -2720,6 +2720,10 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       // scale = 69/262 ≈ 0.263 → rw=45 rh=69; charCenterX=22px → rxOff=-7
       celular_right:     { rw:  45, rh:  69, ryOff:   3, rxOff:  -7 },
       celular_left:      { rw:  45, rh:  69, ryOff:   3, rxOff:  -7 },
+      // Wall slide: frame 325×584, content charH≈384px, scale=68/384≈0.177
+      // padL=83 fijo (right) / padR=83 fijo (left), minPadB=0 → ryOff=PH-rh=-31
+      pared_deslizamiento_right: { rw:  58, rh: 103, ryOff: -31, rxOff: -14 },
+      pared_deslizamiento_left:  { rw:  58, rh: 103, ryOff: -31, rxOff: -12 },
     }
     const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
     const rw = dim.rw, rh = dim.rh
