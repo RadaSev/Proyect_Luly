@@ -2280,9 +2280,9 @@ export function drawWalls(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {
     }
 
     // ── Pared lateral sprite ─────────────────────────────────────────────────
-    // Pared = p.w === WT, altura > STAIR_H (las paredes son altas, no delgadas)
+    // Pared = p.w === WT, cualquier altura (incluyendo trozos pequeños junto a puertas)
     // Izquierda: p.x % RW === 0 | Derecha: (p.x + p.w) % RW === 0
-    if (p.w === WT && p.h > STAIR_H) {
+    if (p.w === WT && p.h > 0) {
       const isRightWall = (p.x + p.w) % RW === 0
       drawWallSprite(ctx, sx, sy, p.w, p.h, p.y, sprs, isRightWall)
       continue
@@ -3952,7 +3952,7 @@ export function drawRealMapDev(ctx: CanvasRenderingContext2D, g: G, sprs: SprBan
         const isFloor = pl.h === WT  && Math.abs(yIR - (RH - WT)) < 4
         const isCeil  = pl.h === WT  && yIR < 4
         const isPlat  = pl.h === STAIR_H && yIR >= WT + 4 && yIR <= RH - WT - STAIR_H - 4 && pl.w >= 36
-        const isWall  = pl.w === WT  && pl.h > STAIR_H
+        const isWall  = pl.w === WT  && pl.h > 0
 
         if (isFloor || isCeil) {
           drawFloorSprite(ctx, pl.x, pl.y, pl.w, pl.h, pl.x, sprs, isCeil)

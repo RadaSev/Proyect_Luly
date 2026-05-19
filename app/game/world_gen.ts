@@ -329,6 +329,15 @@ export function computeDoors(w: number, c: number, r: number): { L: boolean; R: 
   // El cuarto encima del boss P2 siempre tiene salida hacia abajo
   if (c === bp2c_d && r === bp2r_d - 1) d.D = true
 
+  // ★ Salas adyacentes a boss rooms: eliminar puertas que apunten hacia lados sellados.
+  //   Evita huecos visuales en pisos/techos/paredes de salas vecinas al cubículo del jefe.
+  //   El laberinto puede generar conexiones hacia esos lados, pero como el boss room los
+  //   sella con muros sólidos, el cuarto vecino no debe mostrar una apertura sin gate.
+  if (c === bp1c  && r === bp1r  - 1) d.D = false  // sala sobre P1 boss → sin puerta al boss
+  if (c === bp1c  && r === bp1r  + 1) d.U = false  // sala bajo P1 boss  → sin puerta al boss
+  if (c === bp2c_d - 1 && r === bp2r_d) d.R = false  // sala izq P2 boss → sin puerta al boss
+  if (c === bp2c_d && r === bp2r_d + 1) d.U = false  // sala bajo P2 boss → sin puerta al boss
+
   return d
 }
 
