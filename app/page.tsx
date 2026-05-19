@@ -734,6 +734,8 @@ export default function ProyectoLuly() {
 
   // Sincronizar isTouchDevice → G.current.isMobile para que las funciones de canvas lo lean
   useEffect(() => { G.current.isMobile = isTouchDevice }, [isTouchDevice])
+  // Sincronizar altura de ventana → G.current.winH (para calcular posición exacta del botón mapa en canvas)
+  useEffect(() => { if (G.current) G.current.winH = winDims.h }, [winDims.h])
 
   useEffect(() => {
     const onConnect = (e: GamepadEvent) => {

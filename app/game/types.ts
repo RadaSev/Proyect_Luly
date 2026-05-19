@@ -123,6 +123,8 @@ export type G = {
   gpadType: "xbox" | "ps" | "keyboard"
   // Indica si el juego está en un dispositivo táctil (oculta minimap, ajusta HUD)
   isMobile: boolean
+  // Alto real de la ventana en px — para convertir posiciones CSS de botones móviles a coords canvas
+  winH: number
   // Vista del mapa: "single" = mundo actual ampliado, "all" = los 4 mundos
   mapView: "single" | "all"
   mapViewWorld: number   // índice del mundo mostrado en modo "single"

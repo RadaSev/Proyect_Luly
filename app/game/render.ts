@@ -4917,10 +4917,25 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       const fh = saveIconSpr ? saveIconSpr.naturalHeight / 5 : 0
       const col = frame % 5, row2 = Math.floor(frame / 5)
       const SW = 44, SH = 78   // 221×391 → proporción ×0.199
-      const px = panX                                     // alineado al borde del panel HUD
-      // Desktop: máximo inferior izquierdo (4px del borde)
-      // Mobile:  debajo de la fila de corazones, sin solaparse con el panel HUD ni el d-pad
-      const py = g.isMobile ? (HY0 + HS + 6) : (CH - SH - 4)
+      // Desktop: inferior izquierdo (alineado al panel HUD, pegado al borde)
+      // Mobile:  debajo del botón de MAPA (esquina superior derecha)
+      //   El botón de mapa en CSS: top = 44*(winH/600)+8 px, right = 3%, width=height=40 px
+      //   Convertir a coordenadas canvas (escala = CH/winH = 600/winH):
+      //     mapBtnBottom_canvas = (44*(winH/600) + 8 + 40) * (600/winH) = 44 + 48*(600/winH)
+      //     saveIcon X derecha (alineada con botón): CW - 0.03*CW - (40*(600/winH)/2) - SW/2
+      //   Se añade un gap de 4 px (pantalla) = 4*(600/winH) canvas
+      let px: number, py: number
+      if (g.isMobile) {
+        const sc = 600 / Math.max(300, g.winH)    // canvas px / screen px
+        const mapBtnRight = CW - Math.round(CW * 0.03)      // borde derecho del botón mapa en canvas
+        const mapBtnW     = Math.round(40 * sc)              // ancho del botón en canvas px
+        const mapBtnBot   = Math.round((44 * (g.winH / 600) + 48) * sc)  // fondo del botón en canvas
+        px = mapBtnRight - Math.round(mapBtnW / 2) - Math.round(SW / 2)  // centrado bajo el botón
+        py = mapBtnBot + Math.round(4 * sc)                               // 4 screen-px de gap
+      } else {
+        px = panX          // alineado al borde izquierdo del panel HUD
+        py = CH - SH - 4   // máximo inferior izquierdo
+      }
       const alpha = Math.min(1, g.kennelMsg * 2)   // fade en último 0.5s
       ctx.save(); ctx.globalAlpha = alpha
       if (saveIconSpr && saveIconSpr.complete && saveIconSpr.naturalWidth > 0) {

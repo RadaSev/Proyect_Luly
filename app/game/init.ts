@@ -292,6 +292,7 @@ export function mkG_lazy(): G {
     rexPhoneNotif: null,
     gpadType: "keyboard",
     isMobile: typeof window !== "undefined" && (window.innerWidth < 900 || navigator.maxTouchPoints > 0),
+    winH: typeof window !== "undefined" ? window.innerHeight : CH,
     mapView: "single",
     mapViewWorld: 0,
     showRealMap: false,
