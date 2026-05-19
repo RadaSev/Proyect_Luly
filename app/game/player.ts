@@ -143,7 +143,7 @@ export function tickPlayer(g: G) {
   // ── WALL SLIDE / WALL JUMP ───────────────────────────────────────────
   p.wallJumpCd = Math.max(0, p.wallJumpCd - STEP)
   const hitWallNow = res.vx === 0 && Math.abs(preResVx) > 0.5 && !p.onGround && !p.crouching && !p.dash
-  if (hitWallNow && p.wallJumpCd <= 0) {
+  if (hitWallNow && preResVy > 0 && p.wallJumpCd <= 0) {
     p.wallSliding = true
     p.wallDir = preResVx > 0 ? 1 : -1
     if (p.vy > 2.2) p.vy = 2.2
@@ -151,7 +151,10 @@ export function tickPlayer(g: G) {
   } else if (p.onGround || p.dash || (!left && !right)) {
     p.wallSliding = false; p.wallDir = 0
   }
-  if (p.wallSliding) p.pa = p.wallDir === 1 ? "pared_deslizamiento_right" : "pared_deslizamiento_left"
+  // TODO [wall-slide-sprite]: reemplazar con sprites dedicados cuando se retome
+  //   if (p.wallSliding) p.pa = p.wallDir === 1 ? "pared_deslizamiento_right" : "pared_deslizamiento_left"
+  //   Y quitar preResVy > 0 de la condición hitWallNow para activación inmediata
+  if (p.wallSliding) p.pa = p.facing === 1 ? "jump" : "jump_left"
   // Wall jump
   if (p.wallSliding && jk && !p.jh && g.abilities.has("walljump")) {
     p.vy = JV * 0.92; p.vx = -p.wallDir * (RUN + 2)

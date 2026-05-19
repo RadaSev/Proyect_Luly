@@ -2720,11 +2720,28 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       // scale = 69/262 ≈ 0.263 → rw=45 rh=69; charCenterX=22px → rxOff=-7
       celular_right:     { rw:  45, rh:  69, ryOff:   3, rxOff:  -7 },
       celular_left:      { rw:  45, rh:  69, ryOff:   3, rxOff:  -7 },
-      // Wall slide: frame 325×584, content charH≈384px, scale=68/384≈0.177
-      // right: padB=100 típico → ryOff=PH-rh+padB*(rh/fh)=72-103+17.6≈-13; rxOff=-5 → pegado a pared dcha
-      // left:  rxOff=-12 queda perfecto (pegado a pared izq)
-      pared_deslizamiento_right: { rw:  58, rh: 103, ryOff: -13, rxOff:  -5 },
-      pared_deslizamiento_left:  { rw:  58, rh: 103, ryOff: -31, rxOff: -12 },
+      // ── TODO [wall-slide-sprite] ──────────────────────────────────────────
+      // Sprites: luly_pared_deslizamiento_right/left.png — 25 frames, 384px charH, 5×5 grid
+      // Cargados en page.tsx. Activación en player.ts (buscar TODO [wall-slide-sprite]).
+      //
+      // Dimensiones calculadas (PIL frame 0):
+      //   RIGHT: frame 325×584, padL=83 padR=83 padT=100 padB=100, content 159×384
+      //     scale = 58/325 = 0.1785
+      //     rw=58, rh=103
+      //     ryOff = PH - rh + padB*(rh/fh) = 72 - 103 + 100*(103/584) ≈ -13  ← pies en hitbox bottom
+      //     rxOff = -5  → borde dcho del contenido queda ~8px dentro de la pared dcha (igual que izq)
+      //   LEFT:  frame 325×584, padL=21 padR=83 padT=104 padB=73, content 221×407
+      //     rw=58, rh=103  (mismo sheet size)
+      //     ryOff ≈ -31 funcionó visualmente (usuario: "perfecto")
+      //     rxOff = -12 → pegado a pared izq (usuario: "perfecto")
+      //
+      // Estado final probado:
+      //   right { rw:58, rh:103, ryOff:-13, rxOff:-5  }  ← tamaño correcto, pegado a pared
+      //   left  { rw:58, rh:103, ryOff:-31, rxOff:-12 }  ← usuario confirmó "perfecto"
+      //
+      // Para retomar: descomentar estas dos líneas y el bloque en player.ts / page.tsx:
+      // pared_deslizamiento_right: { rw:  58, rh: 103, ryOff: -13, rxOff:  -5 },
+      // pared_deslizamiento_left:  { rw:  58, rh: 103, ryOff: -31, rxOff: -12 },
     }
     const dim: LulyDim = LULY_DIM[p.pa] ?? LULY_DIM.idle
     const rw = dim.rw, rh = dim.rh
