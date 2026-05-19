@@ -38,7 +38,7 @@ export const UB_FLAME_DMG2     = 4     // daño ataque 2 (2 corazones = 4 unidad
 export const UB_FLAME_CD       = 4.0   // s de espera entre ataques
 export const UB_FLAME_DMG_DUR  = 1.2   // s de ventana de daño activo
 export const UB_FREEZE_FRAME1  = 20    // frame en que el boss se congela (ataque 1)
-export const UB_FREEZE_FRAME2  = 15    // frame en que el boss se congela (ataque 2)
+export const UB_FREEZE_FRAME2  = 14    // frame en que el boss se congela (ataque 2)
 export const UB_VULN_DUR       = 2.5   // s de ventana de vulnerabilidad (post ataque 2)
 // Arena del Torturado: posición relativa de las 4 plataformas laterales
 export const UB_PLAT_W         = 200   // ancho de cada plataforma
