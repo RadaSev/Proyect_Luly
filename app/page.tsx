@@ -155,6 +155,7 @@ export default function ProyectoLuly() {
     // El Torturado — llamas animadas (grid 5×5, 25 frames)
     L("violet_fire_piso", "/assets/Enviroment/violet_fire/piso_animate.png")
     L("violet_fire_plat", "/assets/Enviroment/violet_fire/plataforma_animate.png")
+    L("mitad_key",        "/assets/Enviroment/mitad_key/mitad_key.png")
     // W1P2 Boss — sprites exclusivos (no comparten loop general de boss anims)
     L("boss_w1_ss_mareado_right", "/assets/boos/World_1/Second_Section/mareado_right.png")
     L("boss_w1_ss_mareado_left",  "/assets/boos/World_1/Second_Section/mareado_left.png")

@@ -504,7 +504,7 @@ export function drawTraversableTile(ctx: CanvasRenderingContext2D, sx: number, s
 // ── Pickup: MEDIA llave (dibujado antes de paredes) ─────────────────────────
 // Es solo la mitad derecha de una llave: varilla + dientes sin el arco/mango.
 // Rex tiene la otra mitad (el mango/arco) — juntas abren la jaula.
-export function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
+export function drawPickups(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
   const { cx, cy } = g, t = Date.now() * 0.001
   for (const pk of g.pickups) {
     if (!pk.active) continue
@@ -550,38 +550,28 @@ export function drawPickups(ctx: CanvasRenderingContext2D, g: G) {
     haloK.addColorStop(0, "rgba(255,220,0,0.65)"); haloK.addColorStop(1, "rgba(255,140,0,0)")
     ctx.fillStyle = haloK; ctx.beginPath(); ctx.arc(sx, sy, 30, 0, Math.PI * 2); ctx.fill()
 
-    // ── MEDIA LLAVE: solo la varilla + dientes (sin mango circular) ──
-    // La "fractura" se indica con un corte dentado en el extremo izquierdo.
-    ctx.strokeStyle = "#FFD700"; ctx.lineWidth = 3.5; ctx.lineCap = "round"; ctx.lineJoin = "round"
-    // Varilla horizontal (de izquierda a derecha)
-    ctx.beginPath(); ctx.moveTo(sx - 10, sy); ctx.lineTo(sx + 12, sy); ctx.stroke()
-    // Extremo izquierdo roto (línea dentada = fractura)
-    ctx.strokeStyle = "#FFC000"; ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(sx - 10, sy - 3); ctx.lineTo(sx - 7, sy + 2)
-    ctx.lineTo(sx - 9, sy - 1); ctx.lineTo(sx - 6, sy + 3)
-    ctx.stroke()
-    // Dientes (mordeduras hacia arriba, en el extremo derecho)
-    ctx.strokeStyle = "#FFD700"; ctx.lineWidth = 3.5; ctx.lineCap = "round"
-    ctx.beginPath(); ctx.moveTo(sx + 4, sy); ctx.lineTo(sx + 4, sy - 7); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(sx + 9, sy); ctx.lineTo(sx + 9, sy - 5); ctx.stroke()
-    // Punta final
-    ctx.beginPath(); ctx.moveTo(sx + 12, sy); ctx.lineTo(sx + 12, sy - 3); ctx.stroke()
-    // Reborde de la varilla (brillo)
-    ctx.strokeStyle = "#FFF0AA"; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(sx - 9, sy - 1.5); ctx.lineTo(sx + 12, sy - 1.5); ctx.stroke()
-
-    // Borde de fractura rojo (resalta que está rota)
-    ctx.strokeStyle = "#FF4400"; ctx.lineWidth = 1.2
-    ctx.beginPath(); ctx.moveTo(sx - 10, sy - 4); ctx.lineTo(sx - 10, sy + 4); ctx.stroke()
+    // ── MEDIA LLAVE: sprite único 768×768, contenido recortado 315×567 ──────────
+    // Recortamos directamente al contenido (padL=284, padT=116) para evitar
+    // escalar el espacio vacío. Mostramos a 38×50px centrado en (sx,sy).
+    const keySpr = sprs["mitad_key"]
+    const _kW = 20, _kH = 25
+    const _kDx = sx - Math.round(_kW / 2)
+    const _kDy = sy - Math.round(_kH / 2)
+    if (keySpr && keySpr.complete && keySpr.naturalWidth > 0) {
+      ctx.drawImage(keySpr, 284, 116, 315, 567, _kDx, _kDy, _kW, _kH)
+    } else {
+      // Fallback geométrico si el sprite no cargó
+      ctx.strokeStyle = "#FFD700"; ctx.lineWidth = 3.5; ctx.lineCap = "round"
+      ctx.beginPath(); ctx.moveTo(sx - 10, sy); ctx.lineTo(sx + 12, sy); ctx.stroke()
+    }
 
     // Etiqueta pulsante
     const pulseK = 0.65 + 0.35 * Math.sin(t * 4)
     ctx.globalAlpha = pulseK
     ctx.fillStyle = "#FFE066"; ctx.font = "bold 9px 'Courier New',monospace"; ctx.textAlign = "center"
-    ctx.fillText("½ LLAVE", sx, sy - 20)
+    ctx.fillText("½ LLAVE", sx, sy - 32)
     ctx.fillStyle = "#FFA050"; ctx.font = "7px 'Courier New',monospace"
-    ctx.fillText("lleva a Rex", sx, sy - 10)
+    ctx.fillText("lleva a Rex", sx, sy - 22)
     ctx.textAlign = "left"
     ctx.restore()
   }
@@ -4645,7 +4635,7 @@ export function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHove
   ctx.save()
   if (sc !== 1) ctx.scale(sc, sc)
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
-  drawBg(ctx, g); drawPickups(ctx, g); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
+  drawBg(ctx, g); drawPickups(ctx, g, sprs); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
   drawUltraFlames(ctx, g, sprs)
   drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawBolkha(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
