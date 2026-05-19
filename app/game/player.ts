@@ -143,7 +143,7 @@ export function tickPlayer(g: G) {
   // ── WALL SLIDE / WALL JUMP ───────────────────────────────────────────
   p.wallJumpCd = Math.max(0, p.wallJumpCd - STEP)
   const hitWallNow = res.vx === 0 && Math.abs(preResVx) > 0.5 && !p.onGround && !p.crouching && !p.dash
-  if (hitWallNow && preResVy > 0 && p.wallJumpCd <= 0) {
+  if (hitWallNow && p.wallJumpCd <= 0) {
     p.wallSliding = true
     p.wallDir = preResVx > 0 ? 1 : -1
     if (p.vy > 2.2) p.vy = 2.2
