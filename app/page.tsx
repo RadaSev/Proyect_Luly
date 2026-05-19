@@ -434,7 +434,7 @@ export default function ProyectoLuly() {
         const _vR = Math.floor(g.pl.y / RH)
         if (!(_vW === 0 && _vC === VIEJO_DOG_C && _vR === VIEJO_DOG_R)) fireTBall(g)
       }
-      if (k === "r") G.current = mkG_lazy()
+      if (k === "r" && g.devMode) G.current = mkG_lazy()
       if (k === "`") { g.devMode = !g.devMode; if (!g.devMode) { g.showDevMap = false; g.showRealMap = false; g.godMode = false; g.infiniteAmmo = false; g.noEnemies = false; g.ohko = false } }
       if (g.devMode && k === "i") g.godMode = !g.godMode
       if (g.devMode && k === "o") g.infiniteAmmo = !g.infiniteAmmo

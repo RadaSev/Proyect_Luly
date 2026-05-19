@@ -142,7 +142,10 @@ export function tickBolkha(g: G) {
   } else {
     if (g.bolkhaState === "talking") g.bolkhaState = "idle"
     // Resetear saludo al alejarse del rango de callout
-    if (dist >= BOLKHA_CALLOUT_R) g.bolkhaGreetedThisVisit = false
+    if (dist >= BOLKHA_CALLOUT_R) {
+      g.bolkhaGreetedThisVisit = false
+      g.bolkhaShownAnimItems.clear()   // nueva visita → animaciones de entrega se pueden repetir
+    }
   }
 }
 
@@ -175,15 +178,23 @@ export function bolkhaDoInteract(g: G) {
     if (g.score >= sel.price) {
       g.score -= sel.price
       sel.buy()
-      g.bolkhaGivingItem = sel.givingItem
-      g.bolkhaGivingPhase = 0
-      g.bolkhaGivingTimer = 0
-      g.bolkhaEf = 0
-      g.bolkhaEft = 0
-      g.bolkhaState = "giving"
-      g.bolkhaShopOpen = false
-      g.bolkhaTalkText = sel.talkText
-      g.bolkhaTalkTimer = 4.0
+      if (!g.bolkhaShownAnimItems.has(sel.givingItem)) {
+        // Primera compra de este item en esta visita → animación completa
+        g.bolkhaShownAnimItems.add(sel.givingItem)
+        g.bolkhaGivingItem = sel.givingItem
+        g.bolkhaGivingPhase = 0
+        g.bolkhaGivingTimer = 0
+        g.bolkhaEf = 0
+        g.bolkhaEft = 0
+        g.bolkhaState = "giving"
+        g.bolkhaShopOpen = false
+        g.bolkhaTalkText = sel.talkText
+        g.bolkhaTalkTimer = 4.0
+      } else {
+        // Ya se mostró la animación esta visita → entrega directa, tienda permanece abierta
+        g.bolkhaTalkText = "¡Aquí tienes!"
+        g.bolkhaTalkTimer = 1.5
+      }
     } else {
       // No alcanza: feedback de error
       g.bolkhaAffordTimer = 1.5

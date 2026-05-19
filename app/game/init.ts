@@ -320,6 +320,7 @@ export function mkG_lazy(): G {
     bolkhaTalkText: "",
     bolkhaTalkTimer: 0,
     bolkhaGreetedThisVisit: false,
+    bolkhaShownAnimItems: new Set<string>(),
     bolkhaAffordTimer: 0,
     bolkhaShopDescCursor: -1,
     bolkhaRexTold: false,

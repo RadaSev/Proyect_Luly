@@ -156,6 +156,7 @@ export type G = {
   bolkhaTalkText: string       // texto de burbuja de diálogo
   bolkhaTalkTimer: number      // tiempo restante para mostrar burbuja
   bolkhaGreetedThisVisit: boolean  // ya saludó en esta aproximación
+  bolkhaShownAnimItems: Set<string> // items cuya animación de entrega ya se mostró esta visita
   bolkhaAffordTimer: number        // flash "sin croquetas" al intentar comprar sin fondos
   bolkhaShopDescCursor: number     // cursor del último ítem cuya desc se mostró
   bolkhaRexTold: boolean           // Rex mencionó a Bolkha en su diálogo → puede aparecer
