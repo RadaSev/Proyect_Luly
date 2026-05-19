@@ -203,7 +203,7 @@ export const TB_MAX_BOUNCES = 5
 export const TB_MAX_LIFE = 8
 export const TB_MAX_SIMULTANEOUS = 3
 export const TB_AMMO_INIT = 3
-export const TB_AMMO_MAX = 15
+export const TB_AMMO_MAX = 5   // máximo tras mejora del bastón (Rex tras El Herrero)
 export const TB_AMMO_DROP = 3
 
 // ── Gamepad ─────────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ export const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E5393
 
 // ── Salvar ──────────────────────────────────────────────────────────────────
 export const SAVE_KEY = "proyecto_luly_v2"
-export const GAME_VERSION = "0.3.25"
+export const GAME_VERSION = "0.3.26"
 
 // ── BG ──────────────────────────────────────────────────────────────────────
 export const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]

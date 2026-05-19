@@ -286,6 +286,12 @@ export function dmgPlayer(g: G, dmg: number) {
     g.pl.dash = false; g.pl.wallSliding = false; g.pl.inv = 2
     g.ultraFlames = null  // limpiar llamas al morir
 
+    // ── Detectar muerte en arena de jefe ANTES de limpiar los locks ─────
+    const _curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
+    const _diedInBoss = g.bossArenaLocked.has(_curW)
+                     || g.bossArenaLocked.has(_curW + 10)
+                     || g.bossArenaLocked.has(_curW + 20)
+
     // ── Abrir puertas de arenas de jefes vivos ───────────────────────────
     // Solo limpiamos los bloqueos de puerta y los objetos de arena.
     // El reset completo del jefe (HP, estado, posición) se hace de forma segura
@@ -305,6 +311,14 @@ export function dmgPlayer(g: G, dmg: number) {
       if (isUltraBoss(e)) {
         g.bossArenaLocked.delete(e.world + 20)
       }
+    }
+
+    // ── Recompensa de consuelo al morir frente a un jefe: recursos completos ─
+    if (_diedInBoss) {
+      g.lives  = 3                    // restaurar todas las vidas
+      g.pl.ammo = 15                  // restaurar todos los huesos
+      if (g.abilities.has("tball"))
+        g.tballAmmo = g.tballUpgraded ? TB_AMMO_MAX : TB_AMMO_INIT  // restaurar pelotas
     }
 
     // Reaparece en el último checkpoint con animación de teletransporte

@@ -177,11 +177,11 @@ export function tickViejoDog(g: G) {
     // Jugadora trae el bastón → mejora la pelota
     g.rexBatonHeld = false
     g.tballUpgraded = true
-    g.tballAmmo = Math.min(TB_AMMO_MAX, g.tballAmmo + 2)  // sube a 5 si tenía 3
+    g.tballAmmo = TB_AMMO_MAX   // rellenar al nuevo máximo (5) inmediatamente
     g.viejoDogState = "baton_delivered"
     spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#8B4513", "#D2691E", "#FFD700", "#CCFF00", "#FFFFFF"], 30, 5, true)
     triggerShake(g, 7, 0.4)
-    g.abilityNotif = { text: "¡PELOTA MEJORADA! +2 balas • +4 rebotes  🎾", timer: 6.0 }
+    g.abilityNotif = { text: "¡PELOTA MEJORADA! 5 pelotas • +4 rebotes  🎾", timer: 6.0 }
     saveGame(g)
   } else if (g.viejoDogState === "key_held" && g.tballKeyHeld && g.rexMitadAnimStart === 0) {
     // Llave entregada: consumir y arrancar animación del sprite rex_mitad_llave
