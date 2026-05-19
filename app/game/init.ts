@@ -120,6 +120,8 @@ export function applyLoad(g: G, s: LulySave): void {
   g.ultraBossRexSeen       = s.ultraBossRexSeen        ?? false
   g.rexSection2Notified    = s.rexSection2Notified     ?? false
   g.rexUltraGaveItems      = s.rexUltraGaveItems       ?? false
+  g.staminaUp              = s.staminaUp              ?? false
+  if (g.staminaUp) g.pl.maxStamina = 150  // restaurar pool de stamina con el buff
   g.rexReadyCursor         = 0   // siempre reset (estado transitorio)
   g.rexUltraReadyDeclined  = false
   g.croquetas              = s.croquetas               ?? 0
@@ -287,6 +289,7 @@ export function mkG_lazy(): G {
     ultraBossRexSeen: false,
     rexSection2Notified: false,
     rexUltraGaveItems: false,
+    staminaUp: false,
     rexReadyCursor: 0,
     rexUltraReadyDeclined: false,
     rexPhoneNotif: null,

@@ -1483,10 +1483,10 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
       dlg = { headers: ["◈ ¡ES LA HORA! ◈"], colors: ["#FFAA44"], pages: [[
         "¡Luly, derrotaste a todos!",
         "Es hora de enfrentar al",
-        "Castigador. Tiene un látigo",
-        "y es muy rápido. Debes",
-        "ser fuerte, Luly.",
-        "La pelota te ayudará.",
+        "Castigador. Si lo vences,",
+        "ganarás mayor resistencia.",
+        "Tendrás más energía",
+        "para correr. ¡Tú puedes! 💪",
       ]]}
     } else if (!p1Dead_dlg) {
       // Enemigos regulares aún vivos, El Castigador vivo → solo página 1
@@ -1557,10 +1557,10 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
       colors:  ["#FF8888",          "#C8A0FF",           "#88DDFF"],
       pages: [
         [
-          "¡Muy bien hecho, Luly!",
+          "¡Luly, te ves más fuerte!",
+          "Ahora resistirás más.",
           "Veo que estás débil...",
-          "Toma esto y recupérate.",
-          "Eres increíble. ❤",
+          "Toma esto, recupérate. ❤",
         ],
         [
           "Ahora mejoraremos tu",
@@ -1589,10 +1589,10 @@ export function drawViejoDog(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank)
       colors:  ["#88FFCC",            "#C8A0FF",           "#88DDFF"],
       pages: [
         [
-          "¡Luly, eres más fuerte",
-          "de lo que pensé! No",
-          "perdiste ninguna vida.",
-          "¡Increíble, Luly! ✨",
+          "¡Luly, te ves más fuerte!",
+          "Ahora resistirás más.",
+          "No perdiste ninguna vida.",
+          "¡Eres increíble, Luly! ✨",
         ],
         [
           "Ahora debes ir abajo,",
@@ -4886,8 +4886,26 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
     ctx.save(); ctx.globalAlpha = g.staCircleAlpha
     const _sc = g.mobileZoom==="close"?1.35:1.0
     const scx=(p.x-g.cx+PW/2)*_sc, scy=(p.y-g.cy-20)*_sc, rad=13, lw=3.5
-    ctx.beginPath(); ctx.arc(scx,scy,rad,0,Math.PI*2); ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fill()
     const startA=-Math.PI/2
+    // ── Medio círculo exterior: pool de stamina bonus (desbloqueado al matar El Castigador) ──
+    // El semi-arco derecho (arriba → abajo, π rad) muestra la stamina extra (100-150).
+    // Pool base (0-100) → círculo interior. Pool bonus (100-150) → medio arco exterior.
+    if (g.staminaUp) {
+      const outerRad = 18, outerLw = 2
+      const bonusRatio = Math.max(0, Math.min(1, (p.stamina - 100) / 50))
+      // Pista tenue (siempre visible cuando staminaUp activo)
+      ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = outerLw; ctx.lineCap = "round"
+      ctx.beginPath(); ctx.arc(scx, scy, outerRad, startA, startA + Math.PI); ctx.stroke()
+      // Relleno: ratio del pool bonus
+      if (!p.exhausted && bonusRatio > 0.01) {
+        const bonusCol = bonusRatio > 0.6 ? "#66FF99" : bonusRatio > 0.3 ? "#AAEE44" : "#FFCC22"
+        ctx.strokeStyle = bonusCol; ctx.lineWidth = outerLw; ctx.lineCap = "round"
+        ctx.beginPath(); ctx.arc(scx, scy, outerRad, startA, startA + bonusRatio * Math.PI); ctx.stroke()
+      }
+    }
+    // Círculo interior: pool base (0-100 siempre; 0-maxStamina si no hay buff)
+    const baseRatio = g.staminaUp ? Math.min(1, p.stamina / 100) : stRatio
+    ctx.beginPath(); ctx.arc(scx,scy,rad,0,Math.PI*2); ctx.fillStyle="rgba(0,0,0,0.5)"; ctx.fill()
     if (p.exhausted) {
       const blink=Math.floor(Date.now()/280)%2===0
       ctx.strokeStyle=blink?"#FF2200":"#FF6600"; ctx.lineWidth=lw
@@ -4896,9 +4914,9 @@ export function drawHUD(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) {
       ctx.textAlign="center"; ctx.textBaseline="middle"
       ctx.fillText(`${Math.ceil(p.staminaCooldown)}s`,scx,scy); ctx.textBaseline="alphabetic"
     } else {
-      const arcCol=stRatio>0.55?"#44EE44":stRatio>0.25?"#EECC00":"#FF4400"
+      const arcCol=baseRatio>0.55?"#44EE44":baseRatio>0.25?"#EECC00":"#FF4400"
       ctx.strokeStyle=arcCol; ctx.lineWidth=lw; ctx.lineCap="round"
-      ctx.beginPath(); ctx.arc(scx,scy,rad,startA,startA+stRatio*Math.PI*2); ctx.stroke()
+      ctx.beginPath(); ctx.arc(scx,scy,rad,startA,startA+baseRatio*Math.PI*2); ctx.stroke()
     }
     ctx.strokeStyle="rgba(255,255,255,0.12)"; ctx.lineWidth=1
     ctx.beginPath(); ctx.arc(scx,scy,rad,0,Math.PI*2); ctx.stroke()

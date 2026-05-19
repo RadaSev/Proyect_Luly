@@ -456,6 +456,14 @@ export function dmgEnemy(g: G, e: Enemy, dmg: number) {
       g.rexSection2Notified = true
       _triggerPhoneAnim("section2")
     }
+    // ── Recompensa al matar El Castigador (solo W0): stamina mejorada ─────────
+    if (bC === p1c && bR === p1r && ew === 0 && !g.staminaUp) {
+      g.staminaUp = true
+      g.pl.maxStamina = 150       // 100 → 150: +50% de resistencia (más tiempo corriendo)
+      g.pl.stamina = 150          // refill completo al recibir el buff
+      g.abilityNotif = { text: "¡Resistencia mejorada! Ahora podrás correr más 🏃", timer: 5.5 }
+      saveGame(g)
+    }
     // Trigger 4: Herrero muerto → celular sobre el último jefe (sin revelar nombre)
     if (bC === p2c && bR === p2r && !g.ultraBossRexSeen) {
       _triggerPhoneAnim("ultra")

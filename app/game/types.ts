@@ -117,6 +117,7 @@ export type G = {
   rexPhoneNotif: { kind: "p1" | "section2" | "p2" | "ultra"; timer: number; setAt: number } | null  // burbuja celular Luly
   rexSection2Notified: boolean     // ya se envió el celular de "segunda sección" al matar al Castigador
   rexUltraGaveItems: boolean       // Rex ya dio los recursos prestados antes del Torturado
+  staminaUp: boolean               // Buff de stamina al matar El Castigador (maxStamina 100→150)
   rexReadyCursor: 0 | 1            // cursor del selector Sí/No (0=Sí, 1=No)
   rexUltraReadyDeclined: boolean   // jugadora dijo No al ready-check → muestra msg "vuelve cuando quieras"
   // Tipo de mando conectado (para iconos dinámicos en HUD/canvas)

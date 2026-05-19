@@ -31,6 +31,7 @@ export interface LulySave {
   bolkhaRexTold?: boolean
   bolkhaMetDialogSeen?: boolean
   rexKeyAnimTimer?: number
+  staminaUp?: boolean
 }
 
 export function saveGame(g: G): void {
@@ -62,6 +63,7 @@ export function saveGame(g: G): void {
       bolkhaRexTold: g.bolkhaRexTold,
       bolkhaMetDialogSeen: g.bolkhaMetDialogSeen,
       rexKeyAnimTimer: g.rexKeyAnimTimer,
+      staminaUp: g.staminaUp,
     }
     localStorage.setItem(SAVE_KEY, JSON.stringify(s))
   } catch (_) {}
