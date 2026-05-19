@@ -33,7 +33,24 @@ export function setRexTypingActive(v: boolean) { _rexTypingActive = v }
 export function setRexYesNoActive(v: boolean)  { _rexYesNoActive = v }
 export function setRexWasInRange(v: boolean)   { _rexWasInRange = v }
 
+// Corazones de recompensa diferidos: se spawnean cuando el diálogo llega a la página 0
+let _rexPendingHearts = 0        // cuántos corazones quedan por soltar
+let _rexHeartsDropped = false    // flag: ya se soltaron en esta visita
+
 export function tickViejoDog(g: G) {
+  // ── Soltar corazones diferidos en la página 0 del diálogo reward_lives ───────
+  if (!_rexHeartsDropped && _rexPendingHearts > 0 &&
+      _rexTypingActive && _rexDlgPage === 1 &&
+      (g.viejoDogState === "reward_lives")) {
+    for (let i = 0; i < _rexPendingHearts; i++) {
+      // Spawnear a la derecha de Rex para no taparle el sprite
+      g.drops.push({ x: VIEJO_DOG_POS.x + 80 + Math.random() * 60, y: VIEJO_DOG_POS.y - 10, vx: 0.5 + Math.random() * 1.5, vy: -3.5 - Math.random() * 1.2, active: true, life: 120, kind: "h" })
+    }
+    spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FF4444", "#FF8888", "#FFD700", "#FFFFFF"], 18, 4, false)
+    _rexHeartsDropped = true
+    _rexPendingHearts = 0
+  }
+
   // Solo aplica en World 0
   const curW = Math.max(0, Math.min(Math.floor(g.pl.x / (NC * RW)), NW - 1))
   if (curW !== 0) return
@@ -110,13 +127,11 @@ export function tickViejoDog(g: G) {
       g.rexBallFirstSeen = true
       saveGame(g)
     } else if (isPart1BossDead(g, 0)) {
-      // Jefe P1 muerto → recompensar con corazones
+      // Jefe P1 muerto → corazones diferidos: se soltarán cuando aparezca el diálogo
       const needed = g.pl.maxHp - g.pl.hp
       if (needed > 0) {
-        for (let i = 0; i < needed; i++) {
-          g.drops.push({ x: VIEJO_DOG_POS.x + (Math.random() - 0.5) * 70, y: VIEJO_DOG_POS.y - 20, vx: (Math.random() - 0.5) * 2.5, vy: -3 - Math.random() * 1.8, active: true, life: 24, kind: "h" })
-        }
-        spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FF4444", "#FF8888", "#FFD700", "#FFFFFF"], 18, 4, false)
+        _rexPendingHearts = needed
+        _rexHeartsDropped = false
         g.viejoDogState = "reward_lives"
       } else {
         g.viejoDogState = "reward_full"
@@ -128,13 +143,11 @@ export function tickViejoDog(g: G) {
       saveGame(g)
     }
   } else if (g.viejoDogState === "ball_guide" && isPart1BossDead(g, 0) && !g.rexBatonHeld) {
-    // Castigador muerto, jugadora vuelve a Rex → recompensar y revelar segunda sección
+    // Castigador muerto, jugadora vuelve a Rex → corazones diferidos
     const needed = g.pl.maxHp - g.pl.hp
     if (needed > 0) {
-      for (let i = 0; i < needed; i++) {
-        g.drops.push({ x: VIEJO_DOG_POS.x + (Math.random() - 0.5) * 70, y: VIEJO_DOG_POS.y - 20, vx: (Math.random() - 0.5) * 2.5, vy: -3 - Math.random() * 1.8, active: true, life: 24, kind: "h" })
-      }
-      spawnExplosion(g, VIEJO_DOG_POS.x, VIEJO_DOG_POS.y - 30, ["#FF4444", "#FF8888", "#FFD700", "#FFFFFF"], 18, 4, false)
+      _rexPendingHearts = needed
+      _rexHeartsDropped = false
       g.viejoDogState = "reward_lives"
     } else {
       g.viejoDogState = "reward_full"

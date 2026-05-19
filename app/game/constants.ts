@@ -234,7 +234,7 @@ export const PS_COL: Record<string, string> = { "✕": "#5C8EF7", "○": "#E5393
 
 // ── Salvar ──────────────────────────────────────────────────────────────────
 export const SAVE_KEY = "proyecto_luly_v2"
-export const GAME_VERSION = "0.3.17"
+export const GAME_VERSION = "0.3.18"
 
 // ── BG ──────────────────────────────────────────────────────────────────────
 export const BG_IMGS: (HTMLImageElement | null)[] = [null, null, null, null]

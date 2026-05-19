@@ -554,7 +554,7 @@ export function drawPickups(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank) 
     // Recortamos directamente al contenido (padL=284, padT=116) para evitar
     // escalar el espacio vacío. Mostramos a 38×50px centrado en (sx,sy).
     const keySpr = sprs["mitad_key"]
-    const _kW = 20, _kH = 25
+    const _kW = 20, _kH = 30
     const _kDx = sx - Math.round(_kW / 2)
     const _kDy = sy - Math.round(_kH / 2)
     if (keySpr && keySpr.complete && keySpr.naturalWidth > 0) {
@@ -3190,7 +3190,7 @@ export function drawDrops(ctx: CanvasRenderingContext2D, g: G, sprs: SprBank = {
     const sc = 0.92 + bob  // suave flotación
 
     if (d.kind === "h") {
-      const SZ = 22
+      const SZ = 28
       ctx.save(); ctx.translate(sx + SZ/2, sy + SZ/2); ctx.scale(sc, sc)
       if (heartSpr && heartSpr.complete && heartSpr.naturalWidth > 0) {
         ctx.drawImage(heartSpr, -SZ/2, -SZ/2, SZ, SZ)
@@ -4637,7 +4637,7 @@ export function draw(g: G, ctx: CanvasRenderingContext2D, sprs: SprBank, devHove
   if (hasShake) ctx.translate(g.shakeX / sc, g.shakeY / sc)
   drawBg(ctx, g); drawPickups(ctx, g, sprs); drawWalls(ctx, g, sprs); drawCage(ctx, g, sprs); drawBossArenaPlats(ctx, g); drawToolMounds(ctx, g, sprs); drawBones(ctx, g); drawCrates(ctx, g, sprs); drawCheckpoints(ctx, g, sprs)
   drawUltraFlames(ctx, g, sprs)
-  drawDrops(ctx, g, sprs); drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawBolkha(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
+  drawEnemies(ctx, g, sprs); drawViejoDog(ctx, g, sprs); drawBolkha(ctx, g, sprs); drawPlayer(ctx, g, sprs); drawDrops(ctx, g, sprs); drawProjs(ctx, g); drawTBalls(ctx, g, sprs); drawWhip(ctx, g)
   drawSparks(ctx, g); drawBossRoomFog(ctx, g)
   ctx.restore()
   // ── Efecto de teletransportación (pantalla completa, fuera de escala) ──

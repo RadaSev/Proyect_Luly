@@ -42,5 +42,8 @@ export function tick(g: G) {
     g.pl.vx = 0
     g.pl.crouching = false
   }
-  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickBolkha(g); tickWhip(g); tickBones(g); tickDrops(g); tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0); tickToolMounds(g)
+  tickPlayer(g); tickEnemies(g, now); tickProjs(g); tickTBalls(g); tickPickups(g); tickViejoDog(g); tickBolkha(g); tickWhip(g); tickBones(g)
+  // Durante el diálogo de Rex los drops quedan congelados (no expiran ni se pueden recoger)
+  if (!_rexTypingActive) tickDrops(g)
+  tickCamera(g); tickWorldAnim(g); tickSparks(g); tickShake(g); tickCheckpoints(g); tickBossArenaPlats(g, 0); tickToolMounds(g)
 }
