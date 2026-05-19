@@ -127,25 +127,28 @@ export function tickViejoDog(g: G) {
       g.rexBallFirstSeen = true
       saveGame(g)
     } else if (isPart1BossDead(g, 0)) {
-      // Jefe P1 muerto → corazones diferidos: se soltarán cuando aparezca el diálogo
+      // Jefe P1 muerto → dar HP inmediatamente (garantía de persistencia)
+      // Los corazones cosméticos caerán al llegar al 2º mensaje del diálogo
       const needed = g.pl.maxHp - g.pl.hp
       if (needed > 0) {
-        _rexPendingHearts = needed
+        g.pl.hp = g.pl.maxHp          // HP completa antes de guardar
+        _rexPendingHearts = needed    // solo cosmético: no re-dan HP
         _rexHeartsDropped = false
         g.viejoDogState = "reward_lives"
       } else {
         g.viejoDogState = "reward_full"
       }
-      saveGame(g)
+      saveGame(g)                     // se guarda con HP ya completa
     } else {
       // Segunda+ visita, jefe P1 sigue vivo → guía hacia el jefe
       g.viejoDogState = "ball_guide"
       saveGame(g)
     }
   } else if (g.viejoDogState === "ball_guide" && isPart1BossDead(g, 0) && !g.rexBatonHeld) {
-    // Castigador muerto, jugadora vuelve a Rex → corazones diferidos
+    // Castigador muerto, jugadora vuelve a Rex → mismo patrón
     const needed = g.pl.maxHp - g.pl.hp
     if (needed > 0) {
+      g.pl.hp = g.pl.maxHp
       _rexPendingHearts = needed
       _rexHeartsDropped = false
       g.viejoDogState = "reward_lives"
